@@ -1,12 +1,10 @@
 import Foundation
 import OSLog
 
-/// Observes `AppleCatalogStore.sections` and `AppleMediaIndexStore.records`
-/// and republishes the Top Shelf snapshot whenever either changes, so
-/// "Top Picks" stays in sync with the first catalog shelf the same way
-/// Continue Watching stays in sync with playback progress. Whoever owns
-/// those two store instances (currently `OpenStreamRootView`) should call
-/// `publish` from a `.task`/`.onChange` for each.
+/// Republishes the Top Shelf snapshot whenever `AppleMediaIndexStore.records`
+/// or the sources change, so Continue Watching stays in sync with playback
+/// progress. Whoever owns those stores (currently `OpenStreamRootView`)
+/// should call `publish` from a `.task`/`.onChange` for each.
 @MainActor
 public final class AppleTopShelfPublisher {
     public static let shared = AppleTopShelfPublisher()
@@ -28,7 +26,6 @@ public final class AppleTopShelfPublisher {
     /// most-recent-first order (N52).
     public func publish(
         records: [AppleMediaRecord],
-        sections: [AppleCatalogSection],
         sources: [AppleSource],
         heroes: [AppleTopShelfHero] = [],
         enabled: Bool,
@@ -55,7 +52,7 @@ public final class AppleTopShelfPublisher {
             watchedAt[record.id] = saved.updatedAt
             savedProgress[record.id] = saved
         }
-        let digest = Self.digest(records: records, sections: sections, sources: sources,
+        let digest = Self.digest(records: records, sources: sources,
                                  savedProgress: savedProgress, enabled: enabled)
             + "|activity:\(ApplePlaybackProgressFeed.shared.revision)|successors:\(successorAvailable.sorted())|removed:\(removals.keys.sorted())"
             + "|heroes:" + heroes.map { "\($0.item.id)#\($0.backdropURL?.absoluteString ?? "")#\($0.wordmarkURL?.absoluteString ?? "")" }
@@ -70,7 +67,7 @@ public final class AppleTopShelfPublisher {
         let snapshotExists = enabled ? await writer.snapshotExists() : true
         guard combinedDigest != lastDigest || !snapshotExists else { return }
         do {
-            try await writer.write(records: records, sections: sections, sources: sources,
+            try await writer.write(records: records, sources: sources,
                                    watchedAt: watchedAt, savedProgress: savedProgress, activity: activity,
                                    successorAvailable: successorAvailable, removedAt: removals,
                                    favoriteChannels: favorites, recentChannels: recents, heroes: heroes, enabled: enabled)
@@ -94,7 +91,6 @@ public final class AppleTopShelfPublisher {
 
     private static func digest(
         records: [AppleMediaRecord],
-        sections: [AppleCatalogSection],
         sources: [AppleSource],
         savedProgress: [String: ApplePlaybackProgress] = [:],
         enabled: Bool
@@ -104,12 +100,7 @@ public final class AppleTopShelfPublisher {
             // (review of 0627624).
             .map { "\($0.id)|\($0.isFavorite)|\($0.progress ?? -1)|\($0.lastVerified.timeIntervalSince1970)|\($0.backdropURL?.absoluteString ?? "")" }
             .joined(separator: ",")
-        let topPicksKey = sections.first(where: { !$0.items.isEmpty })?
-            .items.prefix(10).map(\.id).joined(separator: ",") ?? ""
-        // Continue Watching takes its backdrops from any shelf, so a catalog
-        // arriving after the records has to publish again.
-        let shelvesKey = sections.map { "\($0.id)#\($0.items.count)" }.joined(separator: ",")
-        // Enabling or removing an add-on changes what Continue Watching can open.
+        // Enabling or removing a source changes what Continue Watching can open.
         let sourcesKey = sources.map { "\($0.id.uuidString)#\($0.isEnabled)#\($0.kind)" }.joined(separator: ",")
         // The bars and the order follow the playback store, which moves between index syncs
         // (review of 2b1f930).
@@ -117,7 +108,7 @@ public final class AppleTopShelfPublisher {
             .map { "\($0.key)|\($0.value.position)|\($0.value.duration)|\($0.value.partID ?? "")|\($0.value.updatedAt.timeIntervalSince1970)" }
             .joined(separator: ",")
         return ApplePlaybackIdentity.digest(for: [
-            enabled ? "1" : "0", recordsKey, topPicksKey, shelvesKey, sourcesKey, progressKey,
+            enabled ? "1" : "0", recordsKey, sourcesKey, progressKey,
         ].joined(separator: "\u{1f}"))
     }
 }

@@ -27,15 +27,6 @@ struct AppleStreamFormatBadgeTests {
         #expect(!AppleStreamFormatBadge.parse("DVD rip").contains(.dolbyVision))
     }
 
-    @Test("A stream candidate reads its description, title and behaviorHints filename")
-    func candidateText() {
-        let candidate = AppleStremioHTTPPlaybackCandidate(
-            title: "Torrentio 4k", sourceURL: URL(string: "https://fixture.example/play/abc")!,
-            filename: "Movie.2023.2160p.UHD.BluRay.Remux.HDR10.DTS-HD.MA.5.1.mkv",
-            qualityDescription: "💾 60 GB ⚙️ Dolby Atmos")
-        #expect(AppleStreamFormatBadge.badges(for: candidate) == [.uhd, .hdr10, .atmos, .surround51, .remux])
-    }
-
     @Test("The probe maps size, range and audio; name adds Remux")
     func probeMapping() {
         let probe = AppleStreamFormatBadge.ProbedFormat(width: 3840, height: 1600, dynamicRange: .dolbyVision,

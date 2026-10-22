@@ -12,8 +12,8 @@ struct AppleWatchedHistoryTests {
         return (ApplePlaybackStore(defaults: defaults), defaults)
     }
 
-    private func episode(_ season: Int, _ number: Int) -> AppleStremioEpisode {
-        AppleStremioEpisode(id: "tt0903747:\(season):\(number)", title: "", season: season, episode: number, releaseInfo: nil)
+    private func episode(_ season: Int, _ number: Int) -> AppleMediaEpisode {
+        AppleMediaEpisode(id: "tt0903747:\(season):\(number)", title: "", season: season, episode: number, releaseInfo: nil)
     }
 
     private func key(_ mediaID: String) throws -> String {
@@ -179,52 +179,52 @@ struct AppleWatchedHistoryTests {
 
     // MARK: Up Next
 
-    private var twoSeasons: [AppleStremioEpisode] {
+    private var twoSeasons: [AppleMediaEpisode] {
         [episode(2, 2), episode(1, 3), episode(2, 1), episode(1, 1), episode(0, 1), episode(1, 2)]
     }
 
     @Test func upNextFollowsTheLastWatchedEpisode() {
         let episodes = twoSeasons
-        #expect(AppleStremioEpisodePolicy.upNext(from: episodes, completedIDs: [])?.id == episode(1, 1).id)
+        #expect(AppleMediaEpisodePolicy.upNext(from: episodes, completedIDs: [])?.id == episode(1, 1).id)
         let first2: Set = [episode(1, 1).id, episode(1, 2).id]
-        #expect(AppleStremioEpisodePolicy.upNext(from: episodes, completedIDs: first2)?.id == episode(1, 3).id)
+        #expect(AppleMediaEpisodePolicy.upNext(from: episodes, completedIDs: first2)?.id == episode(1, 3).id)
         // A skipped episode is behind the viewer, not next.
         let gap: Set = [episode(1, 1).id, episode(1, 3).id]
-        #expect(AppleStremioEpisodePolicy.upNext(from: episodes, completedIDs: gap)?.id == episode(2, 1).id)
+        #expect(AppleMediaEpisodePolicy.upNext(from: episodes, completedIDs: gap)?.id == episode(2, 1).id)
         // Specials do not count as progress through the show.
-        #expect(AppleStremioEpisodePolicy.upNext(from: episodes, completedIDs: [episode(0, 1).id])?.id == episode(1, 1).id)
+        #expect(AppleMediaEpisodePolicy.upNext(from: episodes, completedIDs: [episode(0, 1).id])?.id == episode(1, 1).id)
     }
 
     @Test func upNextCrossesIntoTheNextSeason() {
         let season1: Set = [episode(1, 1).id, episode(1, 2).id, episode(1, 3).id]
-        #expect(AppleStremioEpisodePolicy.upNext(from: twoSeasons, completedIDs: season1)?.id == episode(2, 1).id)
+        #expect(AppleMediaEpisodePolicy.upNext(from: twoSeasons, completedIDs: season1)?.id == episode(2, 1).id)
     }
 
     @Test func finishedShowStartsOver() {
         let all = Set(twoSeasons.map(\.id))
-        let next = AppleStremioEpisodePolicy.upNext(from: twoSeasons, completedIDs: all)
+        let next = AppleMediaEpisodePolicy.upNext(from: twoSeasons, completedIDs: all)
         #expect(next?.id == episode(1, 1).id)
         // The last episode alone watched also wraps round.
-        #expect(AppleStremioEpisodePolicy.upNext(from: twoSeasons, completedIDs: [episode(2, 2).id])?.id == episode(1, 1).id)
+        #expect(AppleMediaEpisodePolicy.upNext(from: twoSeasons, completedIDs: [episode(2, 2).id])?.id == episode(1, 1).id)
     }
 
     @Test func seasonSelectionUsesUpNextOnlyInItsSeason() {
         let watched: Set = [episode(1, 1).id, episode(1, 3).id]
         // Up Next is S2E1; season 1 still offers its first unfinished episode.
-        #expect(AppleStremioEpisodePolicy.defaultEpisode(in: 1, from: twoSeasons, completedIDs: watched)?.id == episode(1, 2).id)
-        #expect(AppleStremioEpisodePolicy.defaultEpisode(in: 2, from: twoSeasons, completedIDs: watched)?.id == episode(2, 1).id)
+        #expect(AppleMediaEpisodePolicy.defaultEpisode(in: 1, from: twoSeasons, completedIDs: watched)?.id == episode(1, 2).id)
+        #expect(AppleMediaEpisodePolicy.defaultEpisode(in: 2, from: twoSeasons, completedIDs: watched)?.id == episode(2, 1).id)
         let first: Set = [episode(1, 1).id]
-        #expect(AppleStremioEpisodePolicy.defaultEpisode(in: 1, from: twoSeasons, completedIDs: first)?.id == episode(1, 2).id)
+        #expect(AppleMediaEpisodePolicy.defaultEpisode(in: 1, from: twoSeasons, completedIDs: first)?.id == episode(1, 2).id)
     }
 
     @Test func titlePageButtonNamesTheEpisode() throws {
         let watched: Set = [episode(1, 1).id, episode(1, 2).id]
-        let next = try #require(AppleStremioEpisodePolicy.upNext(from: twoSeasons, completedIDs: watched))
+        let next = try #require(AppleMediaEpisodePolicy.upNext(from: twoSeasons, completedIDs: watched))
         let action = AppleTitlePagePolicy.primaryAction(type: "series", progress: nil, selectedEpisode: next,
                                                         isPlayable: true, hasTrailer: false, namesEpisode: true)
         #expect(action.title == "Play S1, E3")
         #expect(action.displayTitle(hasCompletedDownload: true) == "Play Offline")
-        let restart = try #require(AppleStremioEpisodePolicy.upNext(from: twoSeasons, completedIDs: Set(twoSeasons.map(\.id))))
+        let restart = try #require(AppleMediaEpisodePolicy.upNext(from: twoSeasons, completedIDs: Set(twoSeasons.map(\.id))))
         #expect(AppleTitlePagePolicy.primaryAction(type: "series", progress: nil, selectedEpisode: restart,
                                                    isPlayable: true, hasTrailer: false, namesEpisode: true).title == "Play S1, E1")
         // Heroes and films keep the bare verb.

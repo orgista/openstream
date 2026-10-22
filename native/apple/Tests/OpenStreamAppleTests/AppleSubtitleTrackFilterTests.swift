@@ -69,10 +69,10 @@ struct AppleSubtitleTrackFilterTests {
         #expect(visible.isEmpty)
     }
 
-    @Test func untaggedAddOnsAreNotAutoSelected() {
+    @Test func untaggedSidecarsAreNotAutoSelected() {
         let tracks = [
-            track(1_000_000, nil, "Add-on 1"),
-            track(1_000_001, "und", "Add-on 2", isDefault: true)
+            track(1_000_000, nil, "Sidecar 1"),
+            track(1_000_001, "und", "Sidecar 2", isDefault: true)
         ]
         let visible = AppleSubtitleTrackFilter.visible(tracks, preferredLanguages: ["es"], isExplicitChoice: true)
         #expect(visible.isEmpty)

@@ -63,7 +63,7 @@ func matchingGroupsKeepsItsSnapshotUntilTheNewRevisionIsPublished(hasIMDb: Bool)
         AppleLibraryItem(sourceID: source, name: $0, url: URL(fileURLWithPath: "/" + $0), relativePath: $0, sizeBytes: 1)
     }
     let group = AppleLibrarySeries.groups(files)[0]
-    let enriched = AppleStremioEpisode(id: "tt123:1:1", title: "Pilot", season: 1, episode: 1, overview: "Overview")
+    let enriched = AppleMediaEpisode(id: "tt123:1:1", title: "Pilot", season: 1, episode: 1, overview: "Overview")
     let episodes = AppleLocalLibraryStore.episodes(group: group, mediaID: "tt123", enriched: [enriched])
     #expect(episodes.count == 2)
     #expect(episodes[0] == enriched)
@@ -239,7 +239,7 @@ func cancelledLibraryReloadAllowsWaitingReloadWithNewestSources() async throws {
     let settings = AppleSettingsStore(defaults: defaults, keychain: SortObservationCredentialStub())
     let firstSource = try sourceStore.addLibraryFolder(name: "First", url: firstFolder, bookmarkData: nil)
     let probe = LibraryReloadMatchProbe()
-    let resolver = AppleLibraryMetadataResolver(directory: root.appendingPathComponent("metadata")) { title, _, _, _ in
+    let resolver = AppleLibraryMetadataResolver(directory: root.appendingPathComponent("metadata")) { title, _, _ in
         await probe.lookup(title.title)
     }
     let library = AppleLocalLibraryStore(resolver: resolver, playbackStore: ApplePlaybackStore(defaults: defaults),

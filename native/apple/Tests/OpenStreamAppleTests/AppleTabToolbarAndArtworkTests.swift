@@ -83,7 +83,7 @@ struct AppleCatalogArtworkRetryTests {
                                     posterURL: URL(string: "https://fixture.example/poster.jpg"))
         let candidates = AppleCatalogArtworkPolicy.candidates(item: item, landscape: false)
         #expect(candidates.first == URL(string: "https://fixture.example/poster.jpg"))
-        #expect(candidates.count == 3)
+        #expect(candidates.count == 1)
         #expect(AppleCatalogArtworkPolicy.next(in: candidates, failed: Set(candidates)) == nil)
     }
 }

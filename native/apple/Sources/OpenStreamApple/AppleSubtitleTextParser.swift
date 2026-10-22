@@ -7,8 +7,7 @@ import Foundation
 /// text until a blank line. Timestamps accept either `,` or `.` for the
 /// fractional part and may omit the hour field (WebVTT). Inline markup
 /// (`<i>…</i>`, ASS `{\an8}` overrides) is stripped so the cue carries plain
-/// text; gzip payloads are inflated first because add-ons commonly serve
-/// `.srt.gz`.
+/// text; gzip payloads (`.srt.gz`) are inflated first.
 public enum AppleSubtitleTextParser {
     /// Cap on cues taken from one file. A feature-length subtitle track holds
     /// roughly 2,000 cues, so this only bounds a hostile or malformed payload.
@@ -19,7 +18,7 @@ public enum AppleSubtitleTextParser {
     static let maximumInflatedBytes = 32_000_000
 
 
-    /// `language` is the file's declared language (the add-on's `lang`), the
+    /// `language` is the file's declared language, the
     /// best hint for a legacy code page (`AppleSubtitleTextEncoding`).
     public static func cues(from data: Data, language: String? = nil) -> [AppleSubtitleCue] {
         let payload = decompressedIfNeeded(data)

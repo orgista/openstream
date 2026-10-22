@@ -13,35 +13,6 @@ import Testing
     }
 }
 
-@Suite struct AppleTestCatalogSeedPolicyTests {
-    /// TestFlight, App Review and the App Store all run Release archives; App
-    /// Review's carries the same sandbox receipt as TestFlight. None of them
-    /// may start with a catalog the user did not add.
-    private static let fixture = ["https://fixture.example/aiometadata/manifest.json"]
-
-    @Test func releaseBuildsNeverSeedWhateverTheReceipt() {
-        #expect(!AppleTestCatalogSeedPolicy.seedsTestCatalogs(isDebugBuild: false))
-        #expect(AppleTestCatalogSeedPolicy.manifests(isDebugBuild: false, devSourceManifests: Self.fixture).isEmpty)
-    }
-
-    /// A debug build seeds exactly the dev-sources add-ons it was given; the
-    /// addresses themselves are never compiled in.
-    @Test func debugBuildsSeedTheDevSourcesCatalogs() {
-        #expect(AppleTestCatalogSeedPolicy.seedsTestCatalogs(isDebugBuild: true))
-        #expect(AppleTestCatalogSeedPolicy.manifests(isDebugBuild: true, devSourceManifests: Self.fixture) == Self.fixture)
-        #expect(AppleTestCatalogSeedPolicy.manifests(isDebugBuild: true, devSourceManifests: []).isEmpty)
-    }
-
-    /// The store follows the policy for the build it was compiled in (tests
-    /// run as DEBUG).
-    @MainActor @Test func storeFollowsThePolicyForThisBuild() {
-        #expect(AppleTestCatalogSeedPolicy.isDebugBuild)
-        #expect(AppleSourceStore.seedsTestCatalogs == AppleTestCatalogSeedPolicy.seedsTestCatalogs(isDebugBuild: true))
-        #expect(AppleSourceStore.testCatalogManifests == AppleTestCatalogSeedPolicy.manifests(
-            isDebugBuild: true, devSourceManifests: AppleTestCatalogSeedPolicy.debugManifests))
-    }
-}
-
 @Suite struct AppleTraceDefaultTests {
     @Test func sandboxReceiptTracesUnlessTheBuildSaysOtherwise() {
         #expect(AppleInteractionTrace.defaultEnabled(infoPlistFlag: nil, isTestFlight: true))
@@ -64,7 +35,6 @@ import Testing
     @Test func noSourcesCarriesTheNoContentStatement() {
         #expect(AppleDiscoverEmptyState.noSources.footnote == AppleAttribution.noContentDisclaimer)
         #expect(AppleDiscoverEmptyState.nothingToShow.footnote == nil)
-        #expect(AppleDiscoverEmptyState.couldNotLoad.footnote == nil)
     }
 
     /// The exact wording the (i) sheet shows: TMDB's required sentence,

@@ -54,24 +54,15 @@ for platform in iOS tvOS visionOS macOS; do
         -clonedSourcePackagesDirPath "$build_root/DerivedData-deploy-ios/SourcePackages" \
         -disableAutomaticPackageResolution -skipPackageUpdates \
         MARKETING_VERSION="$version" CURRENT_PROJECT_VERSION="$build" \
-        'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) OPENSTREAM_ADDONS' \
         CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= \
         ${extra[@]+"${extra[@]}"} archive > "$log" 2>&1 || {
             echo "FAIL: $platform archive; inspect the local archive log (withhold secrets)"; exit 1;
         }
-    grep -Eq -- 'SWIFT_ACTIVE_COMPILATION_CONDITIONS = .*OPENSTREAM_ADDONS|(-D[[:space:]]+OPENSTREAM_ADDONS|-DOPENSTREAM_ADDONS)' "$log" || { echo 'FAIL: add-on compiler condition missing'; exit 1; }
     bash "$root/scripts/sdk-floor-check.sh" "$archive" > "$release/floors-$platform.log" 2>&1 || { echo "FAIL: $platform SDK floors"; exit 1; }
     app="$(find "$archive/Products/Applications" -mindepth 1 -maxdepth 1 -type d -name '*.app')"
     [[ -d "$app" ]] || { echo "FAIL: missing $platform app"; exit 1; }
     python3 "$root/scripts/release/release-metadata.py" verify-app "$app" "$version" "$build"
-    # Scan the main executable: dependency strings alone do not prove add-ons.
-    if [[ "$platform" == macOS ]]; then
-        executable="$app/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")"
-    else
-        executable="$app/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Info.plist")"
-    fi
-    strings -a "$executable" > "$release/addons-$platform.txt"
-    grep -Eiq 'manifest[.]json|addonCollection|stremio' "$release/addons-$platform.txt" || { echo "FAIL: $platform add-on marker absent"; exit 1; }
+    bash "$root/scripts/check-no-addons-in-release.sh" "$app" > "$release/no-addons-$platform.log" 2>&1 || { echo "FAIL: $platform ships add-on words"; exit 1; }
     stage="$(mktemp -d /tmp/openstream-package.XXXXXX)"
     if [[ "$platform" == macOS ]]; then
         ditto "$app" "$stage/oStream.app"
@@ -94,7 +85,7 @@ for platform in iOS tvOS visionOS macOS; do
         mv "$stage/package.ipa" "$release/OpenStream-$platform-$version-$build.ipa"
     fi
     rm -rf "$stage"
-    echo "PASS: $platform archive, versions, SDK floors and add-on markers"
+    echo "PASS: $platform archive, versions, SDK floors, no add-on words"
 done
 python3 "$root/scripts/release/release-metadata.py" finish "$checkout" "$release" "$version" "$build"
 # Never silently commit source different from the source used to build the assets.

@@ -220,7 +220,7 @@ struct AppleRemoteImage: View {
 }
 
 /// Renders a title wordmark from its decoded alpha bounds rather than its
-/// source canvas. Metahub logos often contain asymmetric transparent padding;
+/// source canvas. Title logos often contain asymmetric transparent padding;
 /// cropping that padding keeps the visible mark optically centered.
 struct AppleTrimmedTitleLogo: View {
     let url: URL

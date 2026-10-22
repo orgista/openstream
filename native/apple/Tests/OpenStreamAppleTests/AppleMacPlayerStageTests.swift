@@ -15,7 +15,7 @@ struct AppleMacPlayerStageTests {
 
     @Test func theMacPresentsInTheWindowAndNotASheet() {
         #if os(macOS) || os(visionOS)
-        #expect(AppleStremioPlayerPresentationStyle.current == .windowStage)
+        #expect(AppleMediaPlayerPresentationStyle.current == .windowStage)
         #endif
     }
 
@@ -33,8 +33,8 @@ struct AppleMacPlayerStageTests {
         var presenters: Set<String> = []
         for file in files {
             let text = try String(contentsOf: Self.sources.appendingPathComponent(file), encoding: .utf8)
-            if text.contains("AppleStremioPlayerView(presentation:") { builders.insert(file) }
-            if text.contains("AppleStremioPlayerPresentationModifier(presentation:") { presenters.insert(file) }
+            if text.contains("AppleMediaPlayerView(presentation:") { builders.insert(file) }
+            if text.contains("AppleMediaPlayerPresentationModifier(presentation:") { presenters.insert(file) }
         }
         #expect(builders == ["AppleDiscoverView.swift", "AppleMacPlayerStage.swift", "AppleVisionPlayerStage.swift"])
         // Title pages (Discover, Library, media servers), Add Files, Live.
@@ -144,13 +144,13 @@ struct AppleMacPlayerStageTests {
         #expect(closed == 1)
     }
 
-    private func presentation() -> AppleStremioPlayerPresentation {
+    private func presentation() -> AppleMediaPlayerPresentation {
         let name = "openstream.tests.stage.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: name) ?? .standard
         defaults.removePersistentDomain(forName: name)
         let settings = AppleSettingsStore(defaults: defaults, keychain: StageTestCredentials())
         settings.playbackEngine = .native
-        return AppleStremioPlayerPresentation(
+        return AppleMediaPlayerPresentation(
             request: ApplePlaybackRequest(url: URL(string: "https://fixture.example/film.mp4")!,
                                           mediaID: "stage-test", sourceKind: .files),
             settings: settings)
@@ -164,7 +164,7 @@ struct AppleMacPlayerStageTests {
                       ApplePlaybackTrack(id: 1, title: "French", language: "fr", codec: "sub")]
         #expect(AppleStockSubtitleMenuPolicy.showsAppMenu(tracks: native, stockPlayerListsCaptions: true) == false)
         #expect(AppleStockSubtitleMenuPolicy.showsAppMenu(tracks: [], stockPlayerListsCaptions: true) == false)
-        let sidecar = ApplePlaybackTrack(id: 1_000_000, title: "Add-on", language: "en", codec: "srt")
+        let sidecar = ApplePlaybackTrack(id: 1_000_000, title: "Sidecar", language: "en", codec: "srt")
         #expect(AppleStockSubtitleMenuPolicy.showsAppMenu(tracks: native + [sidecar], stockPlayerListsCaptions: true))
         let bitmap = ApplePlaybackTrack(id: 4, title: "PGS", language: "en", codec: "hdmv_pgs_subtitle")
         #expect(AppleStockSubtitleMenuPolicy.showsAppMenu(tracks: [bitmap], stockPlayerListsCaptions: true))

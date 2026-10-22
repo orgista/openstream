@@ -5,21 +5,6 @@ import Synchronization
 
 @Suite("Accessible recommendation polish")
 struct ApplePolishRecommendationTests {
-    @Test func allAccessibleCatalogsParticipateEvenWithDuplicateHeadings() throws {
-        let source = AppleSource(kind: .stremio, name: "Fixture", url: try #require(URL(string: "https://fixture.example/manifest.json")))
-        var disabled = AppleSource(kind: .stremio, name: "Disabled", url: try #require(URL(string: "https://fixture.example/disabled/manifest.json")))
-        disabled.isEnabled = false
-        let catalog = try JSONDecoder().decode(AppleStremioCatalog.self, from: Data(#"{"id":"first","type":"movie","name":"Movies"}"#.utf8))
-        let other = try JSONDecoder().decode(AppleStremioCatalog.self, from: Data(#"{"id":"second","type":"movie","name":"Movies"}"#.utf8))
-        let first = AppleCatalogItem(mediaID: "tt1234567", type: "movie", name: "First")
-        let second = AppleCatalogItem(mediaID: "tt7654321", type: "movie", name: "Second")
-        let sections = [AppleCatalogSection(source: source, catalog: catalog, items: [first]),
-                        AppleCatalogSection(source: source, catalog: other, items: [second]),
-                        AppleCatalogSection(source: disabled, catalog: other, items: [first])]
-        #expect(AppleRecommendationRowPolicy.accessibleCatalogs(sections, sources: [source, disabled]).map(\.item) == [first, second])
-        #expect(AppleRecommendationRowPolicy.accessibleCatalogs(sections, sources: []).isEmpty)
-    }
-
     @Test func seedRailAlwaysFollowsCustomOrder() {
         #expect(AppleRecommendationRowPolicy.appendingSeed("seed", to: ["custom", "continue", "catalog"]) == ["custom", "continue", "catalog", "seed"])
         #expect(AppleRecommendationRowPolicy.appendingSeed(nil, to: ["custom", "continue"]) == ["custom", "continue"])

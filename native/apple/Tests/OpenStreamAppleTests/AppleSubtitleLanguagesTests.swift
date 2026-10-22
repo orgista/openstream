@@ -8,16 +8,7 @@ private struct InMemoryCredentialStore: AppleCredentialStoring {
     func remove(_ account: String) throws {}
 }
 
-private func track(_ language: String, source: String = "Add-on") -> AppleExternalSubtitleTrack {
-    AppleExternalSubtitleTrack(
-        id: "\(source):\(language)",
-        languageCode: language,
-        sourceName: source,
-        url: URL(string: "https://example.test/\(language).srt")!
-    )
-}
-
-@Test func subtitleLanguageNormalizationAcceptsTheShapesAddOnsSend() {
+@Test func subtitleLanguageNormalizationAcceptsCommonShapes() {
     #expect(AppleSubtitleLanguages.normalized("en") == "eng")
     #expect(AppleSubtitleLanguages.normalized("eng") == "eng")
     #expect(AppleSubtitleLanguages.normalized("pt-BR") == "por")
@@ -39,13 +30,6 @@ private func track(_ language: String, source: String = "Add-on") -> AppleExtern
     #expect(AppleSubtitleLanguages.deviceDefaults(preferredLanguages: ["qq"]) == ["eng"])
 }
 
-@Test func subtitlesRowIsOfferedOnlyForManifestsThatDeclareSubtitles() {
-    #expect(AppleSubtitleLanguages.declaresSubtitles(resources: ["catalog", "subtitles"]))
-    #expect(AppleSubtitleLanguages.declaresSubtitles(resources: [" Subtitles "]))
-    #expect(AppleSubtitleLanguages.declaresSubtitles(resources: ["catalog", "meta", "stream"]) == false)
-    #expect(AppleSubtitleLanguages.declaresSubtitles(resources: []) == false)
-}
-
 @Test func subtitleLanguageSelectionStopsAtThree() {
     var selection: [String] = []
     for code in ["en", "spa", "fra", "deu"] {
@@ -60,25 +44,6 @@ private func track(_ language: String, source: String = "Add-on") -> AppleExtern
     #expect(selection == ["eng", "fra", "deu"])
 
     #expect(AppleSubtitleLanguages.sanitized(["en", "eng", "pt-BR", "zz", "ita"]) == ["eng", "por", "ita"])
-}
-
-@Test func externalSubtitleFilterKeepsPreferenceOrderAndDropsOtherLanguages() {
-    let tracks = [track("fre"), track("eng"), track("spa"), track("deu")]
-    let filtered = AppleExternalSubtitleService.filtered(tracks, preferredLanguages: ["spa", "eng"])
-    #expect(filtered.map(\.languageCode) == ["spa", "eng"])
-}
-
-@Test func externalSubtitleFilterUsesTheDeviceLanguageWhenNoneIsPreferred() {
-    let tracks = [track("eng"), track("deu"), track("en-US")]
-    let filtered = AppleExternalSubtitleService.filtered(tracks, preferredLanguages: [], deviceLanguages: ["en-GB"])
-    #expect(filtered.map(\.languageCode) == ["eng", "en-us"])
-    #expect(AppleExternalSubtitleService.filtered([track("spa")], preferredLanguages: [], deviceLanguages: ["en"]).isEmpty)
-}
-
-@Test func externalSubtitleFilterKeepsAddOnOrderWithinOneLanguage() {
-    let tracks = [track("en", source: "First"), track("eng", source: "Second"), track("ita")]
-    let filtered = AppleExternalSubtitleService.filtered(tracks, preferredLanguages: ["eng"])
-    #expect(filtered.map(\.id) == ["First:en", "Second:eng"])
 }
 
 @MainActor

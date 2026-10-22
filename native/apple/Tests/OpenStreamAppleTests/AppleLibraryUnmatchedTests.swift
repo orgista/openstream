@@ -30,7 +30,7 @@ struct AppleLibraryUnmatchedTests {
         let missing = file("Missing.2024.mkv")
         let offline = file("Offline.2024.mkv")
         let found = file("Found.2024.mkv")
-        let resolver = AppleLibraryMetadataResolver(directory: root) { title, _, _, _ in
+        let resolver = AppleLibraryMetadataResolver(directory: root) { title, _, _ in
             switch title.title {
             case "Offline": throw URLError(.notConnectedToInternet)
             case "Found": return AppleCatalogItem(mediaID: "tt0000002", type: "movie", name: "Found", releaseInfo: "2024")
@@ -38,7 +38,7 @@ struct AppleLibraryUnmatchedTests {
             }
         }
         for item in [missing, offline, found] {
-            _ = try await resolver.resolve(item, sources: [], tmdbKey: "", omdbKey: "")
+            _ = try await resolver.resolve(item, tmdbKey: "", omdbKey: "")
         }
         let groups = try [missing, offline, found].map(group)
         let lookups = await resolver.cachedLookups(for: groups)
@@ -56,8 +56,8 @@ struct AppleLibraryUnmatchedTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let item = file("Known.2024.mkv")
         let automatic = AppleCatalogItem(mediaID: "tt0000004", type: "movie", name: "Known", releaseInfo: "2024")
-        let resolver = AppleLibraryMetadataResolver(directory: root) { _, _, _, _ in automatic }
-        #expect(try await resolver.resolve(item, sources: [], tmdbKey: "", omdbKey: "") == automatic)
+        let resolver = AppleLibraryMetadataResolver(directory: root) { _, _, _ in automatic }
+        #expect(try await resolver.resolve(item, tmdbKey: "", omdbKey: "") == automatic)
         let title = try group(item)
         let store = AppleLocalLibraryStore(resolver: resolver, groups: [title])
         let manual = AppleCatalogItem(mediaID: "tt0000005", type: "movie", name: "Owner Pick")
@@ -71,7 +71,7 @@ struct AppleLibraryUnmatchedTests {
         #expect(await store.hasManualMatch(title) == false)
         #expect(store.catalogItem(for: title) == automatic)
         #expect(await resolver.matchRecord(logicalID: logicalID) == nil)
-        #expect(try await resolver.resolve(item, sources: [], tmdbKey: "", omdbKey: "") == automatic)
+        #expect(try await resolver.resolve(item, tmdbKey: "", omdbKey: "") == automatic)
         #expect(store.unmatched.isEmpty)
     }
 
@@ -80,8 +80,8 @@ struct AppleLibraryUnmatchedTests {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let item = file("Home.Video.2019.mkv")
-        let resolver = AppleLibraryMetadataResolver(directory: root) { _, _, _, _ in nil }
-        #expect(try await resolver.resolve(item, sources: [], tmdbKey: "", omdbKey: "") == nil)
+        let resolver = AppleLibraryMetadataResolver(directory: root) { _, _, _ in nil }
+        #expect(try await resolver.resolve(item, tmdbKey: "", omdbKey: "") == nil)
         let title = try group(item)
         let store = AppleLocalLibraryStore(resolver: resolver, groups: [title])
         try await store.correctMatch(title,
@@ -94,16 +94,13 @@ struct AppleLibraryUnmatchedTests {
     }
 
     /// The E2E Unmatched fixture must cache as a no-match, not an outage:
-    /// a launched stub run answers Cinemeta from the fixture host, and the
-    /// E2E simulators keep a TMDB key, so TMDB search needs an answer too.
+    /// the E2E simulators keep a TMDB key, so TMDB search needs an answer.
     @Test func e2eUnmatchedFixtureCachesNoMatch() async throws {
         let project = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let stubs = project.appendingPathComponent("Apps/TestPlans/Stubs")
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let host = try #require(AppleStremioMetadataClient.defaultMetadataSource.url.host)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        try FileManager.default.copyItem(at: stubs.appendingPathComponent("fixture.example"), to: root.appendingPathComponent(host))
         try FileManager.default.copyItem(at: stubs.appendingPathComponent("api.themoviedb.org"),
                                          to: root.appendingPathComponent("api.themoviedb.org"))
         let source = AppleSource(kind: .library, name: "Fixture Library", url: stubs.appendingPathComponent("library-unmatched"))
@@ -112,7 +109,7 @@ struct AppleLibraryUnmatchedTests {
         try await AppleNetworkStub.$testRoot.withValue(root) {
             for group in groups {
                 let item = try #require(group.items.first)
-                #expect(try await resolver.resolve(item, sources: [], tmdbKey: "fixture", omdbKey: "") == nil)
+                #expect(try await resolver.resolve(item, tmdbKey: "fixture", omdbKey: "") == nil)
             }
         }
         #expect(groups.count == 2)

@@ -117,9 +117,9 @@ final class AppleXtreamLibraryStore {
         return value
     }
 
-    func episodes(_ detail: AppleXtreamDetail, sourceID: UUID) -> [AppleStremioEpisode] {
+    func episodes(_ detail: AppleXtreamDetail, sourceID: UUID) -> [AppleMediaEpisode] {
         detail.episodes.map {
-            AppleStremioEpisode(id: AppleXtreamReference(sourceID: sourceID, kind: .series, providerID: detail.title.providerID).mediaID + ":\($0.season):\($0.number)",
+            AppleMediaEpisode(id: AppleXtreamReference(sourceID: sourceID, kind: .series, providerID: detail.title.providerID).mediaID + ":\($0.season):\($0.number)",
                 title: $0.title, season: $0.season, episode: $0.number)
         }
     }

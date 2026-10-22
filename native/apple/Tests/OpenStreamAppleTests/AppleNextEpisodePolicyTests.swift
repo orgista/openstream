@@ -5,51 +5,51 @@ import Testing
 @MainActor
 @Suite("Next episode")
 struct AppleNextEpisodePolicyTests {
-    private func episode(_ season: Int?, _ number: Int?, _ title: String = "Ep") -> AppleStremioEpisode {
-        AppleStremioEpisode(
+    private func episode(_ season: Int?, _ number: Int?, _ title: String = "Ep") -> AppleMediaEpisode {
+        AppleMediaEpisode(
             id: "s\(season.map(String.init) ?? "-")e\(number.map(String.init) ?? "-")",
             title: title, season: season, episode: number,
             releaseInfo: nil, runtimeMinutes: nil, overview: nil, thumbnailURL: nil
         )
     }
 
-    private var season1: [AppleStremioEpisode] {
+    private var season1: [AppleMediaEpisode] {
         [episode(1, 1), episode(1, 2), episode(1, 3)]
     }
 
-    private var twoSeasons: [AppleStremioEpisode] {
+    private var twoSeasons: [AppleMediaEpisode] {
         season1 + [episode(2, 1), episode(2, 2)]
     }
 
     // MARK: Which episode comes next
 
     @Test func theNextEpisodeIsTheOneAfterIt() {
-        let next = AppleStremioEpisodePolicy.following(episode(1, 1), in: season1)
+        let next = AppleMediaEpisodePolicy.following(episode(1, 1), in: season1)
         #expect(next?.episode == 2)
     }
 
     /// The whole point: what follows the last episode of a season is the first
     /// of the next, not nothing.
     @Test func theLastEpisodeOfASeasonLeadsIntoTheNextSeason() {
-        let next = AppleStremioEpisodePolicy.following(episode(1, 3), in: twoSeasons)
+        let next = AppleMediaEpisodePolicy.following(episode(1, 3), in: twoSeasons)
         #expect(next?.season == 2)
         #expect(next?.episode == 1)
     }
 
     @Test func theLastEpisodeOfTheShowHasNoNext() {
-        #expect(AppleStremioEpisodePolicy.following(episode(2, 2), in: twoSeasons) == nil)
+        #expect(AppleMediaEpisodePolicy.following(episode(2, 2), in: twoSeasons) == nil)
     }
 
     /// Order comes from `episodes(in:from:)`, so a muxed-up list still resolves
     /// the real successor.
     @Test func theSourceOrderDoesNotMatter() {
         let shuffled = [episode(1, 3), episode(2, 1), episode(1, 1), episode(1, 2)]
-        #expect(AppleStremioEpisodePolicy.following(episode(1, 1), in: shuffled)?.episode == 2)
-        #expect(AppleStremioEpisodePolicy.following(episode(1, 3), in: shuffled)?.season == 2)
+        #expect(AppleMediaEpisodePolicy.following(episode(1, 1), in: shuffled)?.episode == 2)
+        #expect(AppleMediaEpisodePolicy.following(episode(1, 3), in: shuffled)?.season == 2)
     }
 
     @Test func anEpisodeThatIsNotInTheListHasNoNext() {
-        #expect(AppleStremioEpisodePolicy.following(episode(9, 9), in: season1) == nil)
+        #expect(AppleMediaEpisodePolicy.following(episode(9, 9), in: season1) == nil)
     }
 
     // MARK: When the card appears

@@ -241,7 +241,7 @@ struct AppleHeroBadgeTests {
         #expect(AppleHeroBadge.select(type: "series", episodes: [episode(4, 1, daysAgo: -1)], now: now) == nil)
     }
 
-    @Test func releaseDatesReadEveryStremioShape() throws {
+    @Test func releaseDatesReadEveryShape() throws {
         let expected = try #require(AppleHeroBadge.releaseDate("2026-09-18"))
         #expect(AppleHeroBadge.releaseDate("2026-09-18T00:00:00.000Z") == expected)
         #expect(AppleHeroBadge.releaseDate("2026-09-18T00:00:00Z") == expected)

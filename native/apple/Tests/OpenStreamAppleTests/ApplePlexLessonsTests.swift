@@ -44,8 +44,8 @@ struct ApplePlexLessonsTests {
         let defaults = try #require(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
         let store = ApplePlaybackStore(defaults: defaults)
-        let episodes = [AppleStremioEpisode(id: "tt1234567:1:1", title: "One", season: 1, episode: 1),
-                        AppleStremioEpisode(id: "tt1234567:1:2", title: "Two", season: 1, episode: 2)]
+        let episodes = [AppleMediaEpisode(id: "tt1234567:1:1", title: "One", season: 1, episode: 1),
+                        AppleMediaEpisode(id: "tt1234567:1:2", title: "Two", season: 1, episode: 2)]
         let source = UUID()
         let record = AppleMediaRecord(canonicalID: "tt1234567", kind: .series, title: "Fixture",
             availability: [.init(instanceID: source, capability: .resolvable, itemReference: "fixture")])
@@ -123,12 +123,12 @@ struct ApplePlexLessonsTests {
     }
 
     @Test func specialsAndFutureSuccessorsDoNotKeepFinishedRegularSeries() {
-        let episodes = [AppleStremioEpisode(id: "special", title: "", season: 0, episode: 1),
-                        AppleStremioEpisode(id: "regular", title: "", season: 1, episode: 1),
-                        AppleStremioEpisode(id: "future", title: "", season: 1, episode: 2, releaseInfo: "2099-01-01")]
+        let episodes = [AppleMediaEpisode(id: "special", title: "", season: 0, episode: 1),
+                        AppleMediaEpisode(id: "regular", title: "", season: 1, episode: 1),
+                        AppleMediaEpisode(id: "future", title: "", season: 1, episode: 2, releaseInfo: "2099-01-01")]
         #expect(AppleCompletionPolicy.successor(after: "regular", episodes: episodes, completedIDs: ["regular"]) == nil)
-        let specials = [AppleStremioEpisode(id: "a", title: "", season: 0, episode: 1),
-                        AppleStremioEpisode(id: "b", title: "", season: 0, episode: 2)]
+        let specials = [AppleMediaEpisode(id: "a", title: "", season: 0, episode: 1),
+                        AppleMediaEpisode(id: "b", title: "", season: 0, episode: 2)]
         #expect(AppleCompletionPolicy.successor(after: "a", episodes: specials, completedIDs: ["a"])?.id == "b")
     }
 

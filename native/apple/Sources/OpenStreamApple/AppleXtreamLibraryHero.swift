@@ -25,7 +25,7 @@ struct AppleXtreamLibraryHero: View {
                let source = AppleXtreamLibraryStore.shared.source(reference) {
                 AppleCatalogItemDetailView(item: item, source: source, mediaIndex: mediaIndex,
                     playbackSources: sourceStore.sources, metadataConfiguration: settings.tmdbConfiguration,
-                    gatewayConfig: nil, playbackResolver: AppleStremioPlaybackResolver(), settings: settings,
+                    gatewayConfig: nil, settings: settings,
                     openSettings: openSettings, initialAutoPlay: autoPlay, tabToolbar: tabToolbar)
                     .environment(\.appleDiscoverRows, nil)
             }

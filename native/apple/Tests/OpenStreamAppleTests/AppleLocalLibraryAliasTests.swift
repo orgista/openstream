@@ -18,7 +18,7 @@ private struct AliasCredentialStub: AppleCredentialStoring {
     let settings: AppleSettingsStore
     var blobDirectory: URL { root.appendingPathComponent("Playback") }
 
-    static func run(lookup: @escaping AppleLibraryMetadataResolver.Lookup = { _, _, _, _ in nil },
+    static func run(lookup: @escaping AppleLibraryMetadataResolver.Lookup = { _, _, _ in nil },
                     _ body: (Self) async throws -> Void) async throws {
         let suite = "local-alias-\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -103,7 +103,7 @@ private struct AliasCredentialStub: AppleCredentialStoring {
         }
     }
     @Test func weakMatchRecordsNothing() async throws {
-        try await LocalAliasFixture.run(lookup: { _, _, _, _ in
+        try await LocalAliasFixture.run(lookup: { _, _, _ in
             AppleCatalogItem(mediaID: "tt0903747", type: "movie", name: "Film", releaseInfo: "2019")
         }) { f in
             let file = f.file("Film.2020.mkv")

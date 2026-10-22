@@ -446,7 +446,7 @@ public final class AppleSettingsStore {
         set { captionsPreference = newValue ? .always : .off }
     }
 
-    /// Languages the captions menu lists add-on subtitles for, as three-letter
+    /// Languages the captions menu prefers, as three-letter
     /// codes in preference order (Settings → Playback → Subtitle Languages).
     /// Defaults to the device's preferred languages until the viewer picks.
     /// Written through `AppleSubtitleLanguages.sanitized`, so unknown codes,
@@ -485,7 +485,7 @@ public final class AppleSettingsStore {
 
     /// True once the viewer has picked languages; until then the list is the
     /// English-first device default. The picker is only ever opened by hand,
-    /// from Settings › Playback or a subtitles add-on's detail page.
+    /// from Settings › Playback.
     public private(set) var hasChosenSubtitleLanguages: Bool
 
     /// Whether a show carries on to the next episode by itself. On by default,

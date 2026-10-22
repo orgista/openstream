@@ -14,15 +14,12 @@ struct AppleHomePhoneHeroCarousel<Page: View, Preload: View>: View {
     /// full-bleed hero (N20) sets its own.
     var dotsCentreInset: CGFloat = AppleHomePhoneHeroLayout.dotsCentreInset
     var waitsForCurrentArtwork = false
-    /// Loads the trailer of the page after the one showing.
-    var prefetchTrailer: (Int) async -> Void = { _ in }
     @ViewBuilder let page: (Int) -> Page
     /// Draws a page's art invisibly, so the next page is already decoded when
     /// it slides in rather than arriving as a bare surface under its copy.
     @ViewBuilder let preload: (Int) -> Preload
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.appleHeroesSettled) private var heroesSettled
     @State private var cycle = AppleHeroRotation.Cycle(count: 0)
     @State private var isTouching = false
     @State private var currentArtIsReady = false
@@ -80,13 +77,6 @@ struct AppleHomePhoneHeroCarousel<Page: View, Preload: View>: View {
             holdOrRun()
         }
         .onChange(of: isPaused) { holdOrRun() }
-        // A trailer still loading on the shown page goes first; one playing,
-        // or none at all, leaves room to warm the next page's player.
-        .task(id: heroesSettled && !trailerIsLoading ? cycle.pages(available: pageIDs.count)?.next : nil) {
-            guard heroesSettled, !trailerIsLoading,
-                  let next = cycle.pages(available: pageIDs.count)?.next else { return }
-            await prefetchTrailer(next)
-        }
         .task(id: cycle) {
             // Restarted by every change to the cycle, so this only ever waits
             // for the page that is showing.
@@ -96,7 +86,6 @@ struct AppleHomePhoneHeroCarousel<Page: View, Preload: View>: View {
         }
     }
 
-    private var trailerIsLoading: Bool { trailer.isPlaying && !trailer.isOnScreen }
 
     private var isPaused: Bool {
         AppleHeroRotation.cycleIsPaused(isTouching: isTouching, trailerIsPlaying: trailer.isPlaying,

@@ -46,14 +46,14 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
     private var discFileURL: URL?
     private var lastPublishedIsLive: Bool = false
 
-    /// Subtitle tracks demuxed from the media, kept apart from the add-on
+    /// Subtitle tracks demuxed from the media, kept apart from the sidecar
     /// tracks so `subtitleTracks` can be rebuilt with the embedded ones first
-    /// and the appended add-on ids stay stable.
+    /// and the appended sidecar ids stay stable.
     private var embeddedSubtitleTracks: [ApplePlaybackTrack] = []
     private var externalSubtitleTracks: [AppleExternalSubtitleTrack] = []
     private var activeExternalSubtitleID: Int?
     private var externalSubtitleLoad: Task<Void, Never>?
-    /// The in-flight add-on subtitle download and parse, if any. Tests await
+    /// The in-flight sidecar subtitle read and parse, if any. Tests await
     /// it instead of polling `subtitleCues` against the clock.
     var pendingExternalSubtitleLoad: Task<Void, Never>? { externalSubtitleLoad }
     /// Latest `sourceVideoWidth/Height` and `softwareDisplaySize`, captured in
@@ -66,7 +66,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
     /// engine's own track indices are small integers.
     static let externalSubtitleTrackIDBase = 1_000_000
 
-    /// Downloads a chosen add-on subtitle file. Injectable for tests.
+    /// Reads a chosen sidecar subtitle file. Injectable for tests.
     public var externalSubtitleDataLoader: @Sendable (URL) async throws -> Data
         = AppleExternalSubtitleService.liveDataLoader
 
@@ -605,9 +605,9 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         return nativeOrdinal != nil
     }
 
-    /// Appends add-on subtitle files after the embedded tracks. Ids already
-    /// present are ignored, so a second batch from a slower add-on never
-    /// renumbers a track the viewer can already see.
+    /// Appends sidecar subtitle files after the embedded tracks. Ids already
+    /// present are ignored, so a second batch never renumbers a track the
+    /// viewer can already see.
     public func addExternalSubtitleTracks(_ tracks: [AppleExternalSubtitleTrack]) {
         var merged = externalSubtitleTracks
         for track in tracks where !merged.contains(where: { $0.id == track.id }) {
@@ -940,7 +940,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
     }
 
     /// Auto-selects when tracks arrive. `.always` takes the best visible track; language preferences require a
-    /// match, including add-on tracks that arrive after the embedded selection.
+    /// match, including sidecar tracks that arrive after the embedded selection.
     /// A manual choice (including "Off") always survives track discovery.
     private func autoSelectSubtitleIfPreferred() {
         guard !subtitleSelectionOverridden, captionsPreference != .off,
@@ -1020,8 +1020,8 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         )
     }
 
-    /// Embedded text tracks carry the same "£"-for-"♪" captions as the
-    /// add-on files (A Different World's MKV, iOS 18.6 regression
+    /// Embedded text tracks carry the same "£"-for-"♪" captions as sidecar
+    /// files (A Different World's MKV, iOS 18.6 regression
     /// 2026-10-01), so they get the same repair
     /// (`AppleSubtitleTextParser.musicNotesRestored`).
     static func mapCueBody(_ body: SubtitleCue.Body) -> AppleSubtitleCueBody {

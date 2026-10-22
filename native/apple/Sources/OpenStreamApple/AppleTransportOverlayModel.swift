@@ -158,8 +158,7 @@ public final class AppleTransportOverlayModel {
 
     /// The end-of-episode card, or nil when there is nothing to offer yet.
     public var nextEpisodePrompt: AppleNextEpisodePrompt? {
-        // A provider's error clip is not the episode ending.
-        guard !isPartBoundary, nextEpisode != nil, !coordinator.isPlaceholderPlayback else { return nil }
+        guard !isPartBoundary, nextEpisode != nil else { return nil }
         let prompt = AppleNextEpisodePolicy.prompt(
             position: position,
             duration: duration,
@@ -527,7 +526,7 @@ public final class AppleTransportOverlayModel {
     /// Starts the next episode once this one has run out, unless the viewer
     /// turned auto-play off or dismissed the card.
     private func advanceToNextEpisodeIfDue(hasEnded: Bool = false) {
-        guard !hasAdvancedToNextEpisode, let nextEpisode, !coordinator.isPlaceholderPlayback else { return }
+        guard !hasAdvancedToNextEpisode, let nextEpisode else { return }
         guard (isPartBoundary && hasEnded) || (!isPartBoundary && AppleNextEpisodePolicy.shouldAutoAdvance(
             position: position,
             duration: duration ?? coordinator.engine.duration,

@@ -65,22 +65,22 @@ struct AppleWatchProviderTests {
 
     // MARK: Staying in the app
 
-    /// "in general prefer to stay in the app" — a local or add-on source keeps
+    /// "in general prefer to stay in the app" — a local or server source keeps
     /// Play, and the service is a quiet "also available on".
     @Test func theAppKeepsPlayWhenItCanPlayIt() {
         #expect(!AppleWatchProviderPolicy.replacesPlay(
-            hasLocalOrAddonSource: true, visibleProviders: [netflix]))
+            hasInAppSource: true, visibleProviders: [netflix]))
     }
 
     /// "If they are added with no other local option play becomes the option".
     @Test func theServiceBecomesPlayOnlyWhenNothingElseCan() {
         #expect(AppleWatchProviderPolicy.replacesPlay(
-            hasLocalOrAddonSource: false, visibleProviders: [netflix]))
+            hasInAppSource: false, visibleProviders: [netflix]))
     }
 
     @Test func nothingToPlayAndNoProviderOffersNothing() {
         #expect(!AppleWatchProviderPolicy.replacesPlay(
-            hasLocalOrAddonSource: false, visibleProviders: []))
+            hasInAppSource: false, visibleProviders: []))
     }
 
     // MARK: Logos

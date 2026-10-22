@@ -5,17 +5,8 @@ import Testing
 /// Edge-case tests for AppleContinueWatchingResolver that complement
 /// AppleContinueWatchingResolverTests.
 struct AppleContinueWatchingResolverEdgeTests {
-    private let catalog = AppleStremioCatalog(type: "series", id: "fixture-edge")
-    private let source: AppleSource
+    private let instanceID = UUID()
     private let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
-
-    init() {
-        source = AppleSource(
-            kind: .stremio, name: "Edge Fixture",
-            url: URL(string: "https://fixture.example/edge-manifest.json")!,
-            resources: ["catalog"], catalogs: [catalog]
-        )
-    }
 
     private func item(_ mediaID: String, name: String, type: String = "series") -> AppleCatalogItem {
         AppleCatalogItem(
@@ -26,13 +17,9 @@ struct AppleContinueWatchingResolverEdgeTests {
     }
 
     private func record(_ catalogItem: AppleCatalogItem, progress: Double? = 0.4) -> AppleMediaRecord {
-        var value = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: catalogItem)
+        var value = AppleMediaIngestion.catalogRecord(instanceID: instanceID, item: catalogItem)
         value.progress = progress
         return value
-    }
-
-    private func lookup(sections: [AppleCatalogSection], sources: [AppleSource]? = nil) -> AppleCatalogSearchLookup {
-        AppleCatalogSearchLookup(sections: sections, sources: sources ?? [source])
     }
 
     // MARK: - Progress threshold boundaries
@@ -70,25 +57,6 @@ struct AppleContinueWatchingResolverEdgeTests {
         #expect(result.isEmpty)
     }
 
-    // MARK: - Resolve with multiple lookups
-
-    /// When the first lookup does not match but a second does, resolve uses the second.
-    @Test func resolvePrefersFirstMatchingLookup() {
-        let edgeItem = item("tt_edge_lookup", name: "Lookup Target")
-        let edgeRecord = record(edgeItem)
-
-        // First lookup has no sections (empty shelf) — cannot match
-        let emptyLookup = AppleCatalogSearchLookup(sections: [], sources: [source])
-
-        // Second lookup lists the item
-        let sections = [AppleCatalogSection(source: source, catalog: catalog, items: [edgeItem])]
-        let fullLookup = lookup(sections: sections)
-
-        let resolution = AppleContinueWatchingResolver.resolve(edgeRecord, in: [emptyLookup, fullLookup])
-
-        #expect(resolution == .listed(AppleCatalogSearchMatch(item: edgeItem, source: source)))
-    }
-
     // MARK: - In-progress ordering with equal dates
 
     /// When two records share the same watch date, the one with the
@@ -112,84 +80,6 @@ struct AppleContinueWatchingResolverEdgeTests {
         // Same date → sorted by id ascending
         let sortedIds = result.map(\.id)
         #expect(sortedIds[0] < sortedIds[1])
-    }
-
-    // MARK: - Entries deduplication with multiple sources
-
-    /// Two records resolving to the same catalog item keep only the first in order.
-    @Test func entriesDeduplicateByResolvedItemId() {
-        let sharedItem = item("tt_edge_dedup", name: "Shared Title")
-        let record1 = record(sharedItem, progress: 0.3)
-
-        // A second record with a different item ID but same canonicalID resolves to the same item
-        var record2 = AppleMediaIngestion.catalogRecord(
-            instanceID: UUID(),
-            item: AppleCatalogItem(mediaID: "fixture:alt-copy", type: "series", name: "Shared Title")
-        )
-        record2.availability += record1.availability
-        record2.progress = 0.6
-
-        let sections = [AppleCatalogSection(source: source, catalog: catalog, items: [sharedItem])]
-        let l = lookup(sections: sections)
-
-        let entries = AppleContinueWatchingResolver.entries([record1, record2], in: [l])
-
-        #expect(entries.count == 1)
-        #expect(entries[0].record.id == record1.id)
-    }
-
-    // MARK: - Record with no matching lookup and no active source
-
-    /// A catalog record whose source is not in the lookup at all is unavailable.
-    @Test func recordWithNoMatchingLookupSourceUnavailable() {
-        let phantomSource = AppleSource(
-            kind: .stremio, name: "Phantom",
-            url: URL(string: "https://fixture.example/phantom.json")!,
-            resources: ["catalog"], catalogs: [catalog]
-        )
-        let phantomItem = item("tt_edge_phantom", name: "Gone")
-        var phantomRecord = AppleMediaIngestion.catalogRecord(instanceID: phantomSource.id, item: phantomItem)
-        phantomRecord.progress = 0.5
-
-        // Lookup only knows about our source, not the phantom
-        let sections = [AppleCatalogSection(source: source, catalog: catalog, items: [item("tt_edge_other", name: "Other")])]
-        let l = lookup(sections: sections)
-
-        let resolution = AppleContinueWatchingResolver.resolve(phantomRecord, in: [l])
-
-        #expect(resolution == .unavailable(.sourceUnavailable))
-    }
-
-    // MARK: - Maximum count limiting
-
-    /// entries respects the maximumCount cap of 12.
-    @Test func entriesRespectsMaximumCount() {
-        var records: [AppleMediaRecord] = []
-        var items: [AppleCatalogItem] = []
-        for i in (0 ..< 20) {
-            let mID = "tt_edge_max_\(String(format: "%02d", i))"
-            let it = item(mID, name: ("Title " + String(i)))
-            items.append(it)
-            records.append(record(it, progress: 0.3 + Double(i) * 0.01))
-        }
-
-        let sections = [AppleCatalogSection(source: source, catalog: catalog, items: items)]
-        let l = lookup(sections: sections)
-        let watchedAt = Dictionary(uniqueKeysWithValues: records.enumerated().map {
-            ($1.id, now.addingTimeInterval(-Double($0) * 300))
-        })
-
-        let ordered = AppleContinueWatchingResolver.inProgress(records) {
-            watchedAt[$0.id] ?? .distantPast
-        }
-        let entries = AppleContinueWatchingResolver.entries(ordered, in: [l])
-
-        // All 20 are in progress (max progress = 0.3 + 19*0.01 = 0.49 < 0.95)
-        #expect(ordered.count == 20)
-        // entries deduplicates by item id; since each resolves to a distinct listed item, all pass
-        #expect(entries.count == 20)
-        // The resolver itself does not cap at maximumCount — that is an
-        // upstream concern (Discover row). Verify the resolver returns all.
     }
 
     // MARK: - Finished titles drop out of inProgress

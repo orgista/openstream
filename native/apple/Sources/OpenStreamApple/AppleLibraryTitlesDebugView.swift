@@ -9,7 +9,6 @@ public struct AppleLibraryTitlesDebugView: View {
     /// Its own index file: fixture records never reach the real media index.
     @State private var index = AppleMediaIndexStore(repository: AppleMediaIndexRepository(
         fileURL: FileManager.default.temporaryDirectory.appending(path: "library-titles-fixture-index.json")))
-    @State private var catalogs = AppleCatalogStore()
     @State private var autoPlayGroup: AppleLibrarySeries?
 
     public init() {
@@ -57,7 +56,7 @@ public struct AppleLibraryTitlesDebugView: View {
                 AppleLocalTitleDestination(group: autoPlayGroup, sourceStore: sources, mediaIndex: index,
                     settings: settings, openSettings: {}, tabToolbar: nil, autoPlay: true)
             } else {
-                AppleLibraryView(catalogStore: catalogs, sourceStore: sources, mediaIndex: index, settings: settings, openSettings: {})
+                AppleLibraryView(sourceStore: sources, mediaIndex: index, settings: settings, openSettings: {})
                     .navigationTitle("Library")
             }
         }.preferredColorScheme(.dark).tint(.white)

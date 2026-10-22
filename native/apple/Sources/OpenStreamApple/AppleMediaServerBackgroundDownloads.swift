@@ -296,9 +296,6 @@ enum AppleCachedCredentialPolicy {
         if parts?.queryItems?.contains(where: { secretNames.contains($0.name.lowercased()) }) == true { return nil }
         let path = url.path.lowercased().split(separator: "/")
         if ["live", "movie", "series"].contains(path.first.map(String.init) ?? ""), path.count >= 4 { return nil }
-        #if OPENSTREAM_ADDONS
-        if path.dropLast().contains(where: { AppleAddonURLSecretPolicy.isConfigurationSegment(String($0)) }) { return nil }
-        #endif
         return url
     }
 

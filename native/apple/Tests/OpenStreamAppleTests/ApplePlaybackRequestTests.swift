@@ -3,7 +3,7 @@ import Testing
 @testable import OpenStreamApple
 
 @Test func externalPlaybackRequiresAPublicHeaderFreeRoute() {
-    let direct = ApplePlaybackRequest(url: URL(string: "https://media.example/movie.mp4")!, mediaID: "fixture", sourceKind: .stremio)
+    let direct = ApplePlaybackRequest(url: URL(string: "https://media.example/movie.mp4")!, mediaID: "fixture", sourceKind: .files)
     #expect(direct.allowsExternalPlayback(playerURL: direct.url))
     #expect(!direct.allowsExternalPlayback(playerURL: URL(string: "http://127.0.0.1/movie.m3u8")!))
     #expect(!direct.allowsExternalPlayback(playerURL: URL(string: "http://[::1]/movie.m3u8")!))

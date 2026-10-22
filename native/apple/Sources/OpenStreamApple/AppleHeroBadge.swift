@@ -21,7 +21,7 @@ public enum AppleHeroBadge: String, Equatable, Sendable {
         }
     }
 
-    /// One aired (or announced) episode, as the add-on's meta lists it.
+    /// One aired (or announced) episode, as the title's metadata lists it.
     public struct Episode: Equatable, Hashable, Sendable {
         public let season: Int
         public let episode: Int
@@ -49,7 +49,7 @@ public enum AppleHeroBadge: String, Equatable, Sendable {
         return .newEpisode
     }
 
-    /// Reads a Stremio `released` value ("2026-09-18T00:00:00.000Z", with or
+    /// Reads a `released` value ("2026-09-18T00:00:00.000Z", with or
     /// without the fraction, or a bare "2026-09-18").
     public static func releaseDate(_ value: String?) -> Date? {
         guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }

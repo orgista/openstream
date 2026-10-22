@@ -124,30 +124,3 @@ struct AppleMacWindowShotTests {
 }
 #endif
 
-/// The Add Catalog page drew "Manifest URL" twice on macOS — once as the
-/// section header, once as the form row's own label. iOS and visionOS never
-/// show a text field's title (the field carries a `prompt`), which is why it
-/// went unseen until the macOS sweep.
-@Suite("Add Catalog label")
-struct AppleAddCatalogLabelTests {
-    @Test("The macOS manifest field hides its own label")
-    func manifestFieldHidesItsLabelOnMacOS() throws {
-        let packageRoot = URL(filePath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let source = try String(
-            contentsOf: packageRoot.appending(path: "Sources/OpenStreamApple/AppleSourcesSettingsView.swift"),
-            encoding: .utf8
-        )
-        let lines = source.components(separatedBy: "\n")
-        let header = try #require(
-            lines.firstIndex(where: { $0.contains("Section(\"Manifest URL\")") }),
-            "The Add Catalog form no longer has a Manifest URL section."
-        )
-        let block = lines[header..<min(header + 14, lines.count)].joined(separator: "\n")
-        #expect(block.contains("#if os(macOS)"))
-        #expect(block.contains(".labelsHidden()"),
-                "Without this the section header and the field both read \"Manifest URL\".")
-    }
-}

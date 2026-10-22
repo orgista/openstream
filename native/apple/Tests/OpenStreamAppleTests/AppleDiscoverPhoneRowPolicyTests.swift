@@ -161,30 +161,4 @@ import Testing
         #expect(!AppleRailPaging.canPageForward(geometry))
         #expect(AppleRailPaging.target(geometry, forward: true) == 0)
     }
-
-    #if DEBUG
-    @Test func top10FixtureRanksCatalogueTitlesByTypeWithoutRepeats() throws {
-        let source = AppleSource(kind: .stremio, name: "Fixture", url: try #require(URL(string: "https://fixture.example/manifest.json")))
-        func section(_ type: String, _ names: [String]) -> AppleCatalogSection {
-            AppleCatalogSection(source: source, catalog: AppleStremioCatalog(type: type, id: "c.\(type).\(names.count)", name: "C"),
-                                items: names.map { AppleCatalogItem(mediaID: "fixture:\($0)", type: type, name: $0) })
-        }
-        let week = try #require(AppleTop10Fixture.week(sections: [
-            section("movie", (1...8).map { "Film \($0)" }),
-            section("movie", ["Film 2"] + (9...14).map { "Film \($0)" }),
-            section("series", ["Show A", "Show B"]),
-        ]))
-        #expect(week.films.map(\.rank) == Array(1...10))
-        #expect(week.films.map(\.title) == (1...10).map { "Film \($0)" })
-        #expect(week.tv.map(\.title) == ["Show A", "Show B"])
-        #expect(AppleTop10Fixture.week(sections: []) == nil)
-    }
-
-    @Test func fixtureHidesThePillWhenTheLengthIsUnknown() {
-        #expect(AppleContinueWatchingFixture.info(index: 0, type: "series").remainingLabel == "57 MIN LEFT")
-        #expect(AppleContinueWatchingFixture.info(index: 0, type: "series").subtitle == "Continue · S1, E3")
-        #expect(AppleContinueWatchingFixture.info(index: 2, type: "movie").subtitle == "Movie")
-        #expect(AppleContinueWatchingFixture.info(index: 3, type: "series").remainingLabel == nil)
-    }
-    #endif
 }

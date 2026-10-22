@@ -34,7 +34,7 @@ enum AppleSubtitleCueLayerPolicy {
     /// only, Sodalite#38) and expects the host to draw; nothing did, so every
     /// MKV/TS subtitle and every live-TS caption played blank on a device
     /// (Q4a8 paths 1 and 2). Native embedded tracks remain AVKit's to draw;
-    /// native add-on tracks publish cues to this same layer.
+    /// native sidecar tracks publish cues to this same layer.
     static func mountsOverStockPlayer(
         engine: ApplePlaybackEngineKind,
         route: ApplePlaybackPresentationRoute

@@ -216,29 +216,3 @@ struct AppleStillProgressBar: View {
             .accessibilityHidden(true)
     }
 }
-
-#if DEBUG
-/// Review builds only: Continue Watching tiles for a simulator that has no
-/// progress, so the row can be photographed without playing anything. The
-/// tiles are real catalogue titles; the progress lives in memory and is never
-/// written to the playback store or the media index.
-enum AppleContinueWatchingFixture {
-    static let launchKey = "OpenStreamDebugContinueWatching"
-    static let count = 4
-
-    static var isEnabled: Bool { UserDefaults.standard.bool(forKey: launchKey) }
-
-    static func info(index: Int, type: String) -> AppleContinueWatchingTileInfo {
-        // (fraction watched, minutes left or nil for an unknown length, S, E)
-        let pattern: [(Double, Double?, Int, Int)] = [(0.40, 57, 1, 3), (0.72, 8, 2, 5), (0.20, 81, 3, 1), (0.55, nil, 1, 7)]
-        let (fraction, minutesLeft, season, episode) = pattern[index % pattern.count]
-        let partID = type == "movie" ? nil : "fixture:\(season):\(episode)"
-        let label = minutesLeft.flatMap { left -> String? in
-            let duration = left * 60 / (1 - fraction)
-            return AppleContinueWatchingCaption.remainingLabel(position: duration * fraction, duration: duration)
-        }
-        return AppleContinueWatchingTileInfo(progress: fraction, remainingLabel: label,
-                                             subtitle: AppleContinueWatchingCaption.subtitle(type: type, partID: partID))
-    }
-}
-#endif

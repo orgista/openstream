@@ -63,7 +63,6 @@ struct AppleSettingsView: View {
     let sourceStore: AppleSourceStore
     let webManagement: any AppleWebManagementServing
     var backupController: AppleConfigurationController? = nil
-    var catalogStore: AppleCatalogStore? = nil
     /// Large phone windows and landscape iPads draw Settings as a split view,
     /// sections on the left and the chosen page on the right, with this
     /// as the right column's stack. Nil pushes everything on one stack.
@@ -172,7 +171,7 @@ struct AppleSettingsView: View {
         case .watchProviders:
             AppleWatchProviderSettingsView(settings: settings)
         case .discoverRows:
-            AppleDiscoverRowsSettingsView(settings: settings, sourceStore: sourceStore, catalogStore: catalogStore)
+            AppleDiscoverRowsSettingsView(settings: settings, sourceStore: sourceStore)
         case .playback:
             ApplePlaybackSettingsView(settings: settings)
         case .playbackInfo:
@@ -1272,7 +1271,7 @@ private struct ApplePlaybackSettingsView: View {
     #endif
 }
 
-/// Picks up to three languages the captions menu lists add-on subtitles for.
+/// Picks up to three languages the captions menu prefers.
 /// Plain focusable rows with a checkmark; further rows go inert once three
 /// are chosen. Nothing is forced: the page stays until Done or Menu (U14).
 @MainActor

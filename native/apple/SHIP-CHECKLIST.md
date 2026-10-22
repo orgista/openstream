@@ -4,14 +4,17 @@ Run every line before uploading a TestFlight build, and tick them in the release
 `DELIVERIES.md`. Owner rule (2026-09-28): these must be clean **before** a build ships, not fixed after.
 If a line fails, fix it or stop and ask; never "ship now, fix in the next build".
 
-## 0. Which build is this? (owner decision 2026-10-02)
-- **TestFlight** builds keep add-ons: archive with `SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) OPENSTREAM_ADDONS'`.
-  Internal groups only by default — external TestFlight groups go through Beta App Review under the same rules
-  as the App Store, so an add-on build there can be rejected.
-- **App Store** submissions are a SEPARATE archive and build number WITHOUT the flag (add-ons compiled out);
-  `scripts/check-no-addons-in-release.sh` must pass on it. Never submit a TestFlight add-on build for App Store review.
-- **Public sideload downloads** include add-ons on every platform. The Mac download is ad-hoc signed and
-  unnotarized until a Developer ID certificate exists; document right-click → Open.
+## 0. One build for everyone (owner decision 2026-10-22)
+- OpenStream has no add-ons. **One build** goes to TestFlight (every group) and to App Review; there is no
+  separate add-on archive, sideload flavour or compilation condition.
+- Load the `app-store-review-hardening` skill and run its pre-submit checklist (binary, metadata and screenshots,
+  review notes and demo, legal, TestFlight). Record the evidence in `DELIVERIES.md`.
+- Public wording follows Infuse/Plex: OpenStream "plays media you own from your devices, network shares and media
+  servers; does not provide any content". No add-on, Stremio, torrent, debrid or catalog-provider words anywhere.
+- After each ship, expire the older TestFlight builds on every platform, so testers can only install the current
+  build: `asc builds list --app 6807530757 --limit 20` first, then `asc builds expire --build-id <id> --confirm`
+  for each older build (or `asc builds expire-all --app 6807530757 --older-than <age> --dry-run`, then without
+  `--dry-run`). Driver only, after "ship N".
 
 ## 1. Authorization and numbers
 - [ ] The owner said "ship N" (or "push N") for this exact build number. Nothing else authorizes an upload.
@@ -35,7 +38,8 @@ If a line fails, fix it or stop and ask; never "ship now, fix in the next build"
 - [ ] Creating or changing a certificate or profile needs the owner's OK first. Say what and why.
 
 ## 4. Nothing unfinished goes out
-- [ ] `bash scripts/check-no-addons-in-release.sh` passes: Release iOS simulator binaries contain no add-on markers, and `OPENSTREAM_ADDONS` is absent from distribution compile commands.
+- [ ] `bash scripts/check-no-addons-in-release.sh --build` passes for iOS, tvOS, visionOS and macOS, Debug and Release,
+      and again on each archive (`scripts/check-no-addons-in-release.sh <archive>`): no add-on word in any shipped file.
 - [ ] No placeholder assets: every icon set (app, Watch, Widgets, **iMessage**, Top Shelf, Mac) is the
       real artwork, with every required size. `grep -rni placeholder HANDOFF-NEXT-SESSION.md FEEDBACK.md`
       and look at each icon in the simulator.

@@ -323,7 +323,7 @@ public enum AppleWatchOnPolicy {
     /// added, subscription before free before ads — and that order is kept.
     public static func action(hasInAppSource: Bool, visibleProviders: [AppleWatchProvider]) -> AppleWatchOnAction? {
         guard AppleWatchProviderPolicy.replacesPlay(
-            hasLocalOrAddonSource: hasInAppSource, visibleProviders: visibleProviders
+            hasInAppSource: hasInAppSource, visibleProviders: visibleProviders
         ) else { return nil }
         var seen = Set<AppleStreamingService>()
         let choices = visibleProviders.compactMap { provider -> AppleWatchOnChoice? in

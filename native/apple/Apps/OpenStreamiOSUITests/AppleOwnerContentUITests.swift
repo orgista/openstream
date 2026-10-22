@@ -3,7 +3,7 @@ import UIKit
 
 /// The owner's own content on DevPlus: imports their backup through Settings ›
 /// Backup & Sync › Import, then checks Library (the SMB share), Live (the
-/// IPTV account), Discover (the add-ons), a title page's trailer and Search.
+/// IPTV account), Discover (the media servers), a title page's trailer and Search.
 ///
 /// Skipped unless the runner has `OPENSTREAM_OWNER_CONTENT=1` (pass it as
 /// `TEST_RUNNER_OPENSTREAM_OWNER_CONTENT=1`). The backup file must already be
@@ -139,7 +139,7 @@ final class AppleOwnerContentUITests: OpenStreamUITestCase {
         closePlayer()
     }
 
-    /// Discover's rows load from the add-ons; a title page shows its trailer.
+    /// Discover's rows load from the media servers; a title page shows its trailer.
     func testDDiscoverRowsAndTrailer() {
         launch([])
         tab("Discover")

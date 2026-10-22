@@ -4,14 +4,12 @@ import Testing
 
 /// iPhone 27 v2 re-run: the "Next Episode in 20s" countdown ran out, the
 /// player closed to the title page and nothing played (2/2). The end of an
-/// episode now hands over to the next one, which keeps the service, audio and
+/// episode now hands over to the next one, which keeps the audio and
 /// subtitle choices of the one that ended, and Continue Watching keeps the
 /// show once an episode is finished.
 @MainActor
 @Suite("Next episode handoff")
 struct AppleNextEpisodeHandoffTests {
-    private static let device = AppleStreamDeviceCapabilities(supportsHDR: true, supportsDolbyVision: false)
-
     // MARK: The end of the stream
 
     /// The last position tick lands a few frames short of the duration; the
@@ -69,27 +67,6 @@ struct AppleNextEpisodeHandoffTests {
         #expect(coordinator.hasAdvancedToNextEpisode)
     }
 
-    // MARK: Source preference
-
-    @Test func theNextEpisodeKeepsToTheServiceTheLastOnePlayedFrom() {
-        func candidate(_ file: String, addon: String) -> AppleStremioHTTPPlaybackCandidate {
-            AppleStremioHTTPPlaybackCandidate(title: file, sourceURL: URL(string: "https://media.fixture.example/\(file)")!,
-                                              filename: file, sourceName: addon)
-        }
-        let streams = [
-            candidate("A.1080p.mkv", addon: "Addon A"),
-            candidate("B.1080p.mkv", addon: "Addon B"),
-            candidate("B.720p.mkv", addon: "Addon B"),
-        ]
-        let preferred = streams[1].serviceKey
-        let order = AppleStremioCandidateRanking.playbackOrder(
-            streams, choice: .automatic, device: Self.device, preferredService: preferred)
-        #expect(order.map(\.title) == ["B.1080p.mkv", "A.1080p.mkv", "B.720p.mkv"])
-        // Without one the order is unchanged.
-        let plain = AppleStremioCandidateRanking.playbackOrder(streams, choice: .automatic, device: Self.device)
-        #expect(plain.map(\.title) == ["A.1080p.mkv", "B.1080p.mkv", "B.720p.mkv"])
-    }
-
     // MARK: Audio and subtitle carry-over
 
     private let englishAudio = ApplePlaybackTrack(id: 1, title: "English", language: "eng", codec: "aac")
@@ -136,8 +113,7 @@ struct AppleNextEpisodeHandoffTests {
     // MARK: Continue Watching
 
     @Test func aFinishedEpisodeKeepsTheShowInContinueWatching() {
-        let source = AppleSource(kind: .stremio, name: "Fixture", url: URL(string: "https://fixture.example/manifest.json")!,
-                                 resources: ["catalog"], catalogs: [])
+        let source = AppleSource(kind: .mediaServer, name: "Fixture", url: URL(string: "https://fixture.example/server")!)
         let show = AppleCatalogItem(mediaID: "tt0072562", type: "series", name: "Saturday Night Live")
         var record = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: show)
         record.progress = 1

@@ -127,11 +127,11 @@ public enum AppleWatchProviderPolicy: Sendable {
 
     /// Whether the external option should replace Play.
     ///
-    /// Only when there is nothing to play in the app: no local file, no add-on
-    /// stream. Otherwise the app stays the default and the service is a quiet
+    /// Only when there is nothing to play in the app: no local file, no server
+    /// title. Otherwise the app stays the default and the service is a quiet
     /// "also available on" (owner: "in general prefer to stay in the app").
-    public static func replacesPlay(hasLocalOrAddonSource: Bool, visibleProviders: [AppleWatchProvider]) -> Bool {
-        !hasLocalOrAddonSource && !visibleProviders.isEmpty
+    public static func replacesPlay(hasInAppSource: Bool, visibleProviders: [AppleWatchProvider]) -> Bool {
+        !hasInAppSource && !visibleProviders.isEmpty
     }
 
     /// How many services the Add Service menu offers (owner 2026-09-28:
@@ -148,7 +148,7 @@ public enum AppleWatchProviderPolicy: Sendable {
     /// The Add Service menu: the most popular services not yet added, at most
     /// `limit`. `directory` is already in popularity order.
     ///
-    /// Stores, add-on channels and aggregators are left out, and the big
+    /// Stores, store channels and aggregators are left out, and the big
     /// subscription services come first: TMDB's US top ten was JustWatch TV,
     /// Amazon Video, Apple TV Store and "HBO Max Amazon Channel", with HBO
     /// Max, Paramount+ and Peacock nowhere (iPhone 27 v2 re-run).

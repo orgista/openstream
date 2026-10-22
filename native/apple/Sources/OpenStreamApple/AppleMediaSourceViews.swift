@@ -101,7 +101,7 @@ struct AppleLiveTVView: View {
     @State private var healthDetailChannel: AppleIPTVChannel?
     #if os(macOS) || os(visionOS)
     /// The channel in the window's full player, while it is up.
-    @State private var fullWindowPlayer: AppleStremioPlayerPresentation?
+    @State private var fullWindowPlayer: AppleMediaPlayerPresentation?
     #endif
     #if os(iOS) || os(visionOS)
     @Environment(\.verticalSizeClass) private var verticalSizeClass
@@ -470,7 +470,7 @@ struct AppleLiveTVView: View {
                 #endif
         }
         #if os(macOS) || os(visionOS)
-        .modifier(AppleStremioPlayerPresentationModifier(presentation: $fullWindowPlayer))
+        .modifier(AppleMediaPlayerPresentationModifier(presentation: $fullWindowPlayer))
         .onChange(of: fullWindowPlayer == nil) { _, closed in
             // Back from the full player: the pinned player picks the channel
             // up again (live, so there is no position to lose).
@@ -603,7 +603,7 @@ struct AppleLiveTVView: View {
             let alternates = AppleLiveChannelAlternates.playbackCandidates(
                 for: channel, request: request, in: channels,
                 hasRecentlyFailed: { ApplePlaybackFailureHistory.shared.contains($0) })
-            fullWindowPlayer = AppleStremioPlayerPresentation(request: request, fallbackCandidates: alternates, settings: settings)
+            fullWindowPlayer = AppleMediaPlayerPresentation(request: request, fallbackCandidates: alternates, settings: settings)
         }
         #else
         return nil
@@ -3207,7 +3207,6 @@ struct AppleLibraryView: View {
     #if !os(tvOS)
     @State private var showsSearch = false
     #endif
-    let catalogStore: AppleCatalogStore
     let sourceStore: AppleSourceStore
     let mediaIndex: AppleMediaIndexStore
     let settings: AppleSettingsStore
@@ -3286,7 +3285,7 @@ struct AppleLibraryView: View {
         .navigationDestination(isPresented: $showsSearch) {
             // Its own router: deep links belong to Discover's Search, and two
             // views answering one route would push it twice.
-            AppleSearchView(catalogStore: catalogStore, sourceStore: sourceStore, mediaIndex: mediaIndex,
+            AppleSearchView(sourceStore: sourceStore, mediaIndex: mediaIndex,
                             router: AppleAppRouter(), settings: settings, openSettings: openSettings)
                 .navigationTitle("Search")
                 .appleTraceScreen("search")
@@ -3377,8 +3376,7 @@ struct AppleLibraryView: View {
             type: item.type, progress: library.progress[featured.id],
             selectedEpisode: library.resumeEpisode(for: item, group: featured,
                 episodes: AppleLocalLibraryStore.episodes(group: featured, mediaID: item.mediaID, enriched: [])),
-            isPlayable: AppleTitlePagePolicy.hasPlaybackRoute(
-                item: item, sources: sourceStore.sources, hasLocalGroup: true),
+            isPlayable: AppleTitlePagePolicy.hasPlaybackRoute(item: item, hasLocalGroup: true),
             trailer: .none))
     }
 

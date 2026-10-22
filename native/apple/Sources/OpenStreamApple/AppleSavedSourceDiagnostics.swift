@@ -3,7 +3,6 @@ import Foundation
 public enum AppleSavedSourceDiagnosticProbeKind: String, Codable, CaseIterable, Sendable {
     case iptv
     case smb
-    case streamingAddon
     case arr
     case search
     case trailer
@@ -21,9 +20,6 @@ public enum AppleSavedSourceDiagnosticStage: String, Codable, CaseIterable, Send
     case firstRead
     case rangeRead
     case manifest
-    case catalog
-    case meta
-    case streamClassification
     case library
     case roots
     case profiles
@@ -81,12 +77,7 @@ public protocol AppleSavedSourceDiagnosticsOperations: Sendable {
 
 public enum AppleSavedSourceDiagnosticsError: Error, Equatable, Sendable {
     case noConfiguredSource
-    case noStreamProvider
     case noResult
-    case emptyStreamResponse
-    case externalStream
-    case youtubeStream
-    case malformedStream
     case unsupportedStage
     case fixtureFailure
     case timeout
@@ -157,46 +148,6 @@ public struct AppleSavedSourceDiagnosticsRunner: Sendable {
                 status: .blocked,
                 errorCategory: "unsupported"
             )
-        } catch AppleSavedSourceDiagnosticsError.noStreamProvider {
-            return result(
-                kind: kind,
-                stage: stage,
-                startedAt: startedAt,
-                status: .blocked,
-                errorCategory: "no-stream-provider"
-            )
-        } catch AppleSavedSourceDiagnosticsError.externalStream {
-            return result(
-                kind: kind,
-                stage: stage,
-                startedAt: startedAt,
-                status: .blocked,
-                errorCategory: "external-link"
-            )
-        } catch AppleSavedSourceDiagnosticsError.youtubeStream {
-            return result(
-                kind: kind,
-                stage: stage,
-                startedAt: startedAt,
-                status: .blocked,
-                errorCategory: "youtube-link"
-            )
-        } catch AppleSavedSourceDiagnosticsError.emptyStreamResponse {
-            return result(
-                kind: kind,
-                stage: stage,
-                startedAt: startedAt,
-                status: .fail,
-                errorCategory: "empty-streams"
-            )
-        } catch AppleSavedSourceDiagnosticsError.malformedStream {
-            return result(
-                kind: kind,
-                stage: stage,
-                startedAt: startedAt,
-                status: .fail,
-                errorCategory: "malformed-stream"
-            )
         } catch is CancellationError {
             return result(
                 kind: kind,
@@ -237,16 +188,12 @@ public struct AppleSavedSourceDiagnosticsRunner: Sendable {
         if error is AppleIPTVError || error is AppleSMBError || error is AppleArrClientError {
             return "provider"
         }
-        if error is AppleStremioPlaybackError || error is AppleManifestClientError {
-            return "provider"
-        }
         return "unknown"
     }
 
     private static let plan: [(AppleSavedSourceDiagnosticProbeKind, [AppleSavedSourceDiagnosticStage])] = [
         (.iptv, [.authenticate, .categories, .channels, .guide, .playbackRequest, .headers]),
         (.smb, [.dnsSD, .authenticate, .browse, .firstRead, .rangeRead]),
-        (.streamingAddon, [.manifest, .catalog, .meta, .streamClassification]),
         (.arr, [.authenticate, .library, .roots, .profiles, .lookup]),
         (.search, [.firstResultTiming]),
         (.trailer, [.timing, .audio, .captions, .playButton]),
@@ -304,8 +251,6 @@ public struct AppleSavedSourceDiagnosticsProductionOperations: AppleSavedSourceD
             try await runIPTV(stage: stage)
         case .smb:
             try await runSMB(stage: stage)
-        case .streamingAddon:
-            try await runStreamingAddon(stage: stage)
         case .arr:
             try await runARR(stage: stage)
         case .search:
@@ -376,70 +321,6 @@ public struct AppleSavedSourceDiagnosticsProductionOperations: AppleSavedSourceD
             _ = try await client.read(url: fileURL, credentials: credentials, range: range)
         default:
             throw AppleSavedSourceDiagnosticsError.unsupportedStage
-        }
-    }
-
-    private func runStreamingAddon(stage: AppleSavedSourceDiagnosticStage) async throws {
-        #if OPENSTREAM_ADDONS
-
-        guard let source = sources.first(where: { $0.isAddon && $0.isEnabled }) else {
-            throw AppleSavedSourceDiagnosticsError.noConfiguredSource
-        }
-        switch stage {
-        case .manifest:
-            _ = try await AppleManifestClient().load(source.url.absoluteString)
-        case .catalog:
-            guard let catalog = source.catalogs.first(where: { !$0.requiresInput }) else {
-                throw AppleSavedSourceDiagnosticsError.noResult
-            }
-            _ = try await AppleStremioCatalogClient().load(source: source, catalog: catalog)
-        case .meta:
-            guard await AppleStremioMetadataClient().previewAssets(
-                sources: [source],
-                type: "movie",
-                mediaID: "tt0000001"
-            ) != nil else {
-                throw AppleSavedSourceDiagnosticsError.noResult
-            }
-        case .streamClassification:
-            guard let source = Self.firstStreamSource(in: sources) else {
-                throw AppleSavedSourceDiagnosticsError.noStreamProvider
-            }
-            let selection = try await AppleStremioPlaybackClient().streams(
-                source: source,
-                type: "movie",
-                mediaID: "tt0000001"
-            )
-            try Self.validateStreamClassification(selection)
-        default:
-            throw AppleSavedSourceDiagnosticsError.unsupportedStage
-        }
-
-        #else
-        throw AppleSavedSourceDiagnosticsError.unsupportedStage
-        #endif
-    }
-
-    static func firstStreamSource(in sources: [AppleSource]) -> AppleSource? {
-        sources.first {
-            $0.isAddon
-                && $0.isEnabled
-                && $0.resources.contains { $0.caseInsensitiveCompare("stream") == .orderedSame }
-        }
-    }
-
-    static func validateStreamClassification(_ selection: AppleStremioStreamSelection) throws {
-        guard selection.httpCandidates.isEmpty else { return }
-        guard let unsupported = selection.unsupported.first else {
-            throw AppleSavedSourceDiagnosticsError.emptyStreamResponse
-        }
-        switch unsupported.reason {
-        case .externalLink:
-            throw AppleSavedSourceDiagnosticsError.externalStream
-        case .youtube:
-            throw AppleSavedSourceDiagnosticsError.youtubeStream
-        case .invalidHTTPURL, .invalidLocator, .missingLocator:
-            throw AppleSavedSourceDiagnosticsError.malformedStream
         }
     }
 

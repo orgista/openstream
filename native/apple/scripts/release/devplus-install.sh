@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Build the iOS app with add-ons (TestFlight-equivalent Release), sign it Ad Hoc for the team's registered test
+# Build the iOS app (the same Release build as TestFlight), sign it Ad Hoc for the team's registered test
 # iPhones (DevPlus + the owner's) and install it on one of them. Runs ON Dev-Mini — call it through scripts/mini.sh:
 #   scripts/mini.sh 'zsh scripts/release/devplus-install.sh [build-number] [device-udid]'
 # Default device: DevPlus. The IPA stays in ~/Developer/openstream-build/devplus/export even when the device is not
@@ -15,7 +15,6 @@ xcodebuild -project Apps/OpenStreamApps.xcodeproj -scheme "OpenStream iOS" -conf
   -destination 'generic/platform=iOS' -archivePath "$ARCHIVE" \
   -derivedDataPath ~/Developer/openstream-build/dd-ios-release \
   CURRENT_PROJECT_VERSION=$BUILD \
-  SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) OPENSTREAM_ADDONS' \
   archive 2>&1 | grep -E "error:|ARCHIVE (SUCCEEDED|FAILED)|Signing Identity" | tail -20
 [[ -d $ARCHIVE ]] || { print -u2 "archive failed"; exit 1; }
 xcodebuild -exportArchive -archivePath "$ARCHIVE" -exportPath "$OUT/export" \

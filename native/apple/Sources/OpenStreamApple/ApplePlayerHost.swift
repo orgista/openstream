@@ -296,7 +296,7 @@ public final class ApplePlayerHost {
     /// The Mac was left out, and its CC menu did nothing (owner, 2026-09-24).
     /// On the default engine the legible group is pinned deselected while the
     /// app owns captions, so AVKit's select was undone the moment it landed;
-    /// on the AVPlayer engine the choice held only until the next add-on batch
+    /// on the AVPlayer engine the choice held only until the next sidecar batch
     /// re-applied the captions setting over it. The mirror is what tells the
     /// engine the viewer chose, on iPhone and on the Mac alike. Apple TV hides
     /// the stock rows and drives selection from its own menu instead.

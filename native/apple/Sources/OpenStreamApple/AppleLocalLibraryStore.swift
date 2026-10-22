@@ -25,7 +25,7 @@ final class AppleLocalLibraryStore {
     private(set) var errorMessage: String?
     private(set) var progress: [String: ApplePlaybackProgress] = [:]
     private var offlineIDs: [String: String] = [:]
-    private var episodesByGroup: [String: [AppleStremioEpisode]] = [:]
+    private var episodesByGroup: [String: [AppleMediaEpisode]] = [:]
 
     private let metadataResolver: AppleLibraryMetadataResolver
     private let injectedPlaybackStore: ApplePlaybackStore?
@@ -43,7 +43,7 @@ final class AppleLocalLibraryStore {
     }
 
     @concurrent nonisolated private static func episodeCandidates(groups: [AppleLibrarySeries], sources: [AppleSource],
-        offlineIDs: [String: String]) async -> [String: [AppleStremioEpisode]] {
+        offlineIDs: [String: String]) async -> [String: [AppleMediaEpisode]] {
         let sourcesByID = Dictionary(sources.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
         return Dictionary(uniqueKeysWithValues: groups.filter { $0.parsed.kind == .show }.map { group in
             let episodes = group.items.filter { AppleLibraryTitleParser.parse($0).role == .feature }.map { file in
@@ -51,7 +51,7 @@ final class AppleLocalLibraryStore {
                 let id = offlineIDs[file.id] ?? sourcesByID[file.sourceID].map {
                     AppleMediaIngestion.libraryRecord(source: $0, item: file).id
                 } ?? file.id
-                return AppleStremioEpisode(id: id, title: "", season: parsed.episodeNumbers.isEmpty ? nil : parsed.season,
+                return AppleMediaEpisode(id: id, title: "", season: parsed.episodeNumbers.isEmpty ? nil : parsed.season,
                     episode: parsed.episodeNumbers.last, releaseInfo: parsed.airDate)
             }
             return (group.id, episodes)
@@ -408,14 +408,12 @@ final class AppleLocalLibraryStore {
         if refresh { recordedIdentityFileIDs.subtract(group.items.map(\.id)) }
         guard let file = group.items.first else { return }
         if !refresh, metadata[group.id] != nil,
-           !(await metadataResolver.needsRevalidation(file, sources: sourceStore.sources,
-                tmdbKey: settings.tmdbAPIKey, omdbKey: settings.omdbAPIKey)) {
+           !(await metadataResolver.needsRevalidation(file, tmdbKey: settings.tmdbAPIKey, omdbKey: settings.omdbAPIKey)) {
             playbackStore.recordIdentityAliases(await recordIdentityAliases(for: group, resolvedMediaID: metadata[group.id]?.mediaID))
             return
         }
         do {
-            let value = try await metadataResolver.resolve(file, sources: sourceStore.sources,
-                tmdbKey: settings.tmdbAPIKey, omdbKey: settings.omdbAPIKey, refresh: refresh)
+            let value = try await metadataResolver.resolve(file, tmdbKey: settings.tmdbAPIKey, omdbKey: settings.omdbAPIKey, refresh: refresh)
             guard !Task.isCancelled else { return }
             if metadata[group.id] != value {
                 metadata[group.id] = value
@@ -723,7 +721,7 @@ final class AppleLocalLibraryStore {
         "local-file-" + ApplePlaybackIdentity.digest(for: file.id)
     }
 
-    nonisolated static func matchesEpisode(_ file: AppleLibraryItem, episode: AppleStremioEpisode) -> Bool {
+    nonisolated static func matchesEpisode(_ file: AppleLibraryItem, episode: AppleMediaEpisode) -> Bool {
         let parsed = AppleLibraryTitleParser.parse(file)
         if episode.id == fileEpisodeID(file) { return true }
         guard parsed.role == .feature else { return false }
@@ -732,7 +730,7 @@ final class AppleLocalLibraryStore {
         return season == episode.season && parsed.episodeNumbers.contains(number)
     }
 
-    func localFiles(for item: AppleCatalogItem, group: AppleLibrarySeries? = nil, episode: AppleStremioEpisode? = nil) -> [AppleLibraryItem] {
+    func localFiles(for item: AppleCatalogItem, group: AppleLibrarySeries? = nil, episode: AppleMediaEpisode? = nil) -> [AppleLibraryItem] {
         let matches = matchingGroups(item)
         let groups = matches.isEmpty ? group.map { [$0] } ?? [] : matches
         return groups.flatMap { group in
@@ -745,22 +743,22 @@ final class AppleLocalLibraryStore {
             let firstPart = AppleLibraryTitleParser.parse($0).part ?? 1
             let secondPart = AppleLibraryTitleParser.parse($1).part ?? 1
             if firstPart != secondPart { return firstPart < secondPart }
-            let lhs = AppleStremioCandidateRanking.resolution($0.name)
-            let rhs = AppleStremioCandidateRanking.resolution($1.name)
+            let lhs = AppleReleaseName.resolution($0.name)
+            let rhs = AppleReleaseName.resolution($1.name)
             if lhs != rhs { return lhs > rhs }
             return $0.addedAt == $1.addedAt ? $0.id < $1.id : $0.addedAt > $1.addedAt
         }
     }
-    func resumeEpisode(for item: AppleCatalogItem, group: AppleLibrarySeries?, episodes: [AppleStremioEpisode]) -> AppleStremioEpisode? {
+    func resumeEpisode(for item: AppleCatalogItem, group: AppleLibrarySeries?, episodes: [AppleMediaEpisode]) -> AppleMediaEpisode? {
         let matches = matchingGroups(item)
         let candidates = matches.isEmpty ? group.map { [$0] } ?? [] : matches
         let store = playbackStore
         return Self.resumeEpisode(in: candidates, episodes: episodes) { store.progress(for: self.playbackID($0)) }
     }
-    static func resumeEpisode(in groups: [AppleLibrarySeries], episodes: [AppleStremioEpisode],
-                              progress: (AppleLibraryItem) -> ApplePlaybackProgress?) -> AppleStremioEpisode? {
+    static func resumeEpisode(in groups: [AppleLibrarySeries], episodes: [AppleMediaEpisode],
+                              progress: (AppleLibraryItem) -> ApplePlaybackProgress?) -> AppleMediaEpisode? {
         var newest = Date.distantPast
-        var selected: AppleStremioEpisode?
+        var selected: AppleMediaEpisode?
         for group in groups {
             for file in group.items {
                 guard let value = progress(file), value.resumePosition != nil, value.updatedAt > newest else { continue }
@@ -772,21 +770,21 @@ final class AppleLocalLibraryStore {
         }
         return selected
     }
-    nonisolated static func visibleEpisodes(in season: Int?, from episodes: [AppleStremioEpisode]) -> [AppleStremioEpisode] {
-        AppleStremioEpisodePolicy.episodes(in: season, from: episodes)
+    nonisolated static func visibleEpisodes(in season: Int?, from episodes: [AppleMediaEpisode]) -> [AppleMediaEpisode] {
+        AppleMediaEpisodePolicy.episodes(in: season, from: episodes)
             + episodes.filter { $0.id.hasPrefix("local-file-") }
     }
 
-    static func episodes(group: AppleLibrarySeries, mediaID: String, enriched: [AppleStremioEpisode]) -> [AppleStremioEpisode] {
+    static func episodes(group: AppleLibrarySeries, mediaID: String, enriched: [AppleMediaEpisode]) -> [AppleMediaEpisode] {
         var seen = Set<String>()
-        return group.items.flatMap { file -> [AppleStremioEpisode] in
+        return group.items.flatMap { file -> [AppleMediaEpisode] in
             let parsed = AppleLibraryTitleParser.parse(file)
             if parsed.role == .feature, let season = parsed.season, !parsed.episodeNumbers.isEmpty {
                 return parsed.episodeNumbers.compactMap { number in
                     let id = "\(mediaID):\(season):\(number)"
                     guard seen.insert(id).inserted else { return nil }
                     return enriched.first { $0.season == season && $0.episode == number }
-                        ?? AppleStremioEpisode(id: id, title: "Episode \(number)", season: season, episode: number)
+                        ?? AppleMediaEpisode(id: id, title: "Episode \(number)", season: season, episode: number)
                 }
             }
             if parsed.role == .feature, let date = parsed.airDate {
@@ -796,13 +794,13 @@ final class AppleLocalLibraryStore {
                 }
             }
             // A playable filename row is deliberately not a guessed episode.
-            return [AppleStremioEpisode(id: fileEpisodeID(file), title: file.name, releaseInfo: parsed.airDate)]
+            return [AppleMediaEpisode(id: fileEpisodeID(file), title: file.name, releaseInfo: parsed.airDate)]
         }
     }
 
     /// Read the old positional episode key without rewriting watched history or
     /// changing the file identity. A reset on the current row takes precedence.
-    static func completedEpisodeIDs(_ episodes: [AppleStremioEpisode], group: AppleLibrarySeries?,
+    static func completedEpisodeIDs(_ episodes: [AppleMediaEpisode], group: AppleLibrarySeries?,
                                     mediaID: String, store: ApplePlaybackStore) -> Set<String> {
         var completed = store.completedMediaIDs(among: episodes.map(\.id))
         guard let group else { return completed }
@@ -838,7 +836,7 @@ final class AppleLocalLibraryStore {
 
     /// Filename rows have no invented season/number, so the numbered episode
     /// policy excludes them. Keep their displayed order when selecting a row.
-    static func nextFilenameEpisode(in episodes: [AppleStremioEpisode], completedIDs: Set<String>) -> AppleStremioEpisode? {
+    static func nextFilenameEpisode(in episodes: [AppleMediaEpisode], completedIDs: Set<String>) -> AppleMediaEpisode? {
         let files = episodes.filter { $0.id.hasPrefix("local-file-") }
         return files.first { !completedIDs.contains($0.id) } ?? files.first
     }
@@ -935,7 +933,7 @@ final class AppleLocalLibraryStore {
                       fromBeginning: Bool = false, disc: AppleDiscPlaybackChoice? = nil,
                       explicitVersion: Bool = false, confirmedVersionID: String? = nil,
                       continuingPart: Bool = false, automaticFallback: Bool = false,
-                      engineOverride: ApplePlaybackEngineKind? = nil) async throws -> AppleStremioPlayerPresentation {
+                      engineOverride: ApplePlaybackEngineKind? = nil) async throws -> AppleMediaPlayerPresentation {
         var file = requestedFile
         return try await presentation(attempting: &file, sourceStore: sourceStore, settings: settings,
             fromBeginning: fromBeginning, disc: disc, explicitVersion: explicitVersion, confirmedVersionID: confirmedVersionID,
@@ -948,7 +946,7 @@ final class AppleLocalLibraryStore {
                       fromBeginning: Bool = false, disc: AppleDiscPlaybackChoice? = nil,
                       explicitVersion: Bool = false, confirmedVersionID: String? = nil,
                       continuingPart: Bool = false, automaticFallback: Bool = false,
-                      engineOverride: ApplePlaybackEngineKind? = nil) async throws -> AppleStremioPlayerPresentation {
+                      engineOverride: ApplePlaybackEngineKind? = nil) async throws -> AppleMediaPlayerPresentation {
         try Task.checkCancellation()
         var versions = mediaVersions(for: file)
         let store = playbackStore
@@ -1025,7 +1023,7 @@ final class AppleLocalLibraryStore {
         hints.versionOffset = part.flatMap { version?.cumulativePosition(ordinal: $0.ordinal, offset: 0) } ?? 0
         hints.versionDuration = version?.duration
         let title = AppleLibraryTitleParser.parse(file).title
-        let presentation: AppleStremioPlayerPresentation
+        let presentation: AppleMediaPlayerPresentation
         if source.kind == .nas {
             let credentials = try sourceStore.networkCredentials(for: source) ?? AppleSMBCredentials(username: "", password: "")
             let url = try await AppleSMBRangeServer.shared.playbackURL(sourceURL: file.url, credentials: credentials,
@@ -1035,14 +1033,14 @@ final class AppleLocalLibraryStore {
             request.mediaID = itemID
             request.resumePosition = resume
             request.hints = hints
-            presentation = AppleStremioPlayerPresentation(request: request, settings: settings, engineOverride: engineOverride)
+            presentation = AppleMediaPlayerPresentation(request: request, settings: settings, engineOverride: engineOverride)
         } else {
             let root = file.sourceID == Self.downloadsID ? nil : try AppleLibraryBookmark.resolve(source)
             let access = root.map { AppleSecurityScopedAccess(url: $0) }
             defer { withExtendedLifetime(access) {} }
             let prepared = try await ApplePlaybackPreparer().prepareLibraryMedia(sourceURL: file.url, preferredEngine: engineOverride ?? settings.playbackEngine)
             try Task.checkCancellation()
-            presentation = AppleStremioPlayerPresentation(request: ApplePlaybackRequest(url: prepared.url, headers: prepared.requestHeaders,
+            presentation = AppleMediaPlayerPresentation(request: ApplePlaybackRequest(url: prepared.url, headers: prepared.requestHeaders,
                 resumePosition: resume, mediaID: itemID, title: title, sourceKind: .files, hints: hints), settings: settings, securityScopedURL: root, engineOverride: engineOverride)
         }
         let request = presentation.request
@@ -1102,14 +1100,17 @@ struct AppleLocalTitleShelf: View {
         .defaultFocus($focusedItemID, groups.first?.id)
         .task(id: focusedItemID) {
             guard let group = groups.first(where: { $0.id == focusedItemID }) else { return }
-            try? await Task.sleep(for: AppleMetadataPrefetcher.focusDwell)
+            // A poster that keeps focus this long has its title page's details
+            // fetched ahead of the press; a swipe passing over it costs nothing.
+            try? await Task.sleep(for: .milliseconds(200))
             guard !Task.isCancelled else { return }
             await library.resolve(group, sourceStore: sourceStore, settings: settings)
             let item = library.catalogItem(for: group)
-            if let target = AppleMetadataPrefetcher.detailTarget(type: item.type, mediaID: item.mediaID) {
-                await AppleMetadataPrefetcher.warmDetail(target, sources: sourceStore.sources,
-                    preferredSourceID: group.items.first?.sourceID, configuration: settings.tmdbConfiguration)
-            }
+            guard ["movie", "series"].contains(item.type.lowercased()),
+                  let mediaID = ApplePlayGatingPolicy.canonicalMediaID(item.mediaID) else { return }
+            _ = try? await AppleMetadataResolver().resolve(sources: sourceStore.sources,
+                preferredSourceID: group.items.first?.sourceID, type: item.type.lowercased(), mediaID: mediaID,
+                configuration: settings.tmdbConfiguration)
         }
         #endif
     }
@@ -1139,14 +1140,14 @@ struct AppleLocalTitleDestination: View {
                 playbackSources: sourceStore.sources, metadataConfiguration: settings.metadataEnabled ? try? AppleTMDBConfiguration(credential: settings.tmdbAPIKey) : nil,
                 gatewayConfig: settings.gatewayEnabled ? try? AppleTranscodeGatewayConfig(baseURL: settings.gatewayURL,
                     sessionToken: settings.gatewayToken, isEnabled: true) : nil,
-                playbackResolver: AppleStremioPlaybackResolver(), settings: settings,
+                settings: settings,
                 openSettings: openSettings, initialAutoPlay: autoPlay, localGroup: group, localSourceStore: sourceStore,
                 tabToolbar: tabToolbar)
                 .environment(\.appleLibraryFixMatch, { showsFixMatch = true })
                 .environment(\.appleLibraryIsMatched, library.metadata[group.id] != nil)
                 .environment(\.appleLibraryAutomaticMatch, automaticMatchAction)
                 .sheet(isPresented: $showsFixMatch) {
-                    AppleLibraryFixMatchView(group: group, sources: sourceStore.sources, settings: settings)
+                    AppleLibraryFixMatchView(group: group, settings: settings)
                 }
                 .task(id: group.id) {
                     guard library.metadata[group.id] == nil else { return }

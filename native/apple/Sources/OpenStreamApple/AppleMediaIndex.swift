@@ -217,42 +217,6 @@ public actor AppleMediaIndexRepository {
         orderedRecordIDs = Self.makeOrderedRecordIDs(next)
     }
 
-    /// Catalog shelves are a partial listing, unlike complete local-file scans.
-    public func replaceCatalog(instanceID: AppleSource.ID, with incoming: [AppleMediaRecord]) throws {
-        try replaceCatalogs([(instanceID, incoming)])
-    }
-
-    /// Several catalog sources in one write. Discover indexes every add-on
-    /// at launch, and encoding, scrubbing and writing the whole index once
-    /// per add-on was ~1.4 s of CPU on an Apple TV 4K (2026-10-16).
-    public func replaceCatalogs(_ catalogs: [(instanceID: AppleSource.ID, records: [AppleMediaRecord])]) throws {
-        guard !catalogs.isEmpty else { return }
-        loadIfNeeded()
-        var next = recordsByID
-        for (instanceID, incoming) in catalogs {
-            next = Self.projected(next, instanceID: instanceID,
-                                  incoming: Self.catalogIncoming(instanceID: instanceID, incoming: incoming, in: next),
-                                  scanStatus: .complete)
-        }
-        try commit(next, completedScans: catalogs.map(\.instanceID))
-    }
-
-    private static func catalogIncoming(instanceID: AppleSource.ID, incoming: [AppleMediaRecord],
-                                        in records: [String: AppleMediaRecord]) -> [AppleMediaRecord] {
-        let incomingIDs = Set(incoming.map(\.id))
-        let missing = records.values.filter { record in
-            !incomingIDs.contains(record.id) && record.availability.contains {
-                $0.instanceID == instanceID && $0.capability == .resolvable
-            }
-        }
-        let saved = missing.filter { $0.isFavorite || ($0.progress ?? 0) > 0 }
-            .sorted { $0.lastVerified > $1.lastVerified }.prefix(5_000)
-        let recent = missing.filter { !$0.isFavorite && ($0.progress ?? 0) == 0 }
-            .sorted { $0.lastVerified > $1.lastVerified }.prefix(200)
-        let retained = Array(saved) + recent
-        return Array(incoming.prefix(10_000 - retained.count)) + retained
-    }
-
     /// Replaces one instance's projection only after its adapter produced a
     /// complete bounded snapshot. Other instances and user state are kept.
     public func replace(instanceID: AppleSource.ID, with incoming: [AppleMediaRecord], scanStatus: AppleLibraryScanStatus = .complete) throws {
@@ -521,10 +485,6 @@ public enum AppleMediaRecommendationPolicy {
 }
 
 public enum AppleMediaIngestion {
-    public static func catalogRecords(section: AppleCatalogSection, verifiedAt: Date = .now) -> [AppleMediaRecord] {
-        section.items.map { catalogRecord(instanceID: section.sourceID, item: $0, verifiedAt: verifiedAt) }
-    }
-
     public static func catalogRecord(
         instanceID: AppleSource.ID,
         item: AppleCatalogItem,
@@ -532,7 +492,7 @@ public enum AppleMediaIngestion {
     ) -> AppleMediaRecord {
         AppleMediaRecord(
             canonicalID: AppleXtreamReference.parse(item.mediaID) != nil ? item.mediaID
-                : AppleStremioMetadataClient.isIMDBIdentifier(item.mediaID) ? item.mediaID : item.imdbID,
+                : AppleMediaIdentifier.isIMDBIdentifier(item.mediaID) ? item.mediaID : item.imdbID,
             kind: item.type == "series" ? .series : .movie,
             title: item.name,
             year: item.releaseInfo.flatMap { Int($0.prefix(4)) },
@@ -698,12 +658,6 @@ public final class AppleMediaIndexStore {
 
     public func upsert(_ record: AppleMediaRecord) async throws {
         try await repository.upsert(record)
-        setRecords(await repository.records())
-    }
-
-    public func replaceCatalogs(_ catalogs: [(instanceID: AppleSource.ID, records: [AppleMediaRecord])]) async throws {
-        guard !catalogs.isEmpty else { return }
-        try await repository.replaceCatalogs(catalogs)
         setRecords(await repository.records())
     }
 

@@ -72,7 +72,9 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
     /// Removed identities stay removed when an offline device or old backup returns.
     /// Adding the provider again creates a new UUID; edits never clear a deletion.
     public var sourceTombstones: [UUID: Date]
-    var preservedSourcePayloads: [ApplePreservedJSON] = []
+    /// Retired sources (`AppleRetiredSource`) this copy carried and dropped
+    /// on reading; more than none means the copy should be written again.
+    private(set) var retiredSourceCount = 0
     public var settings: [String: Data]
     public var playbackProgress: [String: ApplePlaybackProgress]
     /// Finished titles and when, keyed like `playbackProgress`. Snapshots
@@ -132,14 +134,13 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
         savedAt = try container.decode(Date.self, forKey: .savedAt)
         sourceTombstones = try container.decodeIfPresent([UUID: Date].self, forKey: .sourceTombstones) ?? [:]
         sources = []
-        for payload in try container.decode([ApplePreservedJSON].self, forKey: .sources) {
+        for payload in try container.decode([AppleJSONValue].self, forKey: .sources) {
             let data = try JSONEncoder().encode(payload)
             if let source = try? JSONDecoder().decode(AppleSource.self, from: data) { sources.append(source) }
             else {
-                guard case .object(let fields) = payload, case .string(let kind) = fields["kind"],
-                      AppleSourceKind(rawValue: kind) == nil, let id = payload.sourceID,
-                      UUID(uuidString: id) != nil else { throw AppleConfigurationError.invalidFile }
-                preservedSourcePayloads.append(payload)
+                guard let fields = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      AppleRetiredSource(fields: fields) != nil else { throw AppleConfigurationError.invalidFile }
+                retiredSourceCount += 1
             }
         }
         settings = try container.decode([String: Data].self, forKey: .settings)
@@ -166,10 +167,7 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
         try container.encode(formatVersion, forKey: .formatVersion)
         try container.encode(savedAt, forKey: .savedAt)
         if !sourceTombstones.isEmpty { try container.encode(sourceTombstones, forKey: .sourceTombstones) }
-        let sourcePayloads = try sources.map { source in
-            try JSONDecoder().decode(ApplePreservedJSON.self, from: JSONEncoder().encode(source))
-        }
-        try container.encode(sourcePayloads + preservedSourcePayloads, forKey: .sources)
+        try container.encode(sources, forKey: .sources)
         try container.encode(settings, forKey: .settings)
         try container.encode(playbackProgress, forKey: .playbackProgress)
         if !playbackTerminals.isEmpty { try container.encode(playbackTerminals, forKey: .playbackTerminals) }
@@ -185,7 +183,7 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
 
     public func validate() throws {
         guard formatVersion == 1 else { throw AppleConfigurationError.unsupportedVersion }
-        let sourceIDs = sources.map(\.id) + preservedSourcePayloads.compactMap { $0.sourceID.flatMap(UUID.init(uuidString:)) }
+        let sourceIDs = sources.map(\.id)
         guard Set(sourceIDs).count == sourceIDs.count,
               Set(watchlist.map(\.id)).count == watchlist.count else { throw AppleConfigurationError.invalidFile }
     }
@@ -199,11 +197,6 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
         }
         result.sourceTombstones = sourceTombstones.merging(incoming.sourceTombstones) { max($0, $1) }
         result.sources = combined.filter { result.sourceTombstones[$0.id] == nil }
-        result.preservedSourcePayloads = Self.mergedPayloads(preservedSourcePayloads, incoming.preservedSourcePayloads)
-            .filter { payload in
-                guard let id = payload.sourceID.flatMap(UUID.init(uuidString:)) else { return true }
-                return result.sourceTombstones[id] == nil
-            }
         // Resume position: the freshest of the two per title, so a snapshot
         // written before this device's last play never winds it back (V6).
         result.playbackTerminals = playbackTerminals.merging(incoming.playbackTerminals) { $0.merging($1) }
@@ -389,48 +382,26 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
         return parts.url ?? URL(string: "https://source.invalid/")!
     }
 
-    /// An unconfigured add-on's manifest URL is the same for everyone, so it
-    /// travels whole and restores signed in (`AppleAddonURLSecretPolicy`).
-    static func keepsFullAddress(_ source: AppleSource) -> Bool {
-        #if OPENSTREAM_ADDONS
-
-        source.isAddon && !source.needsSignIn && source.credentialReference == nil
-            && source.epgURL == nil && !AppleAddonURLSecretPolicy.isSecret(source.url)
-
-        #else
-        false
-        #endif
-    }
-
     static func portableSource(_ source: AppleSource) -> AppleSource {
         var copy = source
-        if keepsFullAddress(source) {
-            copy.needsSignIn = false
-        } else {
-            copy.url = publicAddress(source.url)
-            copy.needsSignIn = source.needsSignIn || source.credentialReference != nil
-                || source.transportReference != nil || source.url != copy.url || source.epgURL != nil
-        }
+        copy.url = publicAddress(source.url)
+        copy.needsSignIn = source.needsSignIn || source.credentialReference != nil
+            || source.transportReference != nil || source.url != copy.url || source.epgURL != nil
         copy.credentialReference = nil
         copy.transportReference = nil
         copy.bookmarkData = nil
         copy.legacyUsername = nil
         copy.legacyPassword = nil
         copy.epgURL = nil
-        // The add-on's logo shows on the restored row; one served from under a
-        // configured add-on's secret path stays behind.
-        #if OPENSTREAM_ADDONS
-        if let logo = source.logoURL, AppleAddonURLSecretPolicy.isSecretAsset(logo) { copy.logoURL = nil }
-        #endif
         copy.validationSummary = nil
         copy.validationFailureSummary = nil
         return copy
     }
 }
 
-/// Round-trips source kinds this build cannot use, including future versions.
-/// No interpretation of their protocol, catalogs or resource URLs takes place.
-indirect enum ApplePreservedJSON: Codable, Equatable, Sendable {
+/// Any JSON value, so each saved source can be read on its own and a retired
+/// one skipped instead of failing the whole list.
+indirect enum AppleJSONValue: Codable, Equatable, Sendable {
     case object([String: Self]), array([Self]), string(String), number(Double), bool(Bool), null
     init(from decoder: Decoder) throws {
         let c = try decoder.singleValueContainer()
@@ -451,24 +422,5 @@ indirect enum ApplePreservedJSON: Codable, Equatable, Sendable {
         case .bool(let v): try c.encode(v)
         case .null: try c.encodeNil()
         }
-    }
-    func stringField(_ key: String) -> String? {
-        guard case .object(let fields) = self, case .string(let value) = fields[key] else { return nil }
-        return value
-    }
-    var sourceID: String? {
-        guard case .object(let fields) = self, case .string(let id) = fields["id"] else { return nil }
-        return id
-    }
-}
-
-extension AppleConfigurationSnapshot {
-    static func mergedPayloads(_ existing: [ApplePreservedJSON], _ incoming: [ApplePreservedJSON]) -> [ApplePreservedJSON] {
-        var result = existing
-        for payload in incoming {
-            if let id = payload.sourceID, let index = result.firstIndex(where: { $0.sourceID == id }) { result[index] = payload }
-            else if !result.contains(payload) { result.append(payload) }
-        }
-        return result
     }
 }

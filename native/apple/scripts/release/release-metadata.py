@@ -11,12 +11,23 @@ import zipfile
 from pathlib import Path
 
 
+# OpenStream plays media the user owns; public text never mentions add-ons (scripts/check-no-addons-in-release.sh).
+ADDON_WORDS = re.compile(r'stremio|strem[.]io|torrent|debrid|premiumize|torbox|magnet:|infohash|cinemeta|metahub|add-?on|manifest[.]json', re.I)
+
+
+def require_no_addon_words(text, label):
+    if ADDON_WORDS.search(text):
+        raise SystemExit(f'FAIL: {label} mentions add-ons; say what OpenStream plays (media you own)')
+
+
 def notes(checkout, version, build):
     changelog = (checkout / 'CHANGELOG.md').read_text()
     match = re.search(r'^## \[' + re.escape(f'{version} ({build})') + r'\][^\n]*\n(.*?)(?=^## |\Z)', changelog, re.M | re.S)
     if not match:
         raise SystemExit('FAIL: matching CHANGELOG version/build section is missing')
-    return re.split(r'^\[[^\n]+\]:', match.group(1), maxsplit=1, flags=re.M)[0].strip() + '\n'
+    text = re.split(r'^\[[^\n]+\]:', match.group(1), maxsplit=1, flags=re.M)[0].strip() + '\n'
+    require_no_addon_words(text, f'CHANGELOG {version} ({build})')
+    return text
 
 
 def verify_info(info, version, build, label):
@@ -106,6 +117,7 @@ else:
         feed_path.write_text(json.dumps(feed, indent=2) + '\n')
         readme = checkout / 'README.md'
         text = readme.read_text()
+        require_no_addon_words(text, 'public README.md')
         text = re.sub(r'https://img[.]shields[.]io/(?:github/v/release/orgista/openstream-apple|badge/release-[^)]*)',
                       f'https://img.shields.io/badge/release-{version}%20%28{build}%29-FF3366', text, count=1)
         readme.write_text(text)

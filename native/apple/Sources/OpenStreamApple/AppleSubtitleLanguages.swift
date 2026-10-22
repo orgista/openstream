@@ -1,7 +1,7 @@
 import Foundation
 
-/// The language vocabulary the captions menu works in. Add-ons report `lang`
-/// in whatever shape they like ("en", "eng", "pt-BR", "English"), so every
+/// The language vocabulary the captions menu works in. Files and servers name
+/// languages in whatever shape they like ("en", "eng", "pt-BR", "English"), so every
 /// value is folded to the three-letter code OpenSubtitles uses before it is
 /// compared with the viewer's preferred languages.
 public enum AppleSubtitleLanguages {
@@ -69,7 +69,7 @@ public enum AppleSubtitleLanguages {
     ]
 
     /// Two-letter to three-letter, for the codes above plus the alternates
-    /// add-ons still send ("chi", "fre", "ger", "dut", "gre", "per", "rum").
+    /// older files still use ("chi", "fre", "ger", "dut", "gre", "per", "rum").
     static let alpha2ToAlpha3: [String: String] = [
         "ar": "ara", "bn": "ben", "bg": "bul", "ca": "cat", "cs": "ces",
         "da": "dan", "de": "deu", "el": "ell", "en": "eng", "et": "est",
@@ -110,7 +110,7 @@ public enum AppleSubtitleLanguages {
         return canonical.uppercased()
     }
 
-    /// Folds an add-on `lang` value, a BCP 47 tag or a language name onto a
+    /// Folds a language code, a BCP 47 tag or a language name onto a
     /// canonical three-letter code. Returns `nil` when nothing matches.
     public static func normalized(_ value: String) -> String? {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -130,16 +130,6 @@ public enum AppleSubtitleLanguages {
         if let match = names.keys.first(where: { displayName(for: $0).lowercased() == trimmed }) { return match }
 
         return nil
-    }
-
-    /// The resource name an add-on manifest declares when it serves subtitles.
-    static let subtitlesResource = "subtitles"
-
-    /// Whether a manifest's resource list declares subtitles, which is the
-    /// only case where a source is offered the subtitle language picker.
-    public static func declaresSubtitles(resources: [String]) -> Bool {
-        resources.contains { $0.trimmingCharacters(in: .whitespacesAndNewlines)
-            .caseInsensitiveCompare(subtitlesResource) == .orderedSame }
     }
 
     /// The device's primary language as a canonical code: the first of the

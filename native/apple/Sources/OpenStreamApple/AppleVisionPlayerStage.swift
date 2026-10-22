@@ -87,7 +87,7 @@ enum AppleVisionPlayerWindowPolicy {
 @MainActor
 @Observable
 final class AppleVisionPlayerStage {
-    private(set) var presentation: AppleStremioPlayerPresentation?
+    private(set) var presentation: AppleMediaPlayerPresentation?
     @ObservationIgnored private var onDismiss: (() -> Void)?
     @ObservationIgnored weak var scene: UIWindowScene?
     /// The window's size before the player took it over.
@@ -100,7 +100,7 @@ final class AppleVisionPlayerStage {
 
     /// Shows `presentation`, replacing any player already up (whose page is
     /// told it closed).
-    func present(_ presentation: AppleStremioPlayerPresentation, onDismiss: @escaping () -> Void) {
+    func present(_ presentation: AppleMediaPlayerPresentation, onDismiss: @escaping () -> Void) {
         guard self.presentation?.id != presentation.id else { return }
         let replaced = self.onDismiss
         let wasPresenting = isPresenting
@@ -196,7 +196,7 @@ private struct AppleVisionPlayerStageHost: ViewModifier {
                 if let presentation = stage.presentation {
                     // Black is the bottom layer: the window's glass would
                     // show through anything clear.
-                    AppleStremioPlayerView(presentation: presentation)
+                    AppleMediaPlayerView(presentation: presentation)
                         .id(presentation.id)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background(Color.black.ignoresSafeArea())
@@ -245,7 +245,7 @@ private struct AppleVisionWindowReader: UIViewRepresentable {
 /// The page's end: hands the presentation to the window's stage and clears
 /// the page's binding when the player closes.
 struct AppleVisionPlayerStagePresenter: ViewModifier {
-    @Binding var presentation: AppleStremioPlayerPresentation?
+    @Binding var presentation: AppleMediaPlayerPresentation?
     @Environment(AppleVisionPlayerStage.self) private var stage: AppleVisionPlayerStage?
     /// A window with no stage (a debug fixture window) gets its own, over
     /// the presenting view.

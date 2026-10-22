@@ -3,12 +3,12 @@ import Testing
 @testable import OpenStreamApple
 
 @Test func libraryReleaseNamesAndOwnerCases() {
-    let owner = AppleLibraryTitleParser.parse(name: "[ Torrent911.lol ] Small.Things.Like.These.2024.1080p.BluRay.x265.HDR.DV.Atmos.mkv")
+    let owner = AppleLibraryTitleParser.parse(name: "[ Fixture911.lol ] Small.Things.Like.These.2024.1080p.BluRay.x265.HDR.DV.Atmos.mkv")
     #expect(owner.title == "Small Things Like These")
     #expect(owner.year == 2024)
     #expect(owner.kind == .movie)
     // The screenshot clips both names; cover the visible prefix and the hash shape.
-    #expect(AppleLibraryTitleParser.parse(name: "[ Torrent911.lol ] Small.Thin…").title == "Small Thin…")
+    #expect(AppleLibraryTitleParser.parse(name: "[ Fixture911.lol ] Small.Thin…").title == "Small Thin…")
     let hash = "7a11e36cfd6d49bb97d90123456789ab.mkv"
     let recovered = AppleLibraryTitleParser.parse(name: hash, parentPath: "Movies/Inception (2010)")
     #expect(recovered.title == "Inception")
@@ -69,7 +69,7 @@ private func libraryTestItem(_ path: String, size: Int64 = 1, source: UUID = UUI
 /// Owner 2026-09-15: "1992 still does not have album art".
 ///
 /// `movies/1992 (2024)/1992.2024.2160p…mkv` parses correctly to title "1992",
-/// year 2024. Cinemeta's `tt4959750` is plainly the same film — Tyrese Gibson,
+/// year 2024. The provider's `tt4959750` is plainly the same film — Tyrese Gibson,
 /// Ray Liotta, Scott Eastwood, `released: 2024-08-30` — but its `releaseInfo`
 /// carries the production year, 2022. Requiring the years to be equal threw
 /// away a correct match and left the card blank.
@@ -126,25 +126,25 @@ private actor LibraryLookupProbe {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
     let probe = LibraryLookupProbe()
-    let resolver = AppleLibraryMetadataResolver(directory: root) { title, _, _, _ in try await probe.lookup(title) }
+    let resolver = AppleLibraryMetadataResolver(directory: root) { title, _, _ in try await probe.lookup(title) }
     let source = UUID()
     let item = libraryTestItem("Inception.2010.mkv", source: source)
-    _ = try await resolver.resolve(item, sources: [], tmdbKey: "", omdbKey: "")
-    let reopened = AppleLibraryMetadataResolver(directory: root) { title, _, _, _ in try await probe.lookup(title) }
-    _ = try await reopened.resolve(item, sources: [], tmdbKey: "", omdbKey: "")
+    _ = try await resolver.resolve(item, tmdbKey: "", omdbKey: "")
+    let reopened = AppleLibraryMetadataResolver(directory: root) { title, _, _ in try await probe.lookup(title) }
+    _ = try await reopened.resolve(item, tmdbKey: "", omdbKey: "")
     #expect(await probe.calls == 1)
-    _ = try await resolver.resolve(libraryTestItem(item.relativePath, size: 2, source: source), sources: [], tmdbKey: "", omdbKey: "")
+    _ = try await resolver.resolve(libraryTestItem(item.relativePath, size: 2, source: source), tmdbKey: "", omdbKey: "")
     #expect(await probe.calls == 2)
-    _ = try await resolver.resolve(libraryTestItem(item.relativePath), sources: [], tmdbKey: "", omdbKey: "")
+    _ = try await resolver.resolve(libraryTestItem(item.relativePath), tmdbKey: "", omdbKey: "")
     #expect(await probe.calls == 3)
     try await withThrowingTaskGroup(of: Void.self) { group in
         for index in 0..<12 {
-            group.addTask { _ = try await resolver.resolve(libraryTestItem("Movie \(index).mkv", source: source), sources: [], tmdbKey: "", omdbKey: "") }
+            group.addTask { _ = try await resolver.resolve(libraryTestItem("Movie \(index).mkv", source: source), tmdbKey: "", omdbKey: "") }
         }
         try await group.waitForAll()
     }
     #expect(await probe.maximum == 4)
-    let cancelled = Task { try await resolver.resolve(libraryTestItem("Cancelled.mkv"), sources: [], tmdbKey: "", omdbKey: "") }
+    let cancelled = Task { try await resolver.resolve(libraryTestItem("Cancelled.mkv"), tmdbKey: "", omdbKey: "") }
     cancelled.cancel()
     await #expect(throws: CancellationError.self) { try await cancelled.value }
     let dates = try await resolver.datedItems([item], sourceID: source)
@@ -192,7 +192,7 @@ private actor LibraryLookupProbe {
     #expect(stamped.title == "Hey Arnold The Movie")
     #expect(stamped.year == 2002)
 
-    #expect(AppleLibraryTitleParser.parse(name: "Torrent911.lol - Dune.2021.1080p.mkv").title == "Dune")
+    #expect(AppleLibraryTitleParser.parse(name: "Fixture911.lol - Dune.2021.1080p.mkv").title == "Dune")
     // A title that merely contains a dot-word is not a tracker stamp.
     #expect(AppleLibraryTitleParser.parse(name: "W.A.R - The Movie 2011 1080p.mkv").title.contains("W A R"))
 }

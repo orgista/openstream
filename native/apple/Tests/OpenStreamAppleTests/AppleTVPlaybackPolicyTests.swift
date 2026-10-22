@@ -9,7 +9,7 @@ struct AppleTVPlaybackPolicyTests {
             url: URL(string: url)!,
             isLive: isLive,
             mediaID: "tt0111161",
-            sourceKind: .stremio,
+            sourceKind: .mediaServer,
             hints: ApplePlaybackRequest.Hints(notWebReady: notWebReady, filename: filename)
         )
     }
@@ -29,9 +29,9 @@ struct AppleTVPlaybackPolicyTests {
     }
 
     @Test func filenameHintWinsOverTheURL() {
-        let hinted = request("https://debrid.example/dl/abc123", filename: "Movie.2024.1080p.mkv")
+        let hinted = request("https://server.example/dl/abc123", filename: "Movie.2024.1080p.mkv")
         #expect(AppleTVPlaybackPresentationPolicy.engineKind(for: hinted, preferred: .openStream, isTV: true) == .openStream)
-        let mp4Hint = request("https://debrid.example/dl/abc123", filename: "Movie.2024.1080p.mp4")
+        let mp4Hint = request("https://server.example/dl/abc123", filename: "Movie.2024.1080p.mp4")
         #expect(AppleTVPlaybackPresentationPolicy.engineKind(for: mp4Hint, preferred: .openStream, isTV: true) == .native)
         #expect(AppleTVPlaybackPresentationPolicy.containerExtension(url: URL(string: "https://x/y.mp4")!, filename: "z.mkv") == "mkv")
         #expect(AppleTVPlaybackPresentationPolicy.containerExtension(url: URL(string: "https://x/y")!, filename: nil) == nil)
@@ -137,7 +137,7 @@ struct AppleTVPlaybackPolicyTests {
     }
 
     @Test func signatureIsDerivedFromTheRequest() {
-        let hinted = Policy.StreamSignature(request: request("https://debrid.example/dl/abc123", filename: "Movie.2024.2160p.mkv", notWebReady: true))
+        let hinted = Policy.StreamSignature(request: request("https://server.example/dl/abc123", filename: "Movie.2024.2160p.mkv", notWebReady: true))
         #expect(hinted.container == "mkv")
         #expect(hinted.notWebReady)
         #expect(!hinted.isNativeContainer)

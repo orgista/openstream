@@ -3,8 +3,8 @@ import Foundation
 import Testing
 @testable import OpenStreamApple
 
-/// Apple TV check of 630db1d (2026-10-01): Resume label, stock-player
-/// source choice, the player's title line, and seed-sim's extra add-on.
+/// Apple TV check of 630db1d (2026-10-01): Resume label, the player's title
+/// line and stall recovery.
 @MainActor
 struct AppleTVCheck630db1dTests {
     // MARK: 1. The title page finds a position saved under another key
@@ -51,24 +51,6 @@ struct AppleTVCheck630db1dTests {
         #expect(key == savedKey)
     }
 
-    // MARK: 4. The stock player gets a release it can open
-
-    @Test func stockPlayerRanksAContainerItOpensFirst() {
-        let candidates = [
-            "Show.S01E02.2160p.DV.HEVC.DDP5.1.mkv",
-            "Show.S01E02.1080p.WEB.H264.AAC.mp4",
-        ].map { AppleStremioHTTPPlaybackCandidate(title: $0, sourceURL: URL(string: "https://fixture.example/\($0)")!,
-                                                  filename: $0) }
-        let device = AppleStreamDeviceCapabilities(supportsHDR: true, supportsDolbyVision: true)
-        let automatic = AppleStremioCandidateRanking.playbackOrder(candidates, choice: .automatic, device: device)
-        #expect(automatic.first?.filename?.hasSuffix(".mkv") == true)
-        let stock = AppleStremioCandidateRanking.playbackOrder(candidates, choice: .automatic, device: device,
-                                                               stockPlayerOnly: true)
-        #expect(stock.map { $0.filename ?? "" } == [
-            "Show.S01E02.1080p.WEB.H264.AAC.mp4", "Show.S01E02.2160p.DV.HEVC.DDP5.1.mkv",
-        ])
-    }
-
     // MARK: 6. The player names the title, not the file's own tag
 
     @Test func stockPlayerTitleComesFromTheTitlePage() throws {
@@ -111,7 +93,7 @@ struct AppleTVCheck630db1dTests {
             secondsStill: 12, secondsSinceLastNudge: NativePlaybackEngine.stallNudgeCooldown))
     }
 
-    // MARK: Re-check of 5298e1c: subtitle line, Native order and fallback depth
+    // MARK: Re-check of 5298e1c: subtitle line and fallback depth
 
     @Test func stockPlayerLineAboveTheTitleIsTheTitlePagesNotTheFiles() throws {
         let film = AppleStockPlayerMetadata.items(title: "Mad Max: Fury Road", year: 2015)
@@ -124,22 +106,6 @@ struct AppleTVCheck630db1dTests {
         #expect(film.filter { $0.value is Date }.count == AppleStockPlayerMetadata.dateIdentifiers.count)
         let episode = AppleStockPlayerMetadata.items(title: "S51, E7", subtitle: "Saturday Night Live")
         #expect(episode.first { $0.identifier == .iTunesMetadataTrackSubTitle }?.value as? String == "Saturday Night Live")
-    }
-
-    @Test func nativeEnginePutsAnExplicitMP4BeforeUnknownContainers() {
-        let names = ["SNL.S51E07.1080p.WEB.h264-A", "SNL.S51E07.720p.WEB.h264-B", "SNL.S51E07.1080p.HEVC-C",
-                     "SNL.S51E07.2160p.mkv", "SNL.S51E07.720p.WEB.H264.mp4"]
-        let candidates = names.map { AppleStremioHTTPPlaybackCandidate(title: $0,
-            sourceURL: URL(string: "https://fixture.example/\($0)")!, filename: $0) }
-        let device = AppleStreamDeviceCapabilities(supportsHDR: true, supportsDolbyVision: true)
-        let stock = AppleStremioCandidateRanking.playbackOrder(candidates, choice: .automatic, device: device,
-                                                               stockPlayerOnly: true)
-        #expect(stock.first?.filename == "SNL.S51E07.720p.WEB.H264.mp4")
-        #expect(stock.last?.filename == "SNL.S51E07.2160p.mkv")
-        // The MP4 named only in the URL's path counts too.
-        let opaque = AppleStremioHTTPPlaybackCandidate(title: "SNL S51E07",
-            sourceURL: URL(string: "https://fixture.example/dl/SNL.S51E07.mp4/abc123")!, filename: nil)
-        #expect(AppleStremioCandidateRanking.traits(of: opaque).container == .mp4)
     }
 
     @Test func nativeEngineTriesSixStreamsBeforeGivingUp() {

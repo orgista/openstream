@@ -40,8 +40,6 @@ public struct ApplePlaybackFailure: Error, Equatable, LocalizedError, Sendable {
     public let kind: Kind
     public let message: String
     /// The HTTP status the origin answered with, when the failure carries one.
-    /// `AppleStreamServiceFailureScope` reads it to tell a service that is down
-    /// (5xx) from one missing file (404/410).
     public let httpStatus: Int?
     /// The URL loading error underneath, when there was one (no route to the
     /// host, DNS failure, timeout).
@@ -90,46 +88,10 @@ public struct ApplePlaybackFailure: Error, Equatable, LocalizedError, Sendable {
         }
         if let failure = error as? ApplePlaybackFailure { return failure }
 
-        if let resolution = error as? AppleStremioPlaybackResolutionError {
-            switch resolution {
-            case .providerFailure(let failure):
-                return failure
-            case .noStreams:
-                return .init(
-                    kind: .unavailable,
-                    message: "This catalog provides details only. Add an enabled stream source in Settings to play this title."
-                )
-            case .unsupportedOnly, .externalDemuxRequired, .noCompatibleHTTPStream:
-                return .init(
-                    kind: .unsupportedMedia,
-                    message: "The available source did not return an Apple-compatible stream. Try another stream source."
-                )
-            case .gatewayUnavailable:
-                return .init(
-                    kind: .network,
-                    message: "This stream could not be prepared for playback."
-                )
-            }
-        }
-
         // Every source for the title was ruled out; asking again rules them
         // out again, so this is not a player fault worth a retry.
         if let library = error as? AppleLibrarySourceError, library == .noMedia {
             return .init(kind: .unavailable, message: library.localizedDescription)
-        }
-
-        if let stremio = error as? AppleStremioPlaybackError {
-            switch stremio {
-            case .requestFailed(let status) where status == 401 || status == 403:
-                return .init(kind: .authentication, message: "The stream add-on rejected this request (HTTP \(status)).",
-                             httpStatus: status)
-            case .requestFailed(let status):
-                return .init(kind: .network, message: "The stream add-on returned HTTP \(status).", httpStatus: status)
-            case .invalidPayload, .invalidMediaIdentity, .invalidSource:
-                return .init(kind: .unavailable, message: stremio.localizedDescription)
-            case .nonHTTPResponse, .insecureRedirect, .responseTooLarge:
-                return .init(kind: .network, message: stremio.localizedDescription)
-            }
         }
 
         if let iptv = error as? AppleIPTVError {
@@ -361,9 +323,6 @@ public final class ApplePlaybackCoordinator {
     /// observes `engine.avPlayer` directly.
     public var progressWriter: (@MainActor (Double, Double) -> Void)?
 
-    /// Fetches add-on subtitle files for the request's media identity. Injected
-    /// by tests; the default asks every enabled add-on that offers subtitles.
-    public var externalSubtitleFetcher: (@Sendable (AppleExternalSubtitleQuery) async -> [AppleExternalSubtitleTrack])?
     private var externalSubtitleTask: Task<Void, Never>?
     private var librarySubtitles = AppleLibrarySubtitleService()
 
@@ -380,11 +339,6 @@ public final class ApplePlaybackCoordinator {
     /// OpenStream engine itself; tests switch it on for a fake engine.
     @ObservationIgnored var retriesFailedEngineOpen: Bool
     @ObservationIgnored var engineOpenRetryDelay: Duration = AppleEngineOpenRetryPolicy.delay
-    /// The attempt (`generation`) already turned away as an error clip, so it
-    /// is failed once however many events report its length.
-    private var placeholderRejectedAttempt: Int?
-    /// Which stream services failed as a whole recently. Injected by tests.
-    var serviceHealth: AppleStreamServiceHealth = .shared
 
     // MARK: - Display sleep
 
@@ -552,8 +506,7 @@ public final class ApplePlaybackCoordinator {
         // The head of the list, with what decides the stock player's order.
         for (index, candidate) in ([request] + fallbackCandidates).prefix(8).enumerated() {
             appleTrace("candidate \(index + 1): file=\(candidate.hints.filename.map { String($0.suffix(40)) } ?? "-") "
-                + "ext=\(AppleTVPlaybackPresentationPolicy.containerExtension(url: candidate.url, filename: candidate.hints.filename) ?? "-") "
-                + "mp4InPath=\(AppleStremioCandidateRanking.urlNamesMPEG4(candidate.url))")
+                + "ext=\(AppleTVPlaybackPresentationPolicy.containerExtension(url: candidate.url, filename: candidate.hints.filename) ?? "-")")
         }
         var opens = fallbackCandidates.filter(engineOpens)
         // On the stock player a stream that names an MP4/M4V/MOV/HLS goes
@@ -780,69 +733,23 @@ public final class ApplePlaybackCoordinator {
 
     // MARK: - External subtitles
 
-    /// Discover alongside playback, but attach only after load has reset the
-    /// engine's tracks. Siblings arrive first and keep their IDs when add-ons land.
+    /// Discover sidecar files alongside playback, but attach only after load
+    /// has reset the engine's tracks.
     private func startExternalSubtitles(
         for request: ApplePlaybackRequest, attempt: Int, load: Task<Void, any Error>
     ) {
         externalSubtitleTask?.cancel()
         externalSubtitleTask = nil
         guard !request.isLive else { return }
-        let query = AppleExternalSubtitleQuery(request: request)
-        let video = request.hints.libraryFileURL ?? (request.url.isFileURL ? request.url : nil)
-        guard query != nil || video != nil else { return }
-        let fetcher = externalSubtitleFetcher
+        guard let video = request.hints.libraryFileURL ?? (request.url.isFileURL ? request.url : nil) else { return }
         let library = librarySubtitles
         let engine = self.engine
         externalSubtitleTask = Task { @MainActor [weak self] in
-            let siblings = if let video { await library.tracks(for: video) } else { [AppleExternalSubtitleTrack]() }
+            let siblings = await library.tracks(for: video)
             do { try await load.value } catch { return }
             guard let self, !Task.isCancelled, self.generation == attempt else { return }
             engine.addExternalSubtitleTracks(siblings)
-            guard let query else { return }
-            let tracks: [AppleExternalSubtitleTrack]
-            if let fetcher {
-                tracks = await fetcher(query)
-            } else {
-                tracks = await AppleExternalSubtitleService.shared.tracks(
-                    for: query, sources: AppleSourceStore().sources,
-                    preferredLanguages: AppleSubtitleLanguages.storedPreferredLanguages())
-            }
-            guard !Task.isCancelled, self.generation == attempt else { return }
-            engine.addExternalSubtitleTracks(tracks)
         }
-    }
-
-    // MARK: - Error clips
-
-    /// Whether what is playing is a provider's error clip rather than the
-    /// title: far shorter than the title's known runtime. The transport
-    /// overlay reads this so it never offers or starts the next episode.
-    public var isPlaceholderPlayback: Bool {
-        guard let request = lastRequest, !request.isLive else { return false }
-        return AppleStreamPlaceholderPolicy.isPlaceholder(duration: engine.duration,
-                                                          expectedRuntime: request.hints.expectedRuntime)
-    }
-
-    /// The runtime is known but the stream's length is not yet.
-    private func awaitsPlaceholderCheck(_ request: ApplePlaybackRequest) -> Bool {
-        !request.isLive && request.hints.expectedRuntime != nil && engine.duration == nil
-    }
-
-    /// Turns an error clip away as a failed source, once per attempt: its
-    /// progress is dropped unsaved and the next candidate is tried.
-    private func rejectsPlaceholder(_ request: ApplePlaybackRequest) -> Bool {
-        guard isPlaceholderPlayback, lastRequest == request else { return false }
-        if placeholderRejectedAttempt == generation { return true }
-        placeholderRejectedAttempt = generation
-        appleTrace("playback: \(Int(engine.duration ?? 0)) s stream for a \(Int((request.hints.expectedRuntime ?? 0) / 60)) min title — error clip, trying the next source")
-        progressCoordinator?.stopObserving(saveCurrentProgress: false)
-        progressCoordinator = nil
-        surfaceProgressIdentity = nil
-        engine.pause()
-        cancelTimeout()
-        scheduleFailure(ApplePlaybackFailure(kind: .player, message: AppleStreamPlaceholderPolicy.failureMessage))
-        return true
     }
 
     // MARK: - Candidate fallback
@@ -897,10 +804,7 @@ public final class ApplePlaybackCoordinator {
             ApplePlaybackFailureHistory.shared.record(lastRequest.url)
             onSourceFailure?(lastRequest)
         }
-        if let lastRequest { noteServiceFailure(failure, request: lastRequest) }
-        // A service that is down fails every one of its streams the same way,
-        // so the next attempt goes to another service while one is left.
-        if shouldFallBack(for: failure), let next = nextFallbackCandidate(where: isServiceHealthy) {
+        if shouldFallBack(for: failure), let next = nextFallbackCandidate(where: { _ in true }) {
             cancelTimeout()
             cancelObservation()
             showFallbackNotice()
@@ -983,21 +887,6 @@ public final class ApplePlaybackCoordinator {
         return next
     }
 
-    private func isServiceHealthy(_ request: ApplePlaybackRequest) -> Bool {
-        !serviceHealth.isUnhealthy(request.hints.serviceKey)
-    }
-
-    /// A failure that says the whole service is down (not one missing file,
-    /// not a codec) marks that service, so its other streams wait until every
-    /// other service has had a turn, here and on the next play.
-    private func noteServiceFailure(_ failure: ApplePlaybackFailure, request: ApplePlaybackRequest) {
-        guard let key = request.hints.serviceKey, AppleStreamServiceFailureScope.of(failure) == .service else { return }
-        serviceHealth.recordFailure(key)
-        let waiting = fallbackCandidates.count(where: { $0.hints.serviceKey == key })
-        appleTrace("service \(AppleStreamServiceKey.traceName(key)) looks down (\(failure.kind)); "
-            + "\(waiting) more of its streams wait behind other services")
-    }
-
     private func clearFallback() {
         fallbackCandidates = []
         fallbackAttempted = 0
@@ -1044,9 +933,8 @@ public final class ApplePlaybackCoordinator {
         case .tracks:
             applyTrackCarryOver()
         case .duration:
-            if rejectsPlaceholder(request) { return }
-            // The length is known and is the title's: from here a failure is
-            // the stream's, not a reason to try another source.
+            // The length is known: from here a failure is the stream's, not a
+            // reason to try another source.
             if phase == .playing { clearFallback() }
         case .failure(let failure):
             if let failure {
@@ -1056,7 +944,7 @@ public final class ApplePlaybackCoordinator {
     }
 
     /// Applies whatever part of `trackCarryOver` this stream's tracks can
-    /// satisfy. Subtitles from add-ons arrive in a later `.tracks` pass, so a
+    /// satisfy. Sidecar subtitles arrive in a later `.tracks` pass, so a
     /// language not found yet stays pending.
     private func applyTrackCarryOver() {
         guard var carry = trackCarryOver else { return }
@@ -1094,16 +982,13 @@ public final class ApplePlaybackCoordinator {
             // The first frame. Everything before this is the wait the owner
             // sees as a spinner, so it is the one timestamp worth having.
             if case .playing = phase {} else { appleTrace("first frame, route=\(route)") }
-            if rejectsPlaceholder(request) { return }
             if request.isLive { noteLivePlaying() }
             let isResume = (phase == .paused)
             // A version that really plays is the title's resume copy from now on.
             if !isResume { ApplePlaybackStore().notePlaybackStarted(request) }
             setPhase(.playing)
             cancelTimeout()
-            // An error clip shows its length only once it plays; keep the
-            // other sources until it does.
-            if !awaitsPlaceholderCheck(request) { clearFallback() }
+            clearFallback()
             if isResume, request.sourceKind == .mediaServer, remoteProgressStarted {
                 remoteProgressSink?(request.mediaID, lastKnownPosition, engine.duration ?? 0, .progress)
             }
@@ -1171,9 +1056,6 @@ public final class ApplePlaybackCoordinator {
     }
 
     private func handleEnded(request: ApplePlaybackRequest) {
-        // An error clip that ran out is a failed source, never the end of an
-        // episode: no next-episode handover from it.
-        if rejectsPlaceholder(request) { return }
         guard request.isLive else {
             cancelTimeout()
             setPhase(.ended)
@@ -1298,8 +1180,8 @@ public final class ApplePlaybackCoordinator {
             avPlayerProgressObserverPlayer = nil
         }
         surfaceProgressIdentity = request.isLive ? nil : request.mediaID
-        surfaceProgressPartID = request.hints.progressPartID ?? AppleDetailResume.partID(type: request.hints.addonMediaType,
-            mediaID: request.hints.addonMediaID)
+        surfaceProgressPartID = request.hints.progressPartID ?? AppleDetailResume.partID(type: request.hints.titleMediaType,
+            mediaID: request.hints.titleMediaID)
         switch route {
         case .avPlayer:
             if let player = engine.avPlayer {
@@ -1342,8 +1224,6 @@ public final class ApplePlaybackCoordinator {
 
     private func handlePosition(_ position: Double) {
         lastKnownPosition = position
-        // An error clip's position is not the title's: never saved as watched.
-        if isPlaceholderPlayback { return }
 
         if let req = lastRequest, req.sourceKind == .mediaServer {
             if !remoteProgressStarted {
@@ -1365,7 +1245,7 @@ public final class ApplePlaybackCoordinator {
             progressWriter(position, engine.duration ?? 0)
             return
         }
-        // No host writer (an add-on stream on the software route): without
+        // No host writer (a stream on the software route): without
         // this the position was only ever saved by the tvOS Menu handler, so
         // nothing resumed on any other platform or exit path.
         guard let surfaceProgressIdentity, let duration = engine.duration, duration > 0 else { return }

@@ -117,63 +117,10 @@ struct AppleSharedLinkResolverTests {
     }
 
     @Test func youtubeMessageMatchesBuildBoundary() {
-        #if OPENSTREAM_ADDONS
-        #expect(AppleSharedLinkError.unsupportedYouTube.errorDescription == "YouTube links need the YouTube add-on")
-        #else
         #expect(AppleSharedLinkError.unsupportedYouTube.errorDescription == "YouTube links aren't supported.")
-        #endif
     }
 
-    #if OPENSTREAM_ADDONS
-    @Test func youtubeOnlyUsesInstalledEligibleSources() {
-        let source = AppleSource(kind: .stremio, name: "YouTubio", url: URL(string: "https://fixture.example/manifest.json")!, manifestID: "youtubio.elfhosted.com", resources: ["stream"], catalogs: [.init(type: "youtube", id: "yt_id:discover")])
-        var disabled = source
-        disabled.isEnabled = false
-        let unrelated = AppleSource(kind: .stremio, name: "Movies", url: URL(string: "https://fixture.example/manifest.json")!, resources: ["stream"])
-        #expect(AppleSharedLinkYouTubePolicy.sources(in: [source, disabled, unrelated]) == [source])
-        #expect(AppleSharedLinkYouTubePolicy.item(videoID: "3iRUwVzRDZQ", source: source).mediaID == "yt_id:3iRUwVzRDZQ")
-    }
-    #endif
 
-    #if OPENSTREAM_ADDONS
-    @Test @MainActor func withoutTMDBKeyTheMetadataCatalogMatchesTitleYearAndKind() async throws {
-        let page = AppleSharedLinkResolver(loader: { request in
-            let html = "<script type='application/ld+json'>{\"@type\":\"Movie\",\"name\":\"Mayday\",\"releaseYear\":2026}</script>"
-            return (Data(html.utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
-        })
-        let asked = Mutex<[String]>([])
-        let result = try await AppleSharedLinkResolution.resolve(.appleTV(.movie, "mayday", "umc.cmc.abc"), records: [], sources: [],
-            configuration: nil, pageResolver: page, catalogSearch: { type, query in
-                asked.withLock { $0.append("\(type) \(query)") }
-                return [AppleCatalogItem(mediaID: "tt0000002", type: "movie", name: "Mayday", releaseInfo: "2021"),
-                        AppleCatalogItem(mediaID: "tt0000001", type: "movie", name: "Mayday", releaseInfo: "2026"),
-                        AppleCatalogItem(mediaID: "tt0000003", type: "series", name: "Mayday", releaseInfo: "2026")]
-            }) { _ in [] }
-        #expect(asked.withLock { $0 } == ["movie Mayday"])
-        #expect(result.record == nil)
-        #expect(result.item?.mediaID == "tt0000001")
-        #expect(result.item?.type == "movie")
-        #expect(result.item?.year == 2026)
-    }
-
-    @Test func catalogMatchStaysOutWhenAmbiguousOrMissing() async {
-        let twins: AppleSharedLinkResolution.CatalogSearch = { type, _ in
-            [AppleCatalogItem(mediaID: "tt1", type: type, name: "Mayday", releaseInfo: "2026"),
-             AppleCatalogItem(mediaID: "tt2", type: type, name: "Mayday", releaseInfo: "2026")]
-        }
-        #expect(await AppleSharedLinkResolution.catalogMatch(.init(name: "Mayday", year: 2026, kind: .movie), search: twins) == nil)
-        let wrongYear: AppleSharedLinkResolution.CatalogSearch = { type, _ in
-            [AppleCatalogItem(mediaID: "tt1", type: type, name: "Mayday", releaseInfo: "2019")]
-        }
-        #expect(await AppleSharedLinkResolution.catalogMatch(.init(name: "Mayday", year: 2026, kind: .movie), search: wrongYear) == nil)
-        let failing: AppleSharedLinkResolution.CatalogSearch = { _, _ in throw URLError(.notConnectedToInternet) }
-        #expect(await AppleSharedLinkResolution.catalogMatch(.init(name: "Mayday", year: 2026), search: failing) == nil)
-        let show: AppleSharedLinkResolution.CatalogSearch = { type, _ in
-            type == "series" ? [AppleCatalogItem(mediaID: "tt9", type: "series", name: "The Show", year: 2020)] : []
-        }
-        #expect(await AppleSharedLinkResolution.catalogMatch(.init(name: "The Show", year: 2020, kind: .episode), search: show)?.mediaID == "tt9")
-    }
-    #else
     @Test @MainActor func withoutTMDBKeyAppStoreBuildFallsBackToSearch() async throws {
         let page = AppleSharedLinkResolver(loader: { request in
             let html = "<script type='application/ld+json'>{\"@type\":\"Movie\",\"name\":\"Mayday\",\"releaseYear\":2026}</script>"
@@ -184,7 +131,6 @@ struct AppleSharedLinkResolverTests {
         #expect(result.item == nil)
         #expect(result.title?.name == "Mayday")
     }
-    #endif
 
     @Test func episodeOpensItsSeriesAndFilmPagesSeparateYear() throws {
         let html = "<script type='application/ld+json'>{\"@type\":\"TVEpisode\",\"name\":\"Pilot\",\"datePublished\":\"2024-10-01\",\"partOfSeries\":{\"name\":\"The Show\",\"datePublished\":\"2020-01-01\"}}</script>"

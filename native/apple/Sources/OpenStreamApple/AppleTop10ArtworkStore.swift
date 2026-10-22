@@ -41,9 +41,9 @@ actor AppleTop10ArtworkStore {
         records.withLock { $0 = stored }
     }
 
-    /// A metadata-only title opens its page through the first enabled add-on, as a shared link does.
-    nonisolated static func match(_ item: AppleCatalogItem, sources: [AppleSource]) -> AppleCatalogSearchMatch {
-        AppleCatalogSearchMatch(item: item, source: sources.first { $0.isEnabled && $0.isAddon } ?? metadataSource)
+    /// A metadata-only title opens its page with no source of its own, as a shared link does.
+    nonisolated static func match(_ item: AppleCatalogItem) -> AppleCatalogSearchMatch {
+        AppleCatalogSearchMatch(item: item, source: metadataSource)
     }
 
     private static let metadataSource = AppleSource(kind: .library, name: "oStream",

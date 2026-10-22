@@ -48,10 +48,6 @@ struct AppleHomeBillboard<Actions: View>: View {
     /// plays from a file on disk. Nil lets the catalog policy below decide.
     var libraryButton: AppleTitlePagePolicy.HeroButton? = nil
     @ViewBuilder var actions: (AppleTitlePagePolicy.HeroButton, @escaping () -> Void) -> Actions
-    @State private var episodes: [AppleStremioEpisode] = []
-    /// True once the episode lookup has answered; false when there was
-    /// none to make (not a series, or no id to look up); nil while out.
-    @State private var episodeLookupAnswered: Bool?
     /// Every lookup that can find a trailer has answered.
     @State private var actionMetadataLoaded = false
     /// The hero has waited long enough for them (`heroTrailerLookupPatience`).
@@ -63,10 +59,8 @@ struct AppleHomeBillboard<Actions: View>: View {
     /// stalled trailer never leaves a dead button.
     @State private var trailerIsOnScreen = false
     @Environment(\.appleTMDBConfiguration) private var metadataConfiguration
-    @State private var previewTrailerKeys: [String] = []
     @State private var detailTrailerKeys: [String] = []
     @State private var phoneDetails: AppleTMDBDetails?
-    @State private var phonePreviewLogo: URL?
     @State private var phoneLogo: URL?
     @State private var phoneLogoLookupPending = true
     @State private var trailerRequest: UUID?
@@ -77,40 +71,21 @@ struct AppleHomeBillboard<Actions: View>: View {
     @State private var serverTrailerLookedUp = false
     @State private var downloadCoordinator = AppleOfflineDownloadCoordinator()
 
-    private var selectedEpisode: AppleStremioEpisode? {
+    private var selectedEpisode: AppleMediaEpisode? {
         let store = ApplePlaybackStore()
         let progress = ApplePlaybackProgressFeed.shared.progress(for: progressID, in: store)
-        let completedIDs = store.completedMediaIDs(among: episodes.map(\.id))
         return AppleTitlePagePolicy.heroEpisode(
-            item: item, progress: progress, episodes: episodes, completedIDs: completedIDs,
-            localResumeEpisode: AppleLocalLibraryStore.shared.resumeEpisode(for: item, group: nil, episodes: episodes)
+            item: item, progress: progress, episodes: [],
+            localResumeEpisode: AppleLocalLibraryStore.shared.resumeEpisode(for: item, group: nil, episodes: [])
         )
     }
 
     private var hasPlaybackRoute: Bool {
-        AppleTitlePagePolicy.heroHasPlaybackRoute(
-            item: item, sources: sources,
+        AppleTitlePagePolicy.hasPlaybackRoute(
+            item: item,
             hasLocalGroup: !AppleLocalLibraryStore.shared.matchingGroups(item).isEmpty,
-            hasCompletedDownload: downloadCoordinator.state.isCompleted,
-            episodeLookup: episodeLookup
+            hasCompletedDownload: downloadCoordinator.state.isCompleted
         )
-    }
-
-    /// The title page's answer is not known yet: hold the button back.
-    private var playbackRouteIsSettled: Bool {
-        AppleTitlePagePolicy.heroRouteIsSettled(
-            item: item, sources: sources,
-            hasLocalGroup: !AppleLocalLibraryStore.shared.matchingGroups(item).isEmpty,
-            hasCompletedDownload: downloadCoordinator.state.isCompleted,
-            episodeLookup: episodeLookup
-        )
-    }
-
-    /// What the hero's own episode lookup said, an empty answer included
-    /// (`heroHasPlaybackRoute`).
-    private var episodeLookup: AppleTitlePagePolicy.HeroEpisodeLookup {
-        if let episodeLookupAnswered { return episodeLookupAnswered ? (episodes.isEmpty ? .empty : .found) : .unknown }
-        return trailerLookupPatienceElapsed ? .unknown : .pending
     }
 
     /// The Apple TV hero never offers a trailer button (N23 removes them
@@ -127,7 +102,6 @@ struct AppleHomeBillboard<Actions: View>: View {
 
     private var primaryAction: AppleTitlePagePolicy.PrimaryAction? {
         if let libraryButton { return libraryButton.action }
-        guard playbackRouteIsSettled else { return nil }
         return AppleTitlePagePolicy.heroPrimaryAction(
             type: item.type, progress: ApplePlaybackProgressFeed.shared.progress(for: progressID),
             selectedEpisode: selectedEpisode, isPlayable: hasPlaybackRoute, trailer: trailerAvailability
@@ -162,78 +136,27 @@ struct AppleHomeBillboard<Actions: View>: View {
     }
 
     private var trailerKey: String? {
-        (detailTrailerKeys + previewTrailerKeys).first { AppleTrailerPreviewPolicy.embedURL(for: $0) != nil }
+        detailTrailerKeys.first { AppleTrailerPreviewPolicy.embedURL(for: $0) != nil }
     }
 
-    /// Use the title page's metadata clients and canonical-id resolution too:
-    /// a catalog's private id may need resolving before it can list episodes.
+    /// The hero asks for the title page's enriched details (for its trailers
+    /// and the iPhone's logo) with the same canonical id the page uses.
     private func loadActionMetadata() async {
-        episodes = []
-        episodeLookupAnswered = item.type == "series" ? nil : false
         actionMetadataLoaded = false
-        previewTrailerKeys = []
         detailTrailerKeys = []
         phoneDetails = nil
-        phonePreviewLogo = nil
         trailerRequest = nil
         trailerIsOnScreen = false
-        let client = AppleStremioMetadataClient()
-        let resolver = AppleMetadataResolver()
-        let sources = sources
-        let preferred = preferredSourceID
-        let item = item
-        let configuration = metadataConfiguration
-        let fallbackName = phone != nil ? item.name : nil
-        func addLookups(to group: inout TaskGroup<AppleHeroMetadataOutcome>, mediaID: String) {
-            if item.type == "series" {
-                group.addTask {
-                    .episodes((try? await client.episodes(sources: sources, preferredSourceID: preferred,
-                                                          mediaID: mediaID)) ?? [])
-                }
-            }
-            // Apple TV plays no trailer and keeps its separate artwork policy.
-            guard AppleTitlePagePolicy.offersTrailers() else { return }
-            group.addTask {
-                .details(try? await resolver.resolve(sources: sources, preferredSourceID: preferred,
-                    type: item.type, mediaID: mediaID, configuration: configuration, fallbackName: fallbackName))
-            }
+        // Apple TV plays no trailer and keeps its separate artwork policy.
+        if AppleTitlePagePolicy.offersTrailers(), AppleMediaServerItemReference.parse(item.mediaID) == nil {
+            let details = try? await AppleMetadataResolver().resolve(
+                sources: sources, preferredSourceID: preferredSourceID, type: item.type,
+                mediaID: ApplePlayGatingPolicy.canonicalMediaID(item.mediaID) ?? item.mediaID,
+                configuration: metadataConfiguration, fallbackName: phone != nil ? item.name : nil)
+            guard !Task.isCancelled else { return }
+            detailTrailerKeys = details?.trailerYouTubeKeys ?? []
+            if phone != nil { phoneDetails = details }
         }
-        await withTaskGroup(of: AppleHeroMetadataOutcome.self) { group in
-            if AppleTitlePagePolicy.offersTrailers() {
-                group.addTask {
-                    .preview(await client.previewAssets(sources: sources, preferredSourceID: preferred,
-                                                         type: item.type, mediaID: item.mediaID))
-                }
-            }
-            if let canonicalID = ApplePlayGatingPolicy.canonicalMediaID(item.mediaID) {
-                addLookups(to: &group, mediaID: canonicalID)
-            } else if AppleMediaServerItemReference.parse(item.mediaID) == nil {
-                group.addTask {
-                    .identity(await client.imdbIdentifier(sources: sources, preferredSourceID: preferred,
-                                                          type: item.type, id: item.mediaID))
-                }
-            }
-            while let outcome = await group.next() {
-                guard !Task.isCancelled else { group.cancelAll(); return }
-                switch outcome {
-                case .preview(let assets):
-                    previewTrailerKeys = assets?.trailerYouTubeKeys ?? []
-                    if phone != nil { phonePreviewLogo = assets?.logoURL }
-                case .details(let details):
-                    detailTrailerKeys = details?.trailerYouTubeKeys ?? []
-                    if phone != nil { phoneDetails = details }
-                case .identity(let id): addLookups(to: &group, mediaID: id ?? item.mediaID)
-                case .episodes(let loaded):
-                    episodes = loaded
-                    episodeLookupAnswered = true
-                    if loaded.isEmpty { appleTrace("hero episodes: none for \(item.name) — no Play") }
-                }
-            }
-        }
-        guard !Task.isCancelled else { return }
-        // No episode lookup was made (a media-server title, or an id that
-        // never resolved): no evidence either way.
-        if episodeLookupAnswered == nil { episodeLookupAnswered = false }
         actionMetadataLoaded = true
     }
 
@@ -293,7 +216,7 @@ struct AppleHomeBillboard<Actions: View>: View {
     var body: some View {
         heroBody
             .appleMeasuresHeroArt(loadedStill) { artMeasurement = $0 }
-            .task(id: "\(item.id):\(catalogConfigurationIdentity(sources))") { await loadActionMetadata() }
+            .task(id: item.id) { await loadActionMetadata() }
             #if os(tvOS) || os(visionOS)
             .task(id: "\(item.id):\(AppleServerTrailerStore.shared.revision)") {
                 serverTrailer = nil
@@ -377,7 +300,7 @@ struct AppleHomeBillboard<Actions: View>: View {
     }
 
     private var phoneLogoCandidates: [URL] {
-        [wordmark, phoneDetails?.logoURL, phonePreviewLogo, item.logoURL].compactMap { $0 }
+        [wordmark, phoneDetails?.logoURL, item.logoURL].compactMap { $0 }
     }
 
     private var phoneLogoTaskID: String {
@@ -795,7 +718,7 @@ private struct AppleHomeHeroPreview: View {
         #endif
         // Low priority: the trailer is only ever an extra over the art, and
         // must not compete with the art and metadata still loading.
-        .task(id: "\(item.id):\(shouldPreview):\(trailerRequest?.uuidString ?? ""):\(catalogConfigurationIdentity(sources))",
+        .task(id: "\(item.id):\(shouldPreview):\(trailerRequest?.uuidString ?? "")",
               priority: .low) {
             await startPreview()
         }
@@ -829,9 +752,8 @@ private struct AppleHomeHeroPreview: View {
         stop()
         guard shouldPreview else { return }
         #if os(macOS)
-        let assets = await AppleStremioMetadataClient().previewAssets(sources: sources, type: item.type, mediaID: item.mediaID)
         let keys = AppleTrailerKeyFallbackPolicy.orderedKeys(
-            preferred: trailerRequest != nil ? requestedTrailerKey : nil, keys: assets?.trailerYouTubeKeys ?? [])
+            preferred: trailerRequest != nil ? requestedTrailerKey : nil, keys: [])
         guard !Task.isCancelled, shouldPreview, trailerRequest == nil || requestedTrailerKey != nil, let key = keys.first else { return }
         // The best stream the hero can show pixel for pixel, never a default:
         // measured on the 16:9 player the video is drawn at (it overhangs
@@ -855,9 +777,8 @@ private struct AppleHomeHeroPreview: View {
         embedURL = url
         isPlaying = true
         #else
-        let assets = await AppleStremioMetadataClient().previewAssets(sources: sources, type: item.type, mediaID: item.mediaID)
         let keys = AppleTrailerKeyFallbackPolicy.orderedKeys(
-            preferred: trailerRequest != nil ? requestedTrailerKey : nil, keys: assets?.trailerYouTubeKeys ?? [])
+            preferred: trailerRequest != nil ? requestedTrailerKey : nil, keys: [])
         guard !Task.isCancelled, shouldPreview, trailerRequest == nil || requestedTrailerKey != nil, let key = keys.first,
               let url = AppleTrailerPreviewPolicy.embedURL(for: key) else { return }
         // The cover is drawn only now, with a video to play (Fable review 2026-10-14).

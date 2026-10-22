@@ -293,18 +293,18 @@ struct AppleOfflineDownloadCoordinatorTests {
         #expect(await store.record(for: "movie:fixture") != nil)
     }
 
-    @Test func noStreamsFromTheResolverSaysNoDownloadableSource() async throws {
+    @Test func noPlansFromTheResolverSaysNoDownloadableSource() async throws {
         let (coordinator, _, root) = try makeContext(data: Data())
         defer { try? FileManager.default.removeItem(at: root) }
-        coordinator.start(request: request(), resolvePlans: { throw AppleStremioPlaybackResolutionError.noStreams })
+        coordinator.start(request: request(), resolvePlans: { [] })
         try await waitForDownloadState { if case .failed = $0 { return true }; return false }
         #expect(coordinator.state == .failed(item: "Sample Movie", message: AppleOfflineDownloadFailure.noDownloadSource.message))
     }
 
-    @Test func otherResolverFailuresStillSayPreparationFailed() async throws {
+    @Test func resolverFailuresSayPreparationFailed() async throws {
         let (coordinator, _, root) = try makeContext(data: Data())
         defer { try? FileManager.default.removeItem(at: root) }
-        coordinator.start(request: request(), resolvePlans: { throw AppleStremioPlaybackResolutionError.gatewayUnavailable })
+        coordinator.start(request: request(), resolvePlans: { throw ApplePlaybackPreparationError.gatewayUnavailable })
         try await waitForDownloadState { if case .failed = $0 { return true }; return false }
         #expect(coordinator.state == .failed(item: "Sample Movie", message: AppleOfflineDownloadFailure.preparationFailed.message))
     }

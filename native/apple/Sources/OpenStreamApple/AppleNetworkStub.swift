@@ -27,10 +27,10 @@ public enum AppleNetworkStubPolicy {
 }
 
 /// Serves every control-plane request from fixture files instead of the
-/// network (`-OpenStreamStubNetwork <dir>`, Debug builds only): add-on
-/// manifests, catalogs, meta and streams, TMDB, Xtream, debrid. Media never
-/// comes through here — AVPlayer and the engine do not use the loader — so
-/// playback keeps its 127.0.0.1 fixture servers. A request with no fixture
+/// network (`-OpenStreamStubNetwork <dir>`, Debug builds only): TMDB, IPTV
+/// playlists and guides, Xtream. Media never comes through here — AVPlayer and
+/// the engine do not use the loader — so playback keeps its 127.0.0.1 fixture
+/// servers. A request with no fixture
 /// fails loudly and never falls through to the network.
 public enum AppleNetworkStub {
     public enum Error: Swift.Error, Equatable, Sendable {
@@ -67,18 +67,7 @@ public enum AppleNetworkStub {
     /// line naming the missing file's request.
     static func response(for request: URLRequest, root: URL) throws -> (Data, URLResponse) {
         guard let url = request.url else { throw Error.unmatched("no url") }
-        var fixtureRequestURL = url
-        #if DEBUG && OPENSTREAM_ADDONS
-        // A launched E2E run also uses the normal default metadata fallback.
-        // Route it to the fictional fixture host; no real host belongs in the
-        // checked-in fixture tree. Task-local unit-test roots keep their exact paths.
-        if launchRoot != nil, url.host == AppleMediaMetadataClient.defaultMetadataSource.url.host,
-           var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
-            components.host = "fixture.example"
-            if let mapped = components.url { fixtureRequestURL = mapped }
-        }
-        #endif
-        guard let fixture = AppleNetworkStubPolicy.fixtureURL(for: fixtureRequestURL, root: root),
+        guard let fixture = AppleNetworkStubPolicy.fixtureURL(for: url, root: root),
               let fixtureData = try? Data(contentsOf: fixture) else {
             let line = AppleNetworkStubPolicy.missDescription(for: url)
             AppleInteractionTrace.record(.network, line)
@@ -86,9 +75,6 @@ public enum AppleNetworkStub {
         }
         #if DEBUG
         var data = fixtureData
-        if UserDefaults.standard.bool(forKey: "OpenStreamStubEmptyStreams"), url.path.hasPrefix("/stream/") {
-            data = Data(#"{"streams":[]}"#.utf8)
-        }
         // Only the E2E route rewrites fictional media hosts to its loopback server.
         // Control-plane requests and artwork still come from the stub files.
         if let base = UserDefaults.standard.string(forKey: "OpenStreamStubMediaBase"),

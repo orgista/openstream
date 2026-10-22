@@ -3,7 +3,7 @@ import Foundation
 /// Decodes the handful of HTML entities that catalogue metadata actually
 /// carries.
 ///
-/// Cinemeta and TMDB both hand back overviews that were escaped for a web page
+/// Servers and TMDB both hand back overviews that were escaped for a web page
 /// somewhere upstream, so a title like *9/11: One Day in America* arrives
 /// describing a collaboration with the "9/11 Memorial `&amp;` Museum" and the
 /// raw entity is what the viewer reads on the hero and the title page.

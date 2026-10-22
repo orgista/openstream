@@ -32,12 +32,9 @@ func xtreamCredentialSanitizerRemovesWhitespace(_ input: String) {
     defer { defaults.removePersistentDomain(forName: suite) }
     let store = AppleSourceStore(defaults: defaults)
     var now = Date()
-    let manifest = Data(#"{"id":"org.example.session","name":"Session Catalog","resources":["catalog"],"catalogs":[{"type":"movie","id":"top"}]}"#.utf8)
     let server = AppleWebManagementServer(
         configuration: .init(preferredPort: 0, sessionDuration: 60, advertisesBonjour: false, advertisedHost: "127.0.0.1"),
-        manifestClient: AppleManifestClient { url in
-            (manifest, HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
-        },
+        iptvClient: fixturePlaylistClient(),
         now: { now }
     )
     let active = try await server.start(sourceStore: store)
@@ -58,10 +55,9 @@ func xtreamCredentialSanitizerRemovesWhitespace(_ input: String) {
     var codeOnly = request(url: active.friendlyURL)
     codeOnly.httpMethod = "POST"
     codeOnly.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-    codeOnly.httpBody = encodedForm([
-        "pairingCode": try #require(server.session).pairingCode,
-        "manifest": "https://fixture.example/manifest.json"
-    ])
+    var codeOnlyForm = playlistForm(name: "Session TV", url: "https://fixture.example/session.m3u")
+    codeOnlyForm["pairingCode"] = try #require(server.session).pairingCode
+    codeOnly.httpBody = encodedForm(codeOnlyForm)
     #expect(try await response(for: codeOnly, using: browser).statusCode == 401)
     #expect(store.sources.isEmpty)
 
@@ -70,7 +66,7 @@ func xtreamCredentialSanitizerRemovesWhitespace(_ input: String) {
     add.httpMethod = "POST"
     add.setValue(cookie, forHTTPHeaderField: "Cookie")
     add.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-    add.httpBody = encodedForm(["manifest": "https://fixture.example/manifest.json"])
+    add.httpBody = encodedForm(playlistForm(name: "Session TV", url: "https://fixture.example/session.m3u"))
     #expect(try await response(for: add, using: browser).statusCode == 200)
     #expect(store.sources.count == 1)
     var page = request(url: active.friendlyURL)
@@ -190,13 +186,12 @@ func xtreamCredentialSanitizerRemovesWhitespace(_ input: String) {
 
 @Test func webManagementPageIsLeanAndEscapesSubmittedValues() {
     let page = AppleWebManagementPage.setup(
-        manifest: "\"><script>alert(1)</script>",
         error: "No <unsafe> source",
-        address: "192.168.1.95:8090"
+        address: "192.168.1.95:8090",
+        draft: ["playlistURL": "\"><script>alert(1)</script>"]
     )
 
     #expect(page.contains("oStream"))
-    #expect(page.contains("Add-on"))
     #expect(page.contains("M3U Playlist"))
     #expect(page.contains("Xtream Account"))
     #expect(page.contains("192.168.1.95:8090"))
@@ -212,7 +207,8 @@ func xtreamCredentialSanitizerRemovesWhitespace(_ input: String) {
 @Test func webManagementPageCarriesTheAppMarkAndNoUploadSection() {
     let unpaired = AppleWebManagementPage.setup(pairingCode: "ABCD2345", address: "192.168.1.95:8090")
     let paired = AppleWebManagementPage.setup(
-        sources: [AppleSource(kind: .stremio, name: "Cinemeta", url: URL(string: "https://v3-cinemeta.strem.io/manifest.json")!)],
+        sources: [AppleSource(kind: .liveTV, name: "Fixture TV", url: URL(string: "https://fixture.example/playlist.m3u")!,
+                              iptvType: .m3u)],
         address: "192.168.1.95:8090"
     )
 
@@ -223,67 +219,34 @@ func xtreamCredentialSanitizerRemovesWhitespace(_ input: String) {
         // external image and no other product's name on the page.
         #expect(page.contains("<svg class=\"mark\""))
         #expect(!page.contains("<img"))
-        #expect(!page.contains("Stremio"))
         #expect(!page.contains("http://") || page.contains("192.168.1.95:8090"))
     }
 
     #expect(unpaired.contains("Pairing code"))
-    #expect(!unpaired.contains("id=\"manifest\""))
+    #expect(!unpaired.contains("id=\"playlistURL\""))
     #expect(paired.contains("data-paired=\"true\""))
-    #expect(paired.contains("id=\"manifest\""))
-    #expect(paired.contains("Cinemeta"))
+    #expect(paired.contains("id=\"playlistURL\""))
+    #expect(paired.contains("Fixture TV"))
     #expect(paired.contains("value=\"remove\""))
 }
 
-@MainActor
-@Test func webManagementUsesAReadableAddressAndAcceptsSubtitlesOnlyManifests() async throws {
+@Test func webManagementUsesAReadablePort() {
     #expect(AppleWebManagementServer.defaultPort == 8090)
-
-    let suiteName = "openstream-subtitles-only-\(UUID().uuidString)"
-    let defaults = try #require(UserDefaults(suiteName: suiteName))
-    defer { defaults.removePersistentDomain(forName: suiteName) }
-    let store = AppleSourceStore(defaults: defaults)
-    let manifestData = Data(#"{"id":"org.example.subtitles","name":"OpenSubtitles v3","resources":["subtitles"],"catalogs":[]}"#.utf8)
-    let client = AppleManifestClient { url in
-        (manifestData, HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
-    }
-    let source = try await store.addStremio(
-        manifestValue: "https://opensubtitles-v3.strem.io/manifest.json",
-        client: client
-    )
-
-    #expect(source.resources == ["subtitles"])
-    #expect(source.catalogs.isEmpty)
-    #expect(source.capabilities == ["Subtitles"])
-    #expect(AppleCatalogDiscoveryPolicy.catalogs(for: source, maximumCatalogs: 12).isEmpty)
 }
 
 @MainActor
-@Test func webManagementLoopbackServesAndPersistsOneManifest() async throws {
+@Test func webManagementLoopbackServesAndPersistsOnePlaylist() async throws {
     let suiteName = "openstream-web-tests-\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suiteName))
     defer { defaults.removePersistentDomain(forName: suiteName) }
     let sourceStore = AppleSourceStore(defaults: defaults)
-
-    let manifestData = Data(#"""
-    {
-      "id":"org.example.loopback",
-      "name":"Loopback Catalog",
-      "version":"1.0.0",
-      "resources":["catalog","stream"],
-      "catalogs":[{"type":"movie","id":"popular"}]
-    }
-    """#.utf8)
-    let manifestClient = AppleManifestClient { url in
-        (manifestData, HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
-    }
     let configuration = AppleWebManagementServer.Configuration(
         preferredPort: 0,
         sessionDuration: 30,
         advertisesBonjour: false,
         advertisedHost: "127.0.0.1"
     )
-    let server = AppleWebManagementServer(configuration: configuration, manifestClient: manifestClient)
+    let server = AppleWebManagementServer(configuration: configuration, iptvClient: fixturePlaylistClient())
     let activeSession = try await server.start(sourceStore: sourceStore)
     defer { server.stop() }
     let requestConfiguration = URLSessionConfiguration.ephemeral
@@ -325,14 +288,14 @@ func xtreamCredentialSanitizerRemovesWhitespace(_ input: String) {
     #expect(pageResponse.statusCode == 200)
     #expect(pageResponse.url?.query == nil)
     #expect(pageResponse.value(forHTTPHeaderField: "Content-Security-Policy")?.contains("default-src 'none'") == true)
-    #expect(String(decoding: pageData, as: UTF8.self).contains("Manifest URL"))
+    #expect(String(decoding: pageData, as: UTF8.self).contains("Playlist URL"))
     #expect(!String(decoding: pageData, as: UTF8.self).contains(activeSession.token))
 
-    let manifest = "https://addon.example/manifest.json"
+    let playlist = "https://fixture.example/loopback.m3u"
     var invalidPost = request(url: activeSession.friendlyURL)
     invalidPost.httpMethod = "POST"
     invalidPost.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-    invalidPost.httpBody = formBody(manifest: manifest, token: "wrong")
+    invalidPost.httpBody = formBody(playlist: playlist, token: "wrong")
     #expect(try await response(for: invalidPost, using: requestSession).statusCode == 401)
 
     var validPost = request(url: activeSession.friendlyURL)
@@ -340,12 +303,14 @@ func xtreamCredentialSanitizerRemovesWhitespace(_ input: String) {
     validPost.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
     validPost.setValue(activeSession.friendlyURL.absoluteString, forHTTPHeaderField: "Origin")
     validPost.setValue(cookie, forHTTPHeaderField: "Cookie")
-    validPost.httpBody = formBody(manifest: manifest)
+    validPost.httpBody = formBody(playlist: playlist)
     let (successData, successResponse) = try await dataResponse(for: validPost, using: requestSession)
     #expect(successResponse.statusCode == 200)
-    #expect(String(decoding: successData, as: UTF8.self).contains("Loopback Catalog"))
+    #expect(String(decoding: successData, as: UTF8.self).contains("Loopback TV"))
     #expect(sourceStore.sources.count == 1)
-    #expect(sourceStore.sources.first?.manifestID == "org.example.loopback")
+    #expect(sourceStore.sources.first?.kind == .liveTV)
+    #expect(sourceStore.sources.first?.iptvType == .m3u)
+    #expect(sourceStore.sources.first?.discoveredItemCount == 1)
     #expect(server.session != nil)
 }
 
@@ -475,7 +440,7 @@ func xtreamCredentialSanitizerRemovesWhitespace(_ input: String) {
     var add = request(url: first.friendlyURL)
     add.httpMethod = "POST"
     add.setValue(cookie, forHTTPHeaderField: "Cookie")
-    add.httpBody = encodedForm(["manifest": "https://fixture.example/manifest.json"])
+    add.httpBody = encodedForm(playlistForm(name: "Fixture TV", url: "https://fixture.example/playlist.m3u"))
     #expect(try await response(for: add, using: browser).statusCode == 401)
     #expect(server.connectedBrowsers.isEmpty)
 }
@@ -532,11 +497,29 @@ private func request(url: URL) -> URLRequest {
     URLRequest(url: url)
 }
 
-private func formBody(manifest: String, token: String? = nil) -> Data {
+private func formBody(playlist: String, token: String? = nil) -> Data {
     var components = URLComponents()
-    components.queryItems = [URLQueryItem(name: "manifest", value: manifest)]
+    components.queryItems = [
+        URLQueryItem(name: "sourceType", value: "m3u"),
+        URLQueryItem(name: "m3uName", value: "Loopback TV"),
+        URLQueryItem(name: "playlistURL", value: playlist),
+    ]
     if let token { components.queryItems?.append(URLQueryItem(name: "token", value: token)) }
     return Data((components.percentEncodedQuery ?? "").utf8)
+}
+
+private func playlistForm(name: String, url: String) -> [String: String] {
+    ["sourceType": "m3u", "m3uName": name, "playlistURL": url]
+}
+
+/// Answers every playlist request with one channel; `broken.example` answers 404.
+private func fixturePlaylistClient() -> AppleIPTVClient {
+    AppleIPTVClient(loader: { request in
+        let url = try #require(request.url)
+        let status = url.host == "broken.example" ? 404 : 200
+        let playlist = Data("#EXTM3U\n#EXTINF:-1,Fixture News\nhttps://fixture.example/live/news.m3u8\n".utf8)
+        return (playlist, try #require(HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)))
+    })
 }
 
 private func encodedForm(_ values: [String: String]) -> Data {
@@ -645,21 +628,14 @@ private func occupiedLoopbackPort() throws -> (Int32, UInt16) {
 }
 
 @MainActor
-@Test func webManagementAddsAnAddonFromABrowserFormAndKeepsPairingAfterAFailure() async throws {
+@Test func webManagementAddsAPlaylistFromABrowserFormAndKeepsPairingAfterAFailure() async throws {
     let suite = "openstream-web-browser-form-\(UUID())"
     let defaults = try #require(UserDefaults(suiteName: suite))
     defer { defaults.removePersistentDomain(forName: suite) }
     let store = AppleSourceStore(defaults: defaults)
-    let manifest = Data(#"{"id":"org.example.browser","name":"Browser Catalog","version":"1.0.0","resources":["catalog"],"catalogs":[{"type":"movie","id":"top"}]}"#.utf8)
-    let client = AppleManifestClient { url in
-        guard url.host == "addon.example" else {
-            return (Data(), HTTPURLResponse(url: url, statusCode: 404, httpVersion: nil, headerFields: nil)!)
-        }
-        return (manifest, HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
-    }
     let server = AppleWebManagementServer(
         configuration: .init(preferredPort: 0, sessionDuration: 60, advertisesBonjour: false, advertisedHost: "127.0.0.1"),
-        manifestClient: client
+        iptvClient: fixturePlaylistClient()
     )
     let active = try await server.start(sourceStore: store)
     defer { server.stop() }
@@ -683,37 +659,32 @@ private func occupiedLoopbackPort() throws -> (Int32, UInt16) {
     let initialCookie = try await pairBrowser(active, using: session)
     // A failed add keeps the browser session and refreshes its cookie.
     let (failureData, failureResponse) = try await dataResponse(
-        for: browserPost([
-                "sourceType": "addon",
-            "manifest": "https://broken.example/manifest.json"
-        ], cookie: initialCookie),
+        for: browserPost(playlistForm(name: "Browser TV", url: "https://broken.example/playlist.m3u"),
+                         cookie: initialCookie),
         using: session
     )
     #expect(failureResponse.statusCode == 400)
     let failureBody = String(decoding: failureData, as: UTF8.self)
     #expect(failureBody.contains("HTTP 404"))
     #expect(failureBody.contains("data-paired=\"true\""))
-    #expect(failureBody.contains("id=\"manifest\""))
-    #expect(failureBody.contains("value=\"https://broken.example/manifest.json\""))
+    #expect(failureBody.contains("id=\"playlistURL\""))
+    #expect(failureBody.contains("value=\"https://broken.example/playlist.m3u\""))
     let cookie = try pairingCookie(from: failureResponse)
     #expect(cookie == initialCookie)
     #expect(store.sources.isEmpty)
 
     // The cookie from the failed answer is enough for the retry; no code.
     let (successData, successResponse) = try await dataResponse(
-        for: browserPost([
-            "sourceType": "addon",
-            "manifest": "https://addon.example/manifest.json"
-        ], cookie: cookie),
+        for: browserPost(playlistForm(name: "Browser TV", url: "https://fixture.example/playlist.m3u"),
+                         cookie: cookie),
         using: session
     )
     #expect(successResponse.statusCode == 200)
     let successBody = String(decoding: successData, as: UTF8.self)
-    #expect(successBody.contains("Added Browser Catalog"))
-    #expect(successBody.contains("Browser Catalog"))
+    #expect(successBody.contains("Added Browser TV"))
     #expect(successBody.contains("data-paired=\"true\""))
     #expect(store.sources.count == 1)
-    #expect(store.sources.first?.manifestID == "org.example.browser")
+    #expect(store.sources.first?.kind == .liveTV)
 
     // The page is still reachable without the cookie after the code was used.
     #expect(try await response(for: request(url: active.friendlyURL), using: session).statusCode == 200)
@@ -729,7 +700,7 @@ private func occupiedLoopbackPort() throws -> (Int32, UInt16) {
     ])
     let (removedData, removedResponse) = try await dataResponse(for: headerless, using: session)
     #expect(removedResponse.statusCode == 200)
-    #expect(String(decoding: removedData, as: UTF8.self).contains("Removed Browser Catalog"))
+    #expect(String(decoding: removedData, as: UTF8.self).contains("Removed Browser TV"))
     #expect(store.sources.isEmpty)
 }
 
@@ -761,18 +732,14 @@ private func occupiedLoopbackPort() throws -> (Int32, UInt16) {
 }
 
 @MainActor
-@Test func webManagementAddsAnAddonFromAMultipartBrowserForm() async throws {
+@Test func webManagementAddsAPlaylistFromAMultipartBrowserForm() async throws {
     let suite = "openstream-web-multipart-\(UUID())"
     let defaults = try #require(UserDefaults(suiteName: suite))
     defer { defaults.removePersistentDomain(forName: suite) }
     let store = AppleSourceStore(defaults: defaults)
-    let manifest = Data(#"{"id":"org.example.multipart","name":"Multipart Catalog","version":"1.0.0","resources":["catalog"],"catalogs":[{"type":"movie","id":"top"}]}"#.utf8)
-    let client = AppleManifestClient { url in
-        (manifest, HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
-    }
     let server = AppleWebManagementServer(
         configuration: .init(preferredPort: 0, sessionDuration: 60, advertisesBonjour: false, advertisedHost: "127.0.0.1"),
-        manifestClient: client
+        iptvClient: fixturePlaylistClient()
     )
     let active = try await server.start(sourceStore: store)
     defer { server.stop() }
@@ -789,33 +756,30 @@ private func occupiedLoopbackPort() throws -> (Int32, UInt16) {
     post.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
     post.setValue(active.friendlyURL.absoluteString, forHTTPHeaderField: "Origin")
     post.setValue(active.friendlyURL.absoluteString, forHTTPHeaderField: "Referer")
-    post.httpBody = multipartForm([
-        "sourceType": "addon",
-        "manifest": "https://addon.example/manifest.json"
-    ], boundary: boundary)
+    post.httpBody = multipartForm(
+        playlistForm(name: "Multipart TV", url: "https://fixture.example/multipart.m3u"),
+        boundary: boundary
+    )
 
     let (data, response) = try await dataResponse(for: post, using: session)
     #expect(response.statusCode == 200)
     let body = String(decoding: data, as: UTF8.self)
-    #expect(body.contains("Added Multipart Catalog"))
+    #expect(body.contains("Added Multipart TV"))
     #expect(try pairingCookie(from: response) == cookie)
     #expect(store.sources.count == 1)
-    #expect(store.sources.first?.manifestID == "org.example.multipart")
+    #expect(store.sources.first?.kind == .liveTV)
 }
 
 @MainActor
-@Test func webManagementKeepsPairingAfterAnUnreachableAddonAndShowsIPAndPort() async throws {
+@Test func webManagementKeepsPairingAfterAnUnreachablePlaylistAndShowsIPAndPort() async throws {
     let suite = "openstream-web-unreachable-\(UUID())"
     let defaults = try #require(UserDefaults(suiteName: suite))
     defer { defaults.removePersistentDomain(forName: suite) }
     let store = AppleSourceStore(defaults: defaults)
-    let client = AppleManifestClient(
-        loader: { _ in throw URLError(.cannotConnectToHost) },
-        sleeper: { _ in }
-    )
+    let client = AppleIPTVClient(loader: { _ in throw URLError(.cannotConnectToHost) })
     let server = AppleWebManagementServer(
         configuration: .init(preferredPort: 0, sessionDuration: 60, advertisesBonjour: false, advertisedHost: "127.0.0.1"),
-        manifestClient: client
+        iptvClient: client
     )
     let active = try await server.start(sourceStore: store)
     defer { server.stop() }
@@ -831,10 +795,7 @@ private func occupiedLoopbackPort() throws -> (Int32, UInt16) {
     post.setValue(initialCookie, forHTTPHeaderField: "Cookie")
     post.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
     post.setValue(active.friendlyURL.absoluteString, forHTTPHeaderField: "Origin")
-    post.httpBody = encodedForm([
-        "sourceType": "addon",
-        "manifest": "https://unreachable.example/manifest.json"
-    ])
+    post.httpBody = encodedForm(playlistForm(name: "Unreachable TV", url: "https://unreachable.example/playlist.m3u"))
     let (failureData, failureResponse) = try await dataResponse(for: post, using: session)
     #expect(failureResponse.statusCode == 400)
     let failureBody = String(decoding: failureData, as: UTF8.self)
@@ -851,14 +812,14 @@ private func occupiedLoopbackPort() throws -> (Int32, UInt16) {
     let (pageData, pageResponse) = try await dataResponse(for: page, using: session)
     #expect(pageResponse.statusCode == 200)
     let pageBody = String(decoding: pageData, as: UTF8.self)
-    #expect(pageBody.contains("id=\"manifest\""))
+    #expect(pageBody.contains("id=\"playlistURL\""))
     #expect(pageBody.contains("data-paired=\"true\""))
     #expect(pageBody.contains("<p class=\"address\">127.0.0.1:\(port)</p>"))
     #expect(!pageBody.contains("http://127.0.0.1"))
     #expect(pageBody.contains("<svg class=\"mark\""))
     #expect(!pageBody.contains("<img"))
     #expect(!pageBody.lowercased().contains("upload"))
-    for foreign in ["Stremio", "Orgista", "Plex", "Kodi", "Jellyfin"] {
+    for foreign in ["Orgista", "Plex", "Kodi", "Jellyfin"] {
         #expect(!pageBody.contains(foreign))
     }
 

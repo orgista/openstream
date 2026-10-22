@@ -1,4 +1,4 @@
-#if DEBUG && OPENSTREAM_ADDONS
+#if DEBUG
 import Foundation
 
 /// One source from the owner's private dev-sources file, written by
@@ -9,7 +9,6 @@ enum AppleDevSource: Equatable, Sendable {
         case token(String)
     }
 
-    case stremio(name: String, manifestURL: String)
     case xtream(name: String, serverURL: String, username: String, password: String, epgURL: String?)
     case m3u(name: String, playlistURL: String, epgURL: String?)
     case smb(name: String, host: String, port: Int, share: String, path: String,
@@ -22,7 +21,6 @@ enum AppleDevSource: Equatable, Sendable {
     /// The file's `kind` value.
     var kindName: String {
         switch self {
-        case .stremio: "stremio"
         case .xtream: "xtream"
         case .m3u: "m3u"
         case .smb: "smb"
@@ -33,18 +31,17 @@ enum AppleDevSource: Equatable, Sendable {
 
     var name: String {
         switch self {
-        case .stremio(let name, _), .xtream(let name, _, _, _, _), .m3u(let name, _, _),
+        case .xtream(let name, _, _, _, _), .m3u(let name, _, _),
              .smb(let name, _, _, _, _, _, _, _), .mediaServer(_, let name, _, _), .folder(let name, _):
             name
         }
     }
 
-    /// Values that must never reach the trace. A playlist or configured
-    /// add-on URL carries its credentials in the address itself.
+    /// Values that must never reach the trace. A playlist URL carries its
+    /// credentials in the address itself.
     var secrets: [String] {
         let values: [String]
         switch self {
-        case .stremio(_, let url): values = [url]
         case .xtream(_, let server, let username, let password, _): values = [server, username, password]
         case .m3u(_, let playlist, _): values = [playlist]
         case .smb(_, _, _, _, _, let username, let password, _): values = [username, password]
@@ -134,9 +131,6 @@ enum AppleDevSourcesPolicy {
     /// The saved source with the same kind and address, which a remove run deletes.
     static func saved(_ source: AppleDevSource, in existing: [AppleSource]) -> AppleSource? {
         switch source {
-        case .stremio(_, let manifestURL):
-            guard let url = try? AppleManifestURLPolicy.normalize(manifestURL) else { return nil }
-            return existing.first { $0.isAddon && $0.url == url }
         case .xtream(_, let serverURL, _, _, _):
             return existingIPTV(.xtream, endpoint: serverURL, in: existing)
         case .m3u(_, let playlistURL, _):
@@ -160,12 +154,7 @@ enum AppleDevSourcesPolicy {
 
     /// `dev sources: <kind> <name>: added|exists|failed <reason>`.
     static func traceLine(for source: AppleDevSource, outcome: Outcome) -> String {
-        var label = source.name
-        if label.isEmpty, case .stremio(_, let manifestURL) = source {
-            // An add-on's host is public; its path can carry a configuration.
-            label = URL(string: manifestURL)?.host ?? ""
-        }
-        if label.isEmpty { label = "(unnamed)" }
+        let label = source.name.isEmpty ? "(unnamed)" : source.name
         let result = switch outcome {
         case .added: "added"
         case .exists: "exists"
@@ -203,8 +192,6 @@ enum AppleDevSourcesPolicy {
         }
         let source: AppleDevSource?
         switch kind {
-        case "stremio":
-            source = .stremio(name: name, manifestURL: required("manifestURL"))
         case "xtream":
             source = .xtream(name: name, serverURL: required("serverURL"), username: required("username"),
                              password: required("password"), epgURL: optional(entry["epgURL"]))

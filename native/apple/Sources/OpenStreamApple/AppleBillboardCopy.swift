@@ -45,7 +45,7 @@ public enum AppleBillboardCopy {
         return parts.isEmpty ? nil : parts.joined(separator: separator)
     }
 
-    /// The outlined rating badge ("TV-MA"), or nil when the add-on sent none.
+    /// The outlined rating badge ("TV-MA"), or nil when the metadata has none.
     public static func ratingBadge(_ contentRating: String?) -> String? {
         guard let rating = contentRating?.trimmingCharacters(in: .whitespacesAndNewlines),
               !rating.isEmpty, rating.count <= 10 else { return nil }
@@ -58,11 +58,11 @@ public enum AppleBillboardCopy {
     /// a series entry saved before episodes were recorded (no `partID`) cannot
     /// be resumed by the title page, so it says Play. Pressing it opens the
     /// title page, which starts the episode the entry names at its position
-    /// (`AppleStremioEpisodePolicy.savedEpisode`).
+    /// (`AppleMediaEpisodePolicy.savedEpisode`).
     public static func playTitle(progress: ApplePlaybackProgress?, type: String? = nil) -> String {
         guard let progress, progress.resumePosition != nil else { return "Play" }
         if type == "series", progress.partID == nil { return "Play" }
-        if let part = progress.partID, let episode = AppleStremioMetadataClient.episodeIdentity(part) {
+        if let part = progress.partID, let episode = AppleMediaIdentifier.episodeIdentity(part) {
             return "Resume S\(episode.season), E\(episode.episode)"
         }
         return "Resume"

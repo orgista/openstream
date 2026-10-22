@@ -4,7 +4,6 @@ import SwiftUI
 struct AppleLibraryFixMatchView: View {
     @Environment(\.dismiss) private var dismiss
     let group: AppleLibrarySeries
-    let sources: [AppleSource]
     let settings: AppleSettingsStore
     @State private var query = ""
     @State private var year = ""
@@ -17,9 +16,8 @@ struct AppleLibraryFixMatchView: View {
     /// Fixed when the sheet opens, so a pick does not retitle it on the way out.
     @State private var title: String
 
-    init(group: AppleLibrarySeries, sources: [AppleSource], settings: AppleSettingsStore) {
+    init(group: AppleLibrarySeries, settings: AppleSettingsStore) {
         self.group = group
-        self.sources = sources
         self.settings = settings
         _title = State(initialValue: AppleLocalLibraryStore.shared.metadata[group.id] == nil ? "Match" : "Change Metadata")
     }
@@ -82,7 +80,7 @@ struct AppleLibraryFixMatchView: View {
         defer { isSearching = false }
         do {
             let values = try await AppleLibraryMetadataResolver.correctionCandidates(
-                query: query, year: Int(year), kind: group.parsed.kind, sources: sources,
+                query: query, year: Int(year), kind: group.parsed.kind,
                 tmdbKey: settings.tmdbAPIKey, omdbKey: settings.omdbAPIKey)
             try Task.checkCancellation()
             results = values

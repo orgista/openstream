@@ -323,7 +323,7 @@ public struct AppleTMDBClient: Sendable {
         configuration: AppleTMDBConfiguration
     ) async throws -> [AppleWatchProvider] {
         let imdb = imdbID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard AppleStremioMetadataClient.isIMDBIdentifier(imdb),
+        guard AppleMediaIdentifier.isIMDBIdentifier(imdb),
               !imdb.contains(":") else { throw AppleTMDBError.invalidIdentifier }
 
         let find = try await load(
@@ -353,7 +353,7 @@ public struct AppleTMDBClient: Sendable {
         configuration: AppleTMDBConfiguration
     ) async throws -> AppleTMDBDetails {
         let imdb = imdbID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard AppleStremioMetadataClient.isIMDBIdentifier(imdb),
+        guard AppleMediaIdentifier.isIMDBIdentifier(imdb),
               !imdb.contains(":") else { throw AppleTMDBError.invalidIdentifier }
 
         let find = try await load(
@@ -421,7 +421,7 @@ public struct AppleTMDBClient: Sendable {
 
     public func sharedLinkDetails(imdbID: String,
                                   configuration: AppleTMDBConfiguration) async throws -> AppleCatalogItem {
-        guard AppleStremioMetadataClient.isIMDBIdentifier(imdbID) else { throw AppleTMDBError.invalidIdentifier }
+        guard AppleMediaIdentifier.isIMDBIdentifier(imdbID) else { throw AppleTMDBError.invalidIdentifier }
         let find = try await load(path: "/3/find/\(imdbID)",
                                   queryItems: [.init(name: "external_source", value: "imdb_id")],
                                   configuration: configuration, as: FindEnvelope.self)
@@ -443,7 +443,7 @@ public struct AppleTMDBClient: Sendable {
             return try await sharedLinkDetails(id: number, kind: mediaKind, configuration: configuration)
         }
         guard provider == "imdb" || provider == "tvdb",
-              provider == "imdb" ? AppleStremioMetadataClient.isIMDBIdentifier(id) : (Int(id) ?? 0) > 0 else {
+              provider == "imdb" ? AppleMediaIdentifier.isIMDBIdentifier(id) : (Int(id) ?? 0) > 0 else {
             throw AppleTMDBError.invalidIdentifier
         }
         let find = try await load(path: "/3/find/\(id)",
@@ -896,210 +896,6 @@ public struct AppleTMDBClient: Sendable {
     }
 }
 
-#if OPENSTREAM_ADDONS
-public struct AppleMetadataResolver: Sendable {
-    private let sourceClient: AppleStremioMetadataClient
-    private let tmdbClient: AppleTMDBClient
-    private let requestDeadline: Duration
-    private let overallDeadline: Duration
-    private let defaultSource: AppleSource
-    private let clock: any AppleClock
-
-    public init(
-        sourceClient: AppleStremioMetadataClient = AppleStremioMetadataClient(),
-        tmdbClient: AppleTMDBClient = AppleTMDBClient(),
-        requestDeadline: Duration = .seconds(1),
-        overallDeadline: Duration = .seconds(3),
-        defaultSource: AppleSource? = nil,
-        clock: any AppleClock = AppleSystemClock()
-    ) {
-        self.sourceClient = sourceClient
-        self.tmdbClient = tmdbClient
-        self.requestDeadline = max(requestDeadline, .milliseconds(1))
-        self.overallDeadline = max(overallDeadline, .milliseconds(1))
-        self.defaultSource = defaultSource ?? AppleStremioMetadataClient.defaultMetadataSource
-        self.clock = clock
-    }
-
-    public func resolve(
-        sources: [AppleSource],
-        preferredSourceID: AppleSource.ID? = nil,
-        type: String,
-        mediaID: String,
-        configuration: AppleTMDBConfiguration? = nil,
-        fallbackName: String? = nil,
-        onUpdate: (@Sendable (AppleTMDBDetails) async -> Void)? = nil
-    ) async throws -> AppleTMDBDetails? {
-        let cleanID = mediaID.trimmingCharacters(in: .whitespacesAndNewlines)
-        let cleanType = type.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard AppleCatalogDiscoveryPolicy.isShelfType(cleanType), !cleanID.isEmpty else { return nil }
-        // tv, anime, channel and custom types have no Cinemeta or TMDB
-        // record: only the add-on that listed the item is asked, for its own
-        // meta of that type.
-        let isTitleType = ["movie", "series", "episode"].contains(cleanType)
-
-        // Every source, and TMDB, is asked at once, each within
-        // `requestDeadline`. They were asked one after another, so on the
-        // Apple TV a few slow or failing add-ons ahead of the one that
-        // answers held the overview back 1.2-2.3 s on every opening, even
-        // with the caches warm. Answers are still merged in candidate order,
-        // with TMDB last, so a preferred add-on wins exactly as before.
-        let candidates = isTitleType
-            ? Self.candidates(
-                sources: sources,
-                preferredSourceID: preferredSourceID,
-                mediaID: cleanID,
-                defaultSource: defaultSource
-            )
-            : sources.filter { source in
-                source.id == preferredSourceID
-                    && source.isAddon
-                    && source.isEnabled
-                    && source.resources.contains { $0.caseInsensitiveCompare("meta") == .orderedSame }
-            }
-        guard !candidates.isEmpty || isTitleType else { return nil }
-        let timeout = min(requestDeadline, overallDeadline)
-        let tmdbIMDBID = isTitleType
-            ? cleanID.split(separator: ":").first.map(String.init)
-                .flatMap { AppleStremioMetadataClient.isIMDBIdentifier($0) ? $0 : nil }
-            : nil
-        let values = try await withThrowingTaskGroup(of: (index: Int, value: AppleTMDBDetails?).self) { group in
-            for (index, source) in candidates.enumerated() {
-                group.addTask {
-                    do {
-                        return (index, try await appleBoundedMetadataLookup(timeout: timeout, clock: clock) {
-                            try await sourceClient.details(source: source, type: cleanType, mediaID: cleanID,
-                                                           isListingSource: source.id == preferredSourceID,
-                                                           fallbackName: fallbackName)
-                        })
-                    } catch is CancellationError {
-                        throw CancellationError()
-                    } catch {
-                        return (index, nil)
-                    }
-                }
-            }
-            if let configuration, let tmdbIMDBID {
-                group.addTask {
-                    do {
-                        return (candidates.count, try await appleBoundedMetadataLookup(timeout: timeout, clock: clock) {
-                            try await tmdbClient.details(
-                                imdbID: tmdbIMDBID,
-                                kind: cleanType == "series" ? .series : .movie,
-                                configuration: configuration
-                            )
-                        })
-                    } catch is CancellationError {
-                        throw CancellationError()
-                    } catch {
-                        // Source metadata remains usable when enrichment fails.
-                        return (candidates.count, nil)
-                    }
-                }
-            }
-            var values: [Int: AppleTMDBDetails] = [:]
-            for try await result in group {
-                try Task.checkCancellation()
-                if let value = result.value {
-                    values[result.index] = value
-                    var partial: AppleTMDBDetails?
-                    for index in values.keys.sorted() {
-                        if let value = values[index] { partial = Self.merge(partial, value) }
-                    }
-                    if let partial, let onUpdate { await onUpdate(partial) }
-                }
-            }
-            return values
-        }
-        try Task.checkCancellation()
-        var merged: AppleTMDBDetails?
-        for index in values.keys.sorted() {
-            if let value = values[index] { merged = Self.merge(merged, value) }
-        }
-        return merged
-    }
-
-    private static func candidates(
-        sources: [AppleSource],
-        preferredSourceID: AppleSource.ID?,
-        mediaID: String,
-        defaultSource: AppleSource
-    ) -> [AppleSource] {
-        let eligible = sources.filter { source in
-            source.isAddon
-                && source.isEnabled
-                && source.resources.contains { $0.caseInsensitiveCompare("meta") == .orderedSame }
-        }
-
-        let builtIn: [AppleSource]
-        let addOns: [AppleSource]
-
-        if let defaultManifestID = defaultSource.manifestID {
-            builtIn = eligible.filter { $0.manifestID?.caseInsensitiveCompare(defaultManifestID) == .orderedSame }
-            addOns = eligible.filter { $0.manifestID?.caseInsensitiveCompare(defaultManifestID) != .orderedSame }
-        } else {
-            builtIn = []
-            addOns = eligible
-        }
-
-        var result = addOns.filter { $0.id == preferredSourceID }
-            + addOns.filter { $0.id != preferredSourceID }
-            + builtIn
-
-        let hasDefaultSource = defaultSource.manifestID.map { manifestID in
-            result.contains { $0.manifestID == manifestID }
-        } ?? false
-
-        if AppleStremioMetadataClient.isIMDBIdentifier(mediaID), !hasDefaultSource {
-            result.append(defaultSource)
-        }
-        return result
-    }
-
-    private static func merge(
-        _ lhs: AppleTMDBDetails?,
-        _ rhs: AppleTMDBDetails
-    ) -> AppleTMDBDetails {
-        guard let lhs else { return rhs }
-        return AppleTMDBDetails(
-            mediaID: lhs.mediaID ?? rhs.mediaID,
-            mediaType: lhs.mediaType ?? rhs.mediaType,
-            title: nonEmpty(lhs.title) ?? nonEmpty(rhs.title),
-            releaseInfo: nonEmpty(lhs.releaseInfo) ?? nonEmpty(rhs.releaseInfo),
-            runtimeMinutes: lhs.runtimeMinutes ?? rhs.runtimeMinutes,
-            contentRating: nonEmpty(lhs.contentRating) ?? nonEmpty(rhs.contentRating),
-            formatBadges: lhs.formatBadges.isEmpty ? rhs.formatBadges : lhs.formatBadges,
-            genres: lhs.genres.isEmpty ? rhs.genres : lhs.genres,
-            cast: lhs.cast.isEmpty ? rhs.cast : lhs.cast,
-            director: nonEmpty(lhs.director) ?? nonEmpty(rhs.director),
-            writers: lhs.writers.isEmpty ? rhs.writers : lhs.writers,
-            tagline: nonEmpty(lhs.tagline) ?? nonEmpty(rhs.tagline),
-            overview: nonEmpty(lhs.overview) ?? nonEmpty(rhs.overview),
-            posterURL: lhs.posterURL ?? rhs.posterURL,
-            backdropURL: lhs.backdropURL ?? rhs.backdropURL,
-            logoURL: lhs.logoURL ?? rhs.logoURL,
-            trailerYouTubeKeys: (lhs.trailerYouTubeKeys + rhs.trailerYouTubeKeys).reduce(into: []) { keys, key in
-                if !keys.contains(key) { keys.append(key) }
-            },
-            textlessBackdropURL: lhs.textlessBackdropURL ?? rhs.textlessBackdropURL,
-            castMembers: AppleTitlePagePolicy.fillingPortraits(lhs.castMembers.isEmpty ? rhs.castMembers : lhs.castMembers,
-                                                               from: lhs.castMembers + rhs.castMembers),
-            countries: lhs.countries.isEmpty ? rhs.countries : lhs.countries,
-            originalLanguage: nonEmpty(lhs.originalLanguage) ?? nonEmpty(rhs.originalLanguage),
-            spokenLanguages: lhs.spokenLanguages.isEmpty ? rhs.spokenLanguages : lhs.spokenLanguages,
-            textlessPosterURL: lhs.textlessPosterURL ?? rhs.textlessPosterURL
-        )
-    }
-
-    private static func nonEmpty(_ value: String?) -> String? {
-        guard let value else { return nil }
-        let clean = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return clean.isEmpty ? nil : clean
-    }
-
-
-}
-#else
 public struct AppleMetadataResolver: Sendable {
     private let tmdbClient: AppleTMDBClient
     public init(tmdbClient: AppleTMDBClient = AppleTMDBClient()) { self.tmdbClient = tmdbClient }
@@ -1114,7 +910,7 @@ public struct AppleMetadataResolver: Sendable {
     ) async throws -> AppleTMDBDetails? {
         guard let configuration else { return nil }
         let id = mediaID.split(separator: ":").first.map(String.init) ?? mediaID
-        guard AppleStremioMetadataClient.isIMDBIdentifier(id) else { return nil }
+        guard AppleMediaIdentifier.isIMDBIdentifier(id) else { return nil }
         let details = try await tmdbClient.details(imdbID: id, kind: type == "series" ? .series : .movie, configuration: configuration)
         try Task.checkCancellation()
         if let onUpdate { await onUpdate(details) }
@@ -1122,4 +918,3 @@ public struct AppleMetadataResolver: Sendable {
     }
 }
 
-#endif

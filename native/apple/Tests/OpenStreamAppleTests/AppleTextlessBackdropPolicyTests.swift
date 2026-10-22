@@ -249,7 +249,7 @@ import Testing
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let wordmark = URL(string: "https://fixture.example/wordmark.png")!
-        let resolver = AppleLibraryMetadataResolver(directory: root) { title, _, _, _ in
+        let resolver = AppleLibraryMetadataResolver(directory: root) { title, _, _ in
             AppleCatalogItem(
                 mediaID: "tt5657846", type: "movie", name: title.title,
                 backgroundURL: URL(string: "https://fixture.example/backdrop.jpg"),
@@ -257,13 +257,13 @@ import Testing
             )
         }
         let item = libraryItem("A.Bad.Moms.Christmas.2017.mkv")
-        let resolved = try await resolver.resolve(item, sources: [], tmdbKey: "", omdbKey: "")
+        let resolved = try await resolver.resolve(item, tmdbKey: "", omdbKey: "")
         #expect(resolved?.logoURL == wordmark)
 
         // Reopening reads the cached JSON, which is where a missing Codable
         // field would quietly drop the wordmark again.
-        let reopened = AppleLibraryMetadataResolver(directory: root) { _, _, _, _ in nil }
-        #expect(try await reopened.resolve(item, sources: [], tmdbKey: "", omdbKey: "")?.logoURL == wordmark)
+        let reopened = AppleLibraryMetadataResolver(directory: root) { _, _, _ in nil }
+        #expect(try await reopened.resolve(item, tmdbKey: "", omdbKey: "")?.logoURL == wordmark)
     }
 
     /// A viewer who already has a Library holds week-old cache entries that
@@ -289,12 +289,12 @@ import Testing
             AppleLibraryMetadataResolver.cacheKey(item) + ".json"))
 
         let wordmark = URL(string: "https://fixture.example/wordmark.png")!
-        let resolver = AppleLibraryMetadataResolver(directory: root) { title, _, _, _ in
+        let resolver = AppleLibraryMetadataResolver(directory: root) { title, _, _ in
             AppleCatalogItem(mediaID: "tt5657846", type: "movie", name: title.title, logoURL: wordmark)
         }
         // A fresh-but-old-shaped entry is refused, so the wordmark arrives now
         // rather than whenever the seven-day lifetime happens to run out.
-        #expect(try await resolver.resolve(item, sources: [], tmdbKey: "", omdbKey: "")?.logoURL == wordmark)
+        #expect(try await resolver.resolve(item, tmdbKey: "", omdbKey: "")?.logoURL == wordmark)
 
         // And the rewritten entry is now publishable: `cachedLookups` applies
         // the same gate, so the store no longer skips the group as "already

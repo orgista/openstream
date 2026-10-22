@@ -32,7 +32,6 @@ struct AppleEngineReliabilityTests {
         #expect(!retries(failure(.timedOut)))
         #expect(!retries(failure(.unavailable)))
         #expect(!retries(failure(.network, status: 404)))
-        #expect(!retries(failure(.player, message: AppleStreamPlaceholderPolicy.failureMessage)))
         #expect(!retries(failure(.network, message: AppleTruncatedMediaProbe.message)))
         #expect(retries(failure(.network, status: 503)))
     }
@@ -67,7 +66,7 @@ struct AppleEngineReliabilityTests {
 @Suite(.serialized, .timeLimit(.minutes(1))) struct AppleEngineOpenRetryCoordinatorTests {
     private func request(_ id: String) -> ApplePlaybackRequest {
         ApplePlaybackRequest(url: URL(string: "http://127.0.0.1:8765/media/\(id).mkv")!,
-                             mediaID: id, sourceKind: .stremio)
+                             mediaID: id, sourceKind: .catalog)
     }
 
     /// No wall-clock deadline: the parallel gate can hold the coordinator's

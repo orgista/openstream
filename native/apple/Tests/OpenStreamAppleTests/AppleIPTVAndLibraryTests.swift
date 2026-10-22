@@ -517,33 +517,6 @@ private actor IPTVRequestRecorder {
     #expect(matches.map(\.id) == ["sports"])
 }
 
-@Test func stremioMetadataClientLoadsTrailerAndOfficialWordmarkAssets() async throws {
-    let source = AppleSource(
-        kind: .stremio,
-        name: "Metadata",
-        url: URL(string: "https://meta.example/manifest.json")!,
-        resources: ["meta"]
-    )
-    let client = AppleStremioMetadataClient { request in
-        let data = Data(#"{"meta":{"logo":"https://img.example/logo.png","trailers":[{"source":"trailer_123","type":"Trailer"},{"source":"trailer_456","type":"Trailer"}]}}"#.utf8)
-        return (
-            data,
-            HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-        )
-    }
-
-    let assets = await client.previewAssets(
-        sources: [source],
-        preferredSourceID: source.id,
-        type: "movie",
-        mediaID: "tt1234567"
-    )
-
-    #expect(assets?.trailerYouTubeKey == "trailer_123")
-    #expect(assets?.trailerYouTubeKeys == ["trailer_123", "trailer_456"])
-    #expect(assets?.logoURL == URL(string: "https://img.example/logo.png"))
-}
-
 @Test func xtreamClientClassifiesRejectedAccounts() async throws {
     let source = AppleSource(
         kind: .liveTV,
@@ -717,35 +690,6 @@ private actor IPTVRequestRecorder {
     #expect(!persistedText.contains("viewer"))
     #expect(!persistedText.contains("secret"))
     #expect(AppleSourceStore(defaults: defaults, keychain: keychain).sources == store.sources)
-}
-
-@MainActor
-@Test func sourceStoreLossilyRetainsKnownSourcesWhenAFutureKindExists() throws {
-    let suiteName = "openstream-source-lossy-\(UUID().uuidString)"
-    let defaults = try #require(UserDefaults(suiteName: suiteName))
-    defer { defaults.removePersistentDomain(forName: suiteName) }
-    let source = AppleSource(
-        kind: .stremio,
-        name: "Known",
-        url: URL(string: "https://known.example/manifest.json")!
-    )
-    let encoded = try JSONEncoder().encode(source)
-    let known = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
-    let future: [String: Any] = [
-        "id": UUID().uuidString,
-        "kind": "future-provider",
-        "name": "Future",
-        "url": "https://future.example/",
-    ]
-    defaults.set(try JSONSerialization.data(withJSONObject: [known, future]), forKey: "openstream.sources.v1")
-
-    let store = AppleSourceStore(defaults: defaults, keychain: TestAppleCredentialStore())
-    #expect(store.sources.map(\.id) == [source.id])
-    store.setEnabled(false, id: source.id)
-    let preserved = try #require(defaults.data(forKey: "openstream.sources.v1"))
-    let members = try #require(JSONSerialization.jsonObject(with: preserved) as? [[String: Any]])
-    #expect(members.count == 2)
-    #expect(members.contains { $0["kind"] as? String == "future-provider" })
 }
 
 @MainActor
@@ -1144,77 +1088,17 @@ private actor IPTVRequestRecorder {
     #expect(items.allSatisfy { $0.sourceID == source.id })
 }
 
-@Test func stremioMetadataClientLoadsEpisodeIdentitiesForSeriesPlayback() async throws {
-    let source = AppleSource(
-        kind: .stremio,
-        name: "Catalog",
-        url: URL(string: "https://catalog.example/config/manifest.json")!,
-        resources: ["catalog", "meta"]
-    )
-    let client = AppleStremioMetadataClient { request in
-        #expect(request.url?.absoluteString == "https://catalog.example/config/meta/series/tt1234567.json")
-        let data = Data(#"""
-        {"meta":{"videos":[
-          {"id":"tt1234567:1:1","title":"Pilot","season":1,"episode":1},
-          {"id":"tt1234567:1:2","name":"Second","season":"1","episode":"2"},
-          {"id":"","title":"Bad"}
-        ]}}
-        """#.utf8)
-        return (
-            data,
-            HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-        )
-    }
-
-    let episodes = try await client.episodes(source: source, mediaID: "tt1234567")
-
-    #expect(episodes.map(\.id) == ["tt1234567:1:1", "tt1234567:1:2"])
-    #expect(episodes.map(\.displayTitle) == ["S1 E1 · Pilot", "S1 E2 · Second"])
-}
-
-@Test func stremioEpisodePolicyGroupsAndOrdersSeasonsWithoutLosingSpecials() {
+@Test func episodePolicyGroupsAndOrdersSeasonsWithoutLosingSpecials() {
     let episodes = [
-        AppleStremioEpisode(id: "s2e2", title: "Second", season: 2, episode: 2),
-        AppleStremioEpisode(id: "special", title: "Holiday", season: 0, episode: 1),
-        AppleStremioEpisode(id: "s1e2", title: "Later", season: 1, episode: 2),
-        AppleStremioEpisode(id: "s1e1", title: "Pilot", season: 1, episode: 1),
+        AppleMediaEpisode(id: "s2e2", title: "Second", season: 2, episode: 2),
+        AppleMediaEpisode(id: "special", title: "Holiday", season: 0, episode: 1),
+        AppleMediaEpisode(id: "s1e2", title: "Later", season: 1, episode: 2),
+        AppleMediaEpisode(id: "s1e1", title: "Pilot", season: 1, episode: 1),
     ]
 
-    #expect(AppleStremioEpisodePolicy.seasons(in: episodes) == [0, 1, 2])
-    #expect(AppleStremioEpisodePolicy.episodes(in: 1, from: episodes).map(\.id) == ["s1e1", "s1e2"])
-    #expect(AppleStremioEpisodePolicy.episodes(in: 0, from: episodes).map(\.displayTitle) == ["S0 E1 · Holiday"])
-}
-
-@Test func stremioMetadataClientFallsBackToDedicatedMetadataAddon() async throws {
-    let catalog = AppleSource(
-        kind: .stremio,
-        name: "Catalog only",
-        url: URL(string: "https://catalog.example/manifest.json")!,
-        resources: ["catalog"]
-    )
-    let metadata = AppleSource(
-        kind: .stremio,
-        name: "Metadata",
-        url: URL(string: "https://meta.example/manifest.json")!,
-        manifestID: "com.linvo.cinemeta",
-        resources: ["meta"]
-    )
-    let client = AppleStremioMetadataClient { request in
-        #expect(request.url?.host == "meta.example")
-        let data = Data(#"{"meta":{"videos":[{"id":"tt1234567:1:1","title":"Pilot","season":1,"episode":1}]}}"#.utf8)
-        return (
-            data,
-            HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-        )
-    }
-
-    let episodes = try await client.episodes(
-        sources: [catalog, metadata],
-        preferredSourceID: catalog.id,
-        mediaID: "tt1234567"
-    )
-
-    #expect(episodes.map(\.id) == ["tt1234567:1:1"])
+    #expect(AppleMediaEpisodePolicy.seasons(in: episodes) == [0, 1, 2])
+    #expect(AppleMediaEpisodePolicy.episodes(in: 1, from: episodes).map(\.id) == ["s1e1", "s1e2"])
+    #expect(AppleMediaEpisodePolicy.episodes(in: 0, from: episodes).map(\.displayTitle) == ["S0 E1 · Holiday"])
 }
 
 @MainActor

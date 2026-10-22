@@ -8,8 +8,6 @@ struct AppleHomeHeroCarousel<Page: View>: View {
     let viewportSize: CGSize
     let phoneLayout: AppleHomePhoneHeroLayout
     let wideLayout: AppleMacHeroLayout
-    /// Loads the trailer of the page after the one showing.
-    var prefetchTrailer: (Int) async -> Void = { _ in }
     @ViewBuilder let page: (Int, Bool, AppleHomePresentationPolicy.Hero, Int, Int, AppleHomeTVHeroContext?) -> Page
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var rotatingCycle = AppleHeroRotation.Cycle(count: 0)
@@ -65,7 +63,7 @@ struct AppleHomeHeroCarousel<Page: View>: View {
     var body: some View {
         Group {
             #if os(macOS)
-            AppleHomeMacHeroCarousel(pageIDs: pageIDs, layout: wideLayout, prefetchTrailer: prefetchTrailer) { index in
+            AppleHomeMacHeroCarousel(pageIDs: pageIDs, layout: wideLayout) { index in
                 page(index, false, .mac, 0, 0, nil)
             } preload: { index in
                 AppleHomeMacHeroPreload(item: items[index], wordmark: wordmarks[index], layout: wideLayout)
@@ -80,8 +78,7 @@ struct AppleHomeHeroCarousel<Page: View>: View {
             if presentation == .phone || presentation == .pad {
                 AppleHomePhoneHeroCarousel(pageIDs: pageIDs,
                     dotsCentreInset: presentation == .pad ? AppleMacHeroLayout.padDotsCentreInset : AppleHomePhoneHeroLayout.dotsCentreInset,
-                    waitsForCurrentArtwork: presentation == .phone,
-                    prefetchTrailer: prefetchTrailer) { index in
+                    waitsForCurrentArtwork: presentation == .phone) { index in
                     page(index, false, presentation, 0, 0, nil)
                 } preload: { index in
                     if presentation == .pad {

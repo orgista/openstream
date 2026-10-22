@@ -82,7 +82,7 @@ struct AppleDiscoverRecommendationCacheTests {
     }
 
     private func source() -> AppleSource {
-        AppleSource(kind: .stremio, name: "Fixture", url: URL(string: "https://fixture.example/manifest.json")!,
-            resources: ["catalog", "meta"])
+        AppleSource(kind: .liveTV, name: "Fixture", url: URL(string: "https://fixture.example/playlist.m3u")!,
+            iptvType: .m3u)
     }
 }

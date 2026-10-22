@@ -24,7 +24,7 @@ public enum AppleWebManagementServerError: Error, Equatable, LocalizedError, Sen
         case .invalidSessionURL:
             "Web Management could not create its local URL."
         case .sourceValidationTimedOut:
-            "The add-on took too long to respond."
+            "The source took too long to respond."
         }
     }
 }
@@ -110,9 +110,6 @@ public final class AppleWebManagementServer {
     public var onStop: (@MainActor @Sendable (AppleWebManagementServerStopReason) -> Void)?
 
     private let configuration: Configuration
-    #if OPENSTREAM_ADDONS
-    private let manifestClient: AppleManifestClient
-    #endif
     private let iptvClient: AppleIPTVClient
     private let networkQueue = DispatchQueue(label: "com.orgista.openstream.web-management", qos: .userInitiated)
 
@@ -126,19 +123,6 @@ public final class AppleWebManagementServer {
     private var generation = UUID()
     private var isCompleting = false
 
-    #if OPENSTREAM_ADDONS
-    public init(
-        configuration: Configuration = Configuration(),
-        manifestClient: AppleManifestClient = AppleManifestClient(),
-        iptvClient: AppleIPTVClient = AppleIPTVClient(),
-        now: @escaping @MainActor () -> Date = { Date() }
-    ) {
-        self.now = now
-        self.configuration = configuration
-        self.manifestClient = manifestClient
-        self.iptvClient = iptvClient
-    }
-    #else
     public init(
         configuration: Configuration = Configuration(),
         iptvClient: AppleIPTVClient = AppleIPTVClient(),
@@ -148,7 +132,6 @@ public final class AppleWebManagementServer {
         self.configuration = configuration
         self.iptvClient = iptvClient
     }
-    #endif
 
     @discardableResult
     public func start(sourceStore: AppleSourceStore) async throws -> AppleWebManagementSession {
@@ -588,7 +571,7 @@ public final class AppleWebManagementServer {
             }
             guard let browserToken else {
                 return (.html(401, "Session Ended", page(session: activeSession, paired: false,
-                    manifest: form["manifest"] ?? "", error: "Session ended — scan the code again",
+                    error: "Session ended — scan the code again",
                     sourceType: Self.sourceType(from: form), draft: Self.draft(from: form))), false)
             }
             let cookie = pairingCookies(browserToken)
@@ -620,7 +603,6 @@ public final class AppleWebManagementServer {
                 break
             }
 
-            let manifest = form["manifest"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let sourceType = Self.sourceType(from: form)
             let draft = Self.draft(from: form)
             isCompleting = true
@@ -636,11 +618,7 @@ public final class AppleWebManagementServer {
                 case "xtream":
                     source = try await addXtream(form: form, sourceStore: sourceStore)
                 default:
-                    #if OPENSTREAM_ADDONS
-                    source = try await addSource(manifestValue: manifest, sourceStore: sourceStore)
-                    #else
                     return (.plain(400, "Bad Request", "Unsupported source type."), false)
-                    #endif
                 }
                 traceWeb("added \(sourceType) source \"\(source.name)\"")
                 guard !Task.isCancelled, self.session?.token == activeSession.token else {
@@ -668,7 +646,6 @@ public final class AppleWebManagementServer {
                         page(
                             session: activeSession,
                             paired: true,
-                            manifest: manifest,
                             error: message,
                             sourceType: sourceType,
                             draft: draft
@@ -692,14 +669,12 @@ public final class AppleWebManagementServer {
     private func page(
         session activeSession: AppleWebManagementSession,
         paired: Bool,
-        manifest: String = "",
         notice: String? = nil,
         error: String? = nil,
         sourceType: String = AppleWebManagementPage.defaultSourceType,
         draft: [String: String] = [:]
     ) -> String {
         AppleWebManagementPage.setup(
-            manifest: manifest,
             error: error,
             pairingCode: paired ? nil : activeSession.pairingCode,
             notice: notice,
@@ -718,17 +693,11 @@ public final class AppleWebManagementServer {
         return "\(host):\(port)"
     }
 
-    /// `addon` is the default so older posts that carry only `manifest` still
-    /// add an add-on.
     private static func sourceType(from form: [String: String]) -> String {
         switch form["sourceType"]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
         case "m3u": "m3u"
         case "xtream": "xtream"
-        #if OPENSTREAM_ADDONS
-        default: "addon"
-        #else
         default: "unsupported"
-        #endif
         }
     }
 
@@ -740,28 +709,6 @@ public final class AppleWebManagementServer {
         }
     }
 
-#if OPENSTREAM_ADDONS
-    private func addSource(
-        manifestValue: String,
-        sourceStore: AppleSourceStore
-    ) async throws -> AppleSource {
-        let client = manifestClient
-        return try await withThrowingTaskGroup(of: AppleSource.self) { group in
-            group.addTask {
-                try await sourceStore.addStremio(manifestValue: manifestValue, client: client)
-            }
-            group.addTask {
-                try await Task.sleep(for: .seconds(20))
-                throw AppleWebManagementServerError.sourceValidationTimedOut
-            }
-            guard let result = try await group.next() else {
-                throw AppleWebManagementServerError.sourceValidationTimedOut
-            }
-            group.cancelAll()
-            return result
-        }
-    }
-#endif
 
     private func pairingCookies(_ token: String) -> [String] {
         ["openstream_token=\(token); Max-Age=\(Int(Self.browserInactivityDuration)); SameSite=Strict; HttpOnly; Path=/"]

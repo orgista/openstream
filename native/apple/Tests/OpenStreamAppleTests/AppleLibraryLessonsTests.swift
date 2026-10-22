@@ -82,21 +82,21 @@ struct AppleLibraryLessonsTests {
         let old = AppleCatalogItem(mediaID: "tt0000004", type: "movie", name: "Film", posterURL: poster)
         let enriched = AppleCatalogItem(mediaID: old.mediaID, type: old.type, name: old.name,
             posterURL: poster, genres: ["Drama", "Adventure"])
-        let resolver = AppleLibraryMetadataResolver(directory: root) { _, _, _, _ in lookupHasGenres ? enriched : nil }
+        let resolver = AppleLibraryMetadataResolver(directory: root) { _, _, _ in lookupHasGenres ? enriched : nil }
         let folder = root.appendingPathComponent(item.sourceID.uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let cache = folder.appendingPathComponent(AppleLibraryMetadataResolver.cacheKey(item) + ".json")
         let addedAt = Date(timeIntervalSince1970: 1_700_000_000)
         try JSONEncoder().encode(Seed(value: old, checkedAt: .now, addedAt: addedAt, schema: 1)).write(to: cache)
         #expect(await resolver.cachedLookups(for: [group]).metadata[group.id] == old)
-        #expect(await resolver.needsRevalidation(item, sources: [], tmdbKey: "", omdbKey: ""))
+        #expect(await resolver.needsRevalidation(item, tmdbKey: "", omdbKey: ""))
         let expected = lookupHasGenres ? enriched : old
-        #expect(try await resolver.resolve(item, sources: [], tmdbKey: "", omdbKey: "") == expected)
+        #expect(try await resolver.resolve(item, tmdbKey: "", omdbKey: "") == expected)
         let saved = try JSONDecoder().decode(Seed.self, from: Data(contentsOf: cache))
         #expect(saved.addedAt == addedAt)
         #expect(saved.value.posterURL == poster)
         #expect(saved.value.genres == expected.genres)
-        #expect(!(await resolver.needsRevalidation(item, sources: [], tmdbKey: "", omdbKey: "")))
+        #expect(!(await resolver.needsRevalidation(item, tmdbKey: "", omdbKey: "")))
     }
 
     @MainActor
@@ -105,7 +105,7 @@ struct AppleLibraryLessonsTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let source = UUID()
         let titles = AppleLibrarySeries.groups(["Alpha.2020.mkv", "Beta.2021.mkv", "Gamma.2022.mkv"].map { file($0, source: source) })
-        let resolver = AppleLibraryMetadataResolver(directory: root) { _, _, _, _ in nil }
+        let resolver = AppleLibraryMetadataResolver(directory: root) { _, _, _ in nil }
         let store = AppleLocalLibraryStore(resolver: resolver, groups: titles)
         let genres = ["Alpha": ["Drama", "Comedy"], "Beta": ["Drama"], "Gamma": ["Drama", "Horror"]]
         for (index, title) in titles.enumerated() {
@@ -127,13 +127,13 @@ struct AppleLibraryLessonsTests {
         let item = file("Film.2024.mkv", source: UUID())
         let candidate = AppleCatalogItem(mediaID: "tt0000004", type: "movie", name: "Film")
         let cache = root.appendingPathComponent("cache")
-        let resolver = AppleLibraryMetadataResolver(directory: cache, matchDirectory: blocked) { _, _, _, _ in candidate }
-        #expect(try await resolver.resolve(item, sources: [], tmdbKey: "", omdbKey: "") == candidate)
-        let reopened = AppleLibraryMetadataResolver(directory: cache, matchDirectory: blocked) { _, _, _, _ in
+        let resolver = AppleLibraryMetadataResolver(directory: cache, matchDirectory: blocked) { _, _, _ in candidate }
+        #expect(try await resolver.resolve(item, tmdbKey: "", omdbKey: "") == candidate)
+        let reopened = AppleLibraryMetadataResolver(directory: cache, matchDirectory: blocked) { _, _, _ in
             Issue.record("A saved metadata entry must avoid another lookup")
             return nil
         }
-        #expect(try await reopened.resolve(item, sources: [], tmdbKey: "", omdbKey: "") == candidate)
+        #expect(try await reopened.resolve(item, tmdbKey: "", omdbKey: "") == candidate)
         #expect(await reopened.cachedLookups(for: AppleLibrarySeries.groups([item])).metadata.values.first == candidate)
         #expect(await reopened.matchRecord(for: item) == nil)
     }
@@ -145,13 +145,13 @@ struct AppleLibraryLessonsTests {
         let original = file("Dune.2021.1080p.mkv", source: source)
         let wrong = AppleCatalogItem(mediaID: "tt0000001", type: "movie", name: "Dune", releaseInfo: "1984")
         let correct = AppleCatalogItem(mediaID: "tt0000002", type: "movie", name: "Dune", releaseInfo: "2020")
-        let resolver = AppleLibraryMetadataResolver(directory: root.appendingPathComponent("cache"), matchDirectory: root.appendingPathComponent("matches")) { _, _, _, _ in wrong }
-        #expect(try await resolver.resolve(original, sources: [], tmdbKey: "", omdbKey: "") == wrong)
+        let resolver = AppleLibraryMetadataResolver(directory: root.appendingPathComponent("cache"), matchDirectory: root.appendingPathComponent("matches")) { _, _, _ in wrong }
+        #expect(try await resolver.resolve(original, tmdbKey: "", omdbKey: "") == wrong)
         try await resolver.correctMatch(for: original, candidate: correct, provider: "fixture", explicitIDs: ["imdb": correct.mediaID])
-        let reopened = AppleLibraryMetadataResolver(directory: root.appendingPathComponent("cache-v2"), matchDirectory: root.appendingPathComponent("matches")) { _, _, _, _ in wrong }
+        let reopened = AppleLibraryMetadataResolver(directory: root.appendingPathComponent("cache-v2"), matchDirectory: root.appendingPathComponent("matches")) { _, _, _ in wrong }
         let rescanned = file("Dune.2021.4K.mkv", source: source)
-        #expect(try await reopened.resolve(rescanned, sources: [], tmdbKey: "", omdbKey: "") == correct)
-        #expect(try await reopened.resolve(rescanned, sources: [], tmdbKey: "", omdbKey: "", refresh: true) == correct)
+        #expect(try await reopened.resolve(rescanned, tmdbKey: "", omdbKey: "") == correct)
+        #expect(try await reopened.resolve(rescanned, tmdbKey: "", omdbKey: "", refresh: true) == correct)
         let record = try #require(await reopened.matchRecord(for: rescanned))
         #expect(record.isManual)
         #expect(record.explicitIDs["imdb"] == correct.mediaID)
@@ -174,7 +174,7 @@ struct AppleLibraryLessonsTests {
         playback.save(mediaID: identity, position: 120, duration: 1000)
         let saved = playback.progress(for: identity)
         let group = try #require(AppleLibrarySeries.groups([file]).first)
-        let resolver = AppleLibraryMetadataResolver(directory: root) { _, _, _, _ in nil }
+        let resolver = AppleLibraryMetadataResolver(directory: root) { _, _, _ in nil }
         let candidate = AppleCatalogItem(mediaID: "tt0000003", type: "movie", name: "Correct Film")
         try await store.correctMatch(group, candidate: candidate, provider: "fixture", resolver: resolver)
         #expect(store.catalogItem(for: group) == candidate)
@@ -193,7 +193,7 @@ struct AppleLibraryLessonsTests {
         #expect(!AppleLocalLibraryStore.matchesEpisode(range, episode: .init(id: "tt1:1:3", title: "", season: 1, episode: 3)))
         let dated = file("Show.2026-10-12.mkv", source: source)
         let datedGroup = try #require(AppleLibrarySeries.groups([dated]).first)
-        let enriched = AppleStremioEpisode(id: "tt1:4:8", title: "News", season: 4, episode: 8, releaseInfo: "2026-10-12")
+        let enriched = AppleMediaEpisode(id: "tt1:4:8", title: "News", season: 4, episode: 8, releaseInfo: "2026-10-12")
         #expect(AppleLocalLibraryStore.episodes(group: datedGroup, mediaID: "tt1", enriched: [enriched]) == [enriched])
         #expect(AppleLocalLibraryStore.matchesEpisode(dated, episode: enriched))
         #expect(AppleLibraryTitleParser.parse(name: "Show.2026-02-30.mkv").airDate == nil)

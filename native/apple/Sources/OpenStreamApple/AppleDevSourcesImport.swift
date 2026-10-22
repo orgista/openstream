@@ -1,4 +1,4 @@
-#if DEBUG && OPENSTREAM_ADDONS
+#if DEBUG
 import Foundation
 
 /// `-OpenStreamDevSources <path>`: adds every source in the owner's
@@ -83,16 +83,6 @@ public enum AppleDevSourcesImport {
             appleTrace(AppleDevSourcesPolicy.traceLine(for: source, outcome: outcome))
         }
         apply(file.settings, to: settings)
-        // Widget/Top Shelf E2E tests need unfinished progress, without playing a clip to completion.
-        if AppleNetworkStub.isActive, UserDefaults.standard.bool(forKey: "OpenStreamStubContinueWatching"),
-           let source = sourceStore.sources.first(where: { $0.isAddon && $0.url.host == "fixture.example" }) {
-            // Use the ingestion identity the publisher reads, not a transport ID.
-            // Movie Six has no private Library copy merged into its catalog record.
-            let item = AppleCatalogItem(mediaID: "tt0000006", type: "movie", name: "Stub Movie Six")
-            let record = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item)
-            settings.topShelfEnabled = true
-            ApplePlaybackStore().save(mediaID: record.id, position: 120, duration: 5400)
-        }
         let skipped = file.problems.count + file.ignoredKinds.count
         appleTrace(AppleDevSourcesPolicy.summaryLine(added: added, exists: exists, failed: failed, skipped: skipped))
     }
@@ -101,9 +91,6 @@ public enum AppleDevSourcesImport {
         if AppleDevSourcesPolicy.alreadyAdded(source, in: store.sources) { return .exists }
         do {
             switch source {
-            case .stremio(_, let manifestURL):
-                let (url, manifest) = try await AppleManifestClient().load(manifestURL)
-                try store.addStremio(manifestURL: url, manifest: manifest)
             case .xtream(let name, let serverURL, let username, let password, let epgURL):
                 try AppleIPTVEndpointPolicy.validateCredentials(username: username, password: password)
                 try store.addIPTV(name: name, type: .xtream, endpoint: serverURL, username: username,

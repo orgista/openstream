@@ -6,7 +6,7 @@ import Testing
 ///
 /// The route used to publish none and select none, so MP4/M4V/MOV/HLS — which
 /// on Apple TV is most well-formed content — played with no captions available
-/// whether or not an add-on was installed. These cover the selection rule
+/// at all. These cover the selection rule
 /// without needing an asset; the track plumbing itself is exercised on device.
 @Suite("Native route subtitle selection")
 struct AppleNativeSubtitleSelectionTests {

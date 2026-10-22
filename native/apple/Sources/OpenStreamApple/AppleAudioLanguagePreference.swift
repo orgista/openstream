@@ -1,9 +1,9 @@
 import Foundation
 
 /// Settings › Playback › Audio Language: the language a title starts in when
-/// its file carries more than one. Stremio-style containers often flag a dub
-/// as the default track ("it plays with a different audio language than what
-/// you set", stremio-bugs#917), so the default is the device's language, then
+/// its file carries more than one. Files often flag a dub as the default
+/// track ("it plays with a different audio language than what you set"), so
+/// the default is the device's language, then
 /// English, and the file's own default only when neither is there.
 ///
 /// Stored as one canonical three-letter code (`AppleSubtitleLanguages`

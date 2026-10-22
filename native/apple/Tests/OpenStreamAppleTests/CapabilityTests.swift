@@ -239,36 +239,6 @@ import Testing
     #expect(try Data(contentsOf: record.localURL) == Data([4, 3, 2, 1]))
 }
 
-@Test func offlineDownloadPolicyUsesTheProtectedCapabilityWithoutForwardingHeaders() {
-    let upstream = URL(string: "https://media.example/master.m3u8?token=secret")!
-    let capability = URL(string: "http://127.0.0.1:32100/live/opaque/stream.m3u8")!
-    let candidate = AppleStremioHTTPPlaybackCandidate(
-        title: "Protected HLS",
-        sourceURL: upstream,
-        requestHeaders: ["Authorization": "Bearer secret"]
-    )
-    let resolved = AppleResolvedStremioPlayback(
-        stream: candidate,
-        preparedPlayback: ApplePreparedPlayback(
-            route: .direct(capability),
-            url: capability
-        )
-    )
-
-    let plan = AppleOfflineDownloadPolicy.plan(for: resolved)
-    #expect(plan.sourceURL == capability)
-    #expect(plan.requestHeaders.isEmpty)
-    #expect(plan.protectedCapabilityToRevoke == capability)
-
-    let direct = AppleResolvedStremioPlayback(
-        stream: AppleStremioHTTPPlaybackCandidate(title: "Direct", sourceURL: upstream),
-        preparedPlayback: ApplePreparedPlayback(route: .direct(upstream), url: upstream)
-    )
-    let directPlan = AppleOfflineDownloadPolicy.plan(for: direct)
-    #expect(directPlan.sourceURL == upstream)
-    #expect(directPlan.protectedCapabilityToRevoke == nil)
-}
-
 @Test func offlineActionPolicyExcludesEveryLiveTVRoute() {
     #expect(!AppleOfflineActionPolicy.isAvailable(
         sourceKind: .liveTV,
@@ -277,43 +247,43 @@ import Testing
         hasLiveAvailability: false
     ))
     #expect(!AppleOfflineActionPolicy.isAvailable(
-        sourceKind: .stremio,
+        sourceKind: .mediaServer,
         itemType: "channel",
         indexedKind: .movie,
         hasLiveAvailability: false
     ))
     #expect(!AppleOfflineActionPolicy.isAvailable(
-        sourceKind: .stremio,
+        sourceKind: .mediaServer,
         itemType: "movie",
         indexedKind: .channel,
         hasLiveAvailability: false
     ))
     #expect(!AppleOfflineActionPolicy.isAvailable(
-        sourceKind: .stremio,
+        sourceKind: .mediaServer,
         itemType: "movie",
         indexedKind: .movie,
         hasLiveAvailability: true
     ))
     #expect(!AppleOfflineActionPolicy.isAvailable(
-        sourceKind: .stremio,
+        sourceKind: .mediaServer,
         itemType: "linear",
         indexedKind: .movie,
         hasLiveAvailability: false
     ))
     #expect(!AppleOfflineActionPolicy.isAvailable(
-        sourceKind: .stremio,
+        sourceKind: .mediaServer,
         itemType: "sports-event",
         indexedKind: nil,
         hasLiveAvailability: false
     ))
     #expect(AppleOfflineActionPolicy.isAvailable(
-        sourceKind: .stremio,
+        sourceKind: .mediaServer,
         itemType: "series",
         indexedKind: .series,
         hasLiveAvailability: false
     ))
     #expect(AppleOfflineActionPolicy.isAvailable(
-        sourceKind: .stremio,
+        sourceKind: .mediaServer,
         itemType: "movie",
         indexedKind: .movie,
         hasLiveAvailability: false

@@ -15,29 +15,6 @@ enum AppleRailHoverFixture {
     static var isEnabled: Bool { UserDefaults.standard.bool(forKey: launchKey) }
 }
 
-/// `-OpenStreamDebugTop10 YES`: the two Top 10 rails for a review build that
-/// may not fetch the weekly list. The titles are the connected catalogues'
-/// own, in their order; the ranking lives in memory and is never written.
-enum AppleTop10Fixture {
-    static let launchKey = "OpenStreamDebugTop10"
-    static var isEnabled: Bool { UserDefaults.standard.bool(forKey: launchKey) }
-
-    static func week(sections: [AppleCatalogSection]) -> AppleNetflixTop10Week? {
-        func entries(type: String, category: String) -> [AppleNetflixTop10Entry] {
-            var names: [String] = []
-            for section in sections where section.catalog.type == type {
-                for item in section.items where !names.contains(item.name) { names.append(item.name) }
-            }
-            return names.prefix(10).enumerated().map {
-                AppleNetflixTop10Entry(rank: $0.offset + 1, title: $0.element, seasonTitle: nil, category: category)
-            }
-        }
-        let films = entries(type: "movie", category: "Films")
-        let tv = entries(type: "series", category: "TV")
-        guard !films.isEmpty || !tv.isEmpty else { return nil }
-        return AppleNetflixTop10Week(week: .now, films: films, tv: tv)
-    }
-}
 #endif
 
 extension View {

@@ -63,19 +63,17 @@ struct AppleDetailReadinessTests {
     func canonicalMovieIsPlayableWithoutWaitingForIdentifierResolution() {
         #expect(ApplePlayGatingPolicy.canonicalMediaID("tt1234567") == "tt1234567")
         #expect(ApplePlayGatingPolicy.isPreparingOnAppear(mediaID: "tt1234567") == false)
-        #expect(ApplePlayGatingPolicy.requiresIdentifierResolution(mediaID: "tt1234567") == false)
 
         #expect(ApplePlayGatingPolicy.canonicalMediaID("rt:movie-123") == nil)
         #expect(ApplePlayGatingPolicy.isPreparingOnAppear(mediaID: "rt:movie-123"))
-        #expect(ApplePlayGatingPolicy.requiresIdentifierResolution(mediaID: "rt:movie-123"))
     }
 
     @Test
     func seriesDefaultsToTheFirstEpisodeOfTheFirstSeason() {
         let episodes = [
-            AppleStremioEpisode(id: "tt1234567:2:1", title: "Later", season: 2, episode: 1),
-            AppleStremioEpisode(id: "tt1234567:1:2", title: "Second", season: 1, episode: 2),
-            AppleStremioEpisode(id: "tt1234567:1:1", title: "Pilot", season: 1, episode: 1),
+            AppleMediaEpisode(id: "tt1234567:2:1", title: "Later", season: 2, episode: 1),
+            AppleMediaEpisode(id: "tt1234567:1:2", title: "Second", season: 1, episode: 2),
+            AppleMediaEpisode(id: "tt1234567:1:1", title: "Pilot", season: 1, episode: 1),
         ]
         #expect(ApplePlayGatingPolicy.defaultEpisodeID(episodes: episodes) == "tt1234567:1:1")
         #expect(ApplePlayGatingPolicy.defaultEpisodeID(episodes: []) == nil)

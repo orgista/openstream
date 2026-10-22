@@ -15,24 +15,14 @@ public enum AppleWebManagementPage {
     </svg>
     """
 
-#if OPENSTREAM_ADDONS
-    static let sourceTypes: [(value: String, label: String)] = [
-        ("addon", "Add-on"),
-        ("m3u", "M3U Playlist"),
-        ("xtream", "Xtream Account"),
-    ]
-
-#else
     static let sourceTypes: [(value: String, label: String)] = [("m3u", "M3U Playlist"), ("xtream", "Xtream Account")]
 
-#endif
     public static var defaultSourceType: String { sourceTypes[0].value }
 
     /// Renders the whole portal. `pairingCode == nil` means the browser is
     /// paired (cookie or code accepted), so the add card and remove buttons
     /// are shown; otherwise only the address and the pairing field appear.
     public static func setup(
-        manifest: String = "",
         error: String? = nil,
         pairingCode: String? = nil,
         notice: String? = nil,
@@ -58,7 +48,7 @@ public enum AppleWebManagementPage {
                 </section>
                 <div class="lead">\(addressRow)</div>
             \(feedback.isEmpty ? "" : "<section>\(feedback)</section>")
-            \(addCard(manifest: manifest, sourceType: sourceType, draft: draft))
+            \(addCard(sourceType: sourceType, draft: draft))
                 <section>
                   <h2>Sources</h2>
                   \(sourceList(sources))
@@ -114,7 +104,7 @@ public enum AppleWebManagementPage {
     /// for the checked type. Type-specific
     /// fields carry no `required` attribute because a hidden required field
     /// blocks submission silently; the server names the missing value.
-    private static func addCard(manifest: String, sourceType: String, draft: [String: String]) -> String {
+    private static func addCard(sourceType: String, draft: [String: String]) -> String {
         let selected = sourceTypes.contains { $0.value == sourceType } ? sourceType : defaultSourceType
         let radios = sourceTypes.map { type in
             "<input type=\"radio\" class=\"type\" id=\"type-\(type.value)\" name=\"sourceType\" value=\"\(type.value)\"\(type.value == selected ? " checked" : "")>"
@@ -122,26 +112,12 @@ public enum AppleWebManagementPage {
         let tabs = sourceTypes.map { type in
             "<label for=\"type-\(type.value)\">\(type.label)</label>"
         }.joined()
-        #if OPENSTREAM_ADDONS
-        let addonFields = """
-                <div class="fields addon">
-                  <label for="manifest">Manifest URL</label>
-                  <input id="manifest" name="manifest" type="url" inputmode="url"
-                    value="\(escape(manifest))"
-                    placeholder="https://example.com/manifest.json"
-                    autocapitalize="none" autocomplete="url" spellcheck="false">
-                </div>
-        """
-        #else
-        let addonFields = ""
-        #endif
         return """
             <section>
               <h2>Add a source</h2>
               <form method="post" action="/" autocomplete="off">
                 \(radios)
                 <div class="types" role="radiogroup" aria-label="Source type">\(tabs)</div>
-                \(addonFields)
                 <div class="fields m3u">
                   <label for="m3uName">Name</label>
                   <input id="m3uName" name="m3uName" type="text" autocapitalize="words" spellcheck="false"
@@ -321,11 +297,6 @@ public enum AppleWebManagementPage {
 
     /// Monochrome: black page, white text, greys for borders and secondary
     /// text, one muted red for failure text. Nothing blue.
-    #if OPENSTREAM_ADDONS
-    private static let addonStyles = "#type-addon:checked~.types label[for=type-addon]{background:#f5f5f7;color:#000}#type-addon:focus-visible~.types label[for=type-addon]{outline:2px solid #FF3366;outline-offset:2px}#type-addon:checked~.fields.addon{display:grid}"
-    #else
-    private static let addonStyles = ""
-    #endif
     private static let styles = """
     :root{font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;color:#f5f5f7;background:#000}\
     *{box-sizing:border-box}\
@@ -356,7 +327,6 @@ public enum AppleWebManagementPage {
     .types label{min-height:44px;display:grid;place-items:center;border-radius:7px;color:#f5f5f7;font-size:14px;font-weight:500;text-align:center;cursor:pointer}\
     #type-m3u:checked~.types label[for=type-m3u],#type-xtream:checked~.types label[for=type-xtream]{background:#f5f5f7;color:#000}\
     #type-m3u:focus-visible~.types label[for=type-m3u],#type-xtream:focus-visible~.types label[for=type-xtream]{outline:2px solid #FF3366;outline-offset:2px}\
-    \(addonStyles)\
     .fields{display:none;gap:8px}\
     #type-m3u:checked~.fields.m3u,#type-xtream:checked~.fields.xtream{display:grid}\
     .address{margin:0;font-size:22px;font-weight:600;font-variant-numeric:tabular-nums;word-break:break-all}\

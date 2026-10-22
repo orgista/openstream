@@ -133,7 +133,7 @@ import AetherEngine
         #expect(model.hasSkippedIntro)
         #expect(!model.showsSkipIntro)
 
-        // An add-on subtitle file lands mid-item and re-emits `.tracks`; the
+        // A sidecar subtitle file lands mid-item and re-emits `.tracks`; the
         // chapter list is unchanged, so nothing about the skip may change.
         engine.subtitleTracks = [ApplePlaybackTrack(id: 9, title: "English", language: "eng")]
         engine.emit(.tracks)

@@ -43,7 +43,7 @@ public typealias ApplePlayRequestLedger = AppleOneShotRequestLedger
 public enum AppleSeriesProgressGuard {
     /// Whether `partID` names an episode (`…:season:episode`).
     nonisolated public static func namesEpisode(_ partID: String?) -> Bool {
-        partID.flatMap(AppleStremioSeriesInfo.init(mediaID:)) != nil
+        partID.flatMap(AppleMediaSeriesInfo.init(mediaID:)) != nil
     }
 
     /// Whether a save carrying `newPartID` may replace `existing`.

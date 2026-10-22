@@ -77,7 +77,7 @@ struct AppleXtreamTitleLink: View {
     private func detail(_ source: AppleSource) -> some View {
         AppleCatalogItemDetailView(item: item, source: source, mediaIndex: mediaIndex,
             playbackSources: sourceStore.sources, metadataConfiguration: settings.tmdbConfiguration,
-            gatewayConfig: nil, playbackResolver: AppleStremioPlaybackResolver(), settings: settings,
+            gatewayConfig: nil, settings: settings,
             openSettings: openSettings, tabToolbar: tabToolbar)
             .environment(\.appleDiscoverRows, nil)
     }

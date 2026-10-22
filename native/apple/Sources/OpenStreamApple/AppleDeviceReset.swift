@@ -78,7 +78,6 @@ public enum AppleDeviceReset {
         ApplePlaybackFailureHistory.shared.removeAll()
         ApplePlaybackProgressFeed.shared.storeDidChange()
         AppleRemoteImageCache.shared.removeAllCached()
-        Task { await AppleStremioPreviewAssetsCache.shared.removeAll() }
     }
 
     /// `-OpenStreamResetOnLaunch YES`: the same wipe, before any store loads,

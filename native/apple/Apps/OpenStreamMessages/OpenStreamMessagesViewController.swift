@@ -99,7 +99,7 @@ final class OpenStreamMessagesViewController: MSMessagesAppViewController {
         }
     }
 
-    /// Posters come from add-on CDNs, so the fetch is bounded: a Messages
+    /// Posters come from other servers, so the fetch is bounded: a Messages
     /// extension has a small memory budget and is killed, not warned, when it
     /// runs past it. `AppleSystemArtworkPolicy` has already restricted the URL
     /// to a plain https one with no credentials or query.

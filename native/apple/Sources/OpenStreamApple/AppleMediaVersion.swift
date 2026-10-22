@@ -40,7 +40,7 @@ public struct AppleMediaVersion: Codable, Equatable, Sendable, Identifiable {
 
     public var quality: (resolution: Int, dynamicRange: Int, bitrate: Int) {
         let badges = formatBadges
-        let named = AppleStremioCandidateRanking.resolution(label)
+        let named = AppleReleaseName.resolution(label)
         let resolution = descriptors.height ?? max(named, badges.contains(.uhd) ? 2160 : badges.contains(.fullHD) ? 1080 : 0)
         let range = badges.contains(.dolbyVision) ? 3 : badges.contains(.hdr10Plus) ? 2 : badges.contains(.hdr10) ? 1 : 0
         return (resolution, range, descriptors.bitrate ?? 0)

@@ -92,10 +92,10 @@ public enum AppleSubtitleTrackFilter: Sendable {
     /// Every choice once, human-named (owner 2026-09-24: "captions also have
     /// English 1, 2 — it shouldn't have numbers or options").
     ///
-    /// Tracks are grouped by language and kind, so three English files from
-    /// three add-ons and the film's own English track are one "English" row.
+    /// Tracks are grouped by language and kind, so three English sidecar files
+    /// and the film's own English track are one "English" row.
     /// Within a row the best member plays: text over bitmap, the stream's own
-    /// track over an add-on file, the container default, then the lower id.
+    /// track over a sidecar file, the container default, then the lower id.
     /// A variant gets its own row, named with its kind — "English (SDH)",
     /// "English (Forced)" — only when a plain track of that language exists
     /// too; alone, it simply is "English". Effective languages appear first,
@@ -195,17 +195,17 @@ public enum AppleSubtitleTrackFilter: Sendable {
         menuChoices(tracks, preferredLanguages: preferredLanguages, activeTrackID: activeTrackID).map(\.track)
     }
 
-    /// Text over bitmap, the stream's own over an add-on's, default, lower id.
+    /// Text over bitmap, the stream's own over a sidecar, default, lower id.
     private static func isBetter(_ a: ApplePlaybackTrack, than b: ApplePlaybackTrack) -> Bool {
         let aBitmap = ApplePlayerSubtitleSelection.isBitmap(a), bBitmap = ApplePlayerSubtitleSelection.isBitmap(b)
         if aBitmap != bBitmap { return !aBitmap }
-        let aAddon = a.id >= externalTrackIDBase, bAddon = b.id >= externalTrackIDBase
-        if aAddon != bAddon { return !aAddon }
+        let aExternal = a.id >= externalTrackIDBase, bExternal = b.id >= externalTrackIDBase
+        if aExternal != bExternal { return !aExternal }
         if a.isDefault != b.isDefault { return a.isDefault }
         return a.id < b.id
     }
 
-    /// Both engines number add-on subtitle files from here.
+    /// Both engines number sidecar subtitle files from here.
     static let externalTrackIDBase = 1_000_000
 
     /// "Forced" in the title with no forced flag set.

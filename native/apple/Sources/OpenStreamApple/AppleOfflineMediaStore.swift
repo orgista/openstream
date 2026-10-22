@@ -90,24 +90,6 @@ struct AppleOfflineDownloadPlan: Equatable, Sendable {
     var usesBackgroundSession: Bool = false
 }
 
-enum AppleOfflineDownloadPolicy {
-    static func plan(for resolved: AppleResolvedStremioPlayback) -> AppleOfflineDownloadPlan {
-        if case .direct = resolved.preparedPlayback.route,
-           resolved.preparedPlayback.url != resolved.stream.sourceURL {
-            return AppleOfflineDownloadPlan(
-                sourceURL: resolved.preparedPlayback.url,
-                requestHeaders: [:],
-                protectedCapabilityToRevoke: resolved.preparedPlayback.url
-            )
-        }
-        return AppleOfflineDownloadPlan(
-            sourceURL: resolved.stream.sourceURL,
-            requestHeaders: resolved.stream.requestHeaders,
-            protectedCapabilityToRevoke: nil
-        )
-    }
-}
-
 enum AppleOfflineActionPolicy {
     static func isAvailable(
         sourceKind: AppleSourceKind,

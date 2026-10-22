@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build the private dev-sources file the simulators import for testing.
 
-Asks for each source (add-ons, IPTV, network shares, media servers) and the
+Asks for each source (IPTV, network shares, media servers) and the
 service keys, then writes them to ~/Developer/openstream-build/signing/dev-sources.json
 (owner-only permissions, never in the repo or on OSArchive). Debug builds import
 that file at launch with `-OpenStreamDevSources <path>`; see scripts/seed-sim.sh.
@@ -14,11 +14,8 @@ import getpass
 import json
 import os
 import sys
-import urllib.error
-import urllib.request
 
 OUT = os.path.expanduser("~/Developer/openstream-build/signing/dev-sources.json")
-STREMIO_API = "https://api.strem.io/api"
 
 
 def ask(prompt, default=None, required=True):
@@ -44,41 +41,6 @@ def yes(prompt, default=True):
     hint = "Y/n" if default else "y/N"
     value = input(f"{prompt} [{hint}]: ").strip().lower()
     return default if not value else value.startswith("y")
-
-
-def post(path, body):
-    request = urllib.request.Request(
-        f"{STREMIO_API}/{path}", data=json.dumps(body).encode(),
-        headers={"Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(request, timeout=20) as response:
-        payload = json.load(response)
-    if payload.get("error"):
-        raise RuntimeError(payload["error"].get("message", "Stremio error"))
-    return payload["result"]
-
-
-def stremio_account_addons():
-    """Every add-on installed on the owner's Stremio account, with its full
-    (configured) manifest URL. The Stremio password is used once and not saved."""
-    email = ask("Stremio email")
-    password = secret("Stremio password")
-    auth = post("login", {"type": "Login", "email": email, "password": password, "facebook": False})["authKey"]
-    addons = post("addonCollectionGet", {"type": "AddonCollectionGet", "authKey": auth, "update": True})["addons"]
-    result = []
-    for addon in addons:
-        url = addon.get("transportUrl", "")
-        name = (addon.get("manifest") or {}).get("name") or url
-        if not url.startswith("http"):
-            continue
-        if yes(f"  include {name}?"):
-            result.append({"kind": "stremio", "name": name, "manifestURL": url})
-    return result
-
-
-def add_stremio():
-    url = ask("Add-on manifest URL (ends in /manifest.json)")
-    return {"kind": "stremio", "name": ask("Name", required=False), "manifestURL": url}
 
 
 def add_xtream():
@@ -147,7 +109,7 @@ def edit_settings(settings):
 
 
 def describe(entry):
-    detail = entry.get("manifestURL") or entry.get("serverURL") or entry.get("host") or entry.get("url") or ""
+    detail = entry.get("serverURL") or entry.get("host") or entry.get("url") or ""
     host = detail.split("//")[-1].split("/")[0]
     return f"{entry['kind']:11} {entry.get('name') or '(unnamed)'} — {host}"
 
@@ -173,12 +135,10 @@ def save(data):
 def main():
     data = load()
     actions = {
-        "1": ("Import add-ons from my Stremio account", stremio_account_addons),
-        "2": ("Add a Stremio add-on by URL", add_stremio),
-        "3": ("Add IPTV (Xtream username/password)", add_xtream),
-        "4": ("Add IPTV (M3U playlist URL)", add_m3u),
-        "5": ("Add a network share (SMB)", add_smb),
-        "6": ("Add a media server (Jellyfin / Emby / Plex)", add_media_server),
+        "1": ("Add IPTV (Xtream username/password)", add_xtream),
+        "2": ("Add IPTV (M3U playlist URL)", add_m3u),
+        "3": ("Add a network share (SMB)", add_smb),
+        "4": ("Add a media server (Jellyfin / Emby / Plex)", add_media_server),
         "f": ("Add the local IPTV fixture (127.0.0.1:8790)", add_fixture_iptv),
     }
     while True:
@@ -209,7 +169,7 @@ def main():
                 return
             elif choice == "q":
                 return
-        except (urllib.error.URLError, RuntimeError, ValueError, IndexError, KeyError) as error:
+        except (RuntimeError, ValueError, IndexError, KeyError) as error:
             print(f"  ! {error}")
         except KeyboardInterrupt:
             print()

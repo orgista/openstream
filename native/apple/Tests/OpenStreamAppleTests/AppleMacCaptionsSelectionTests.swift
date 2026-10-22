@@ -16,7 +16,7 @@ private let macCaptionsSelectionFixtureAvailable = FileManager.default.fileExist
 ///
 /// AVKit's menu does nothing more than `select(_:in:)` on the item, so each
 /// test makes that call itself and then replays what the app does afterwards:
-/// the host's bind tick re-running discovery, and an add-on's subtitles
+/// the host's bind tick re-running discovery, and a sidecar.s subtitles
 /// arriving late, which is when the engine re-applies the captions setting.
 ///
 /// The time limit is the hang guard for `waitUntil`, which has no deadline of
@@ -68,9 +68,9 @@ struct AppleMacCaptionsSelectionTests {
         #expect(session.selectedLanguage == "fr")
     }
 
-    /// Without the mirror the Mac had before this fix: the late add-on batch
+    /// Without the mirror the Mac had before this fix: the late sidecar batch
     /// re-applies the Off setting and takes the viewer's captions away.
-    @Test(.enabled(if: macCaptionsSelectionFixtureAvailable)) func withoutTheMirrorALateAddonBatchUndoesTheChoice() async throws {
+    @Test(.enabled(if: macCaptionsSelectionFixtureAvailable)) func withoutTheMirrorALateSidecarBatchUndoesTheChoice() async throws {
         let session = try await Session(preference: .off, mirrors: false)
         defer { session.stop() }
         try await session.chooseInStockMenu(language: "en")
@@ -90,7 +90,7 @@ struct AppleMacCaptionsSelectionTests {
         init(preference: AppleCaptionsPreference, mirrors: Bool = true) async throws {
             engine.applyCaptionPreferences(preference: preference, languages: [], languagesAreExplicit: false)
             engine.externalSubtitleDataLoader = { _ in
-                Data("1\n00:00:00,000 --> 00:01:00,000\nAdd-on cue\n".utf8)
+                Data("1\n00:00:00,000 --> 00:01:00,000\nSidecar cue\n".utf8)
             }
             try await engine.load(ApplePlaybackRequest(url: AppleMacCaptionsSelectionTests.fixture,
                                                        autoplay: false, mediaID: "mac-captions",
@@ -131,7 +131,7 @@ struct AppleMacCaptionsSelectionTests {
             try await Self.waitUntil { self.selection == nil || self.engine.activeSubtitleTrackID == expected }
         }
 
-        /// The host's bind ticks, and an add-on's subtitles arriving after the
+        /// The host's bind ticks, and a sidecar.s subtitles arriving after the
         /// stream's own — the engine's moment to re-apply the setting.
         func rediscover() async {
             for _ in 0..<4 {
@@ -139,7 +139,7 @@ struct AppleMacCaptionsSelectionTests {
                 try? await Task.sleep(for: .milliseconds(30))
             }
             engine.addExternalSubtitleTracks([
-                AppleExternalSubtitleTrack(id: "late-addon", languageCode: "de", displayName: "Deutsch",
+                AppleExternalSubtitleTrack(id: "late-sidecar", languageCode: "de", displayName: "Deutsch",
                                            url: URL(string: "https://fixture.example/late.srt")!)
             ])
             for _ in 0..<4 {

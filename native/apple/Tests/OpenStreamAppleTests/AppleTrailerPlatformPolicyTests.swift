@@ -5,7 +5,7 @@ import Testing
 /// Owner 2026-09-23: "remove trailers from Apple TV and add them to Mac".
 @Suite("Trailers by platform")
 struct AppleTrailerPlatformPolicyTests {
-    private static let saved = AppleStremioEpisode(id: "tt0903747:1:3", title: "", season: 1, episode: 3, releaseInfo: nil)
+    private static let saved = AppleMediaEpisode(id: "tt0903747:1:3", title: "", season: 1, episode: 3, releaseInfo: nil)
 
     @Test func onlyTheAppleTVGoesWithoutTrailers() {
         #expect(!AppleTitlePagePolicy.offersTrailers(on: .tvOS))

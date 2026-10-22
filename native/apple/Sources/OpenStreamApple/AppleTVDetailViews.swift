@@ -104,7 +104,7 @@ struct AppleTVBareButtonStyle: ButtonStyle {
 /// show's backdrop rather than a grey box (`AppleEpisodeStillPolicy`, as on
 /// the other platforms).
 struct AppleTVEpisodeCard: View {
-    let episode: AppleStremioEpisode
+    let episode: AppleMediaEpisode
     let subtitle: String
     let isSelected: Bool
     let isWatched: Bool

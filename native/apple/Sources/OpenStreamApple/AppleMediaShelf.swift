@@ -130,7 +130,7 @@ struct AppleMediaShelf<Content: View>: View {
 struct AppleFeaturedHero<Actions: View>: View {
     let item: AppleCatalogItem
     let viewportSize: CGSize
-    /// The title's wordmark, when the preview-assets cache has one. Every
+    /// The title's wordmark, when its record or TMDB has one. Every
     /// platform's hero uses it: the lockup over the art is the shape the owner
     /// asked for on the iPad as well as the Apple TV (2026-09-18 references).
     var wordmark: URL? = nil

@@ -4,8 +4,7 @@ import Testing
 
 /// Owner, on searching "Jury duty": "I go odd results". Episodes were filtered
 /// out earlier; this is the other half — the **same** 2007 series came back
-/// twice, once from Cinemeta carrying its year and once from the TMDB add-on
-/// with none, because the collapse key is title|year and "2007" and "" are
+/// twice, once carrying its year and once from TMDB with none, because the collapse key is title|year and "2007" and "" are
 /// different keys. Verified on screen on iPhone, 2026-09-16.
 @MainActor
 @Suite("Search duplicate collapsing")
@@ -53,7 +52,7 @@ struct AppleSearchDuplicateCollapseTests {
         #expect(results.count == 1)
     }
 
-    /// Three copies of one title from three add-ons collapse to one row.
+    /// Three copies of one title from three sources collapse to one row.
     @Test func severalSourcesOfOneTitleCollapseToOneRow() {
         let results = AppleCatalogSearchStore.mergedResults(
             [record(title: "Jury Duty", year: 2007, canonical: "tt0460637"),

@@ -63,11 +63,10 @@ struct AppleTopShelfLandscapeTests {
         #expect(section.imageURL(for: backdropOnly) == backdropOnly.landscapeArtworkURL)
     }
 
-    @Test func writerTakesContinueWatchingBackdropsFromTheMatchingCatalogItem() async throws {
+    @Test func writerTakesContinueWatchingBackdropsFromTheRecord() async throws {
         let root = try temporaryContainer()
         defer { try? FileManager.default.removeItem(at: root) }
-        let source = AppleSource(kind: .stremio, name: "Cinemeta",
-                                 url: URL(string: "https://fixture.example/manifest.json")!)
+        let sourceID = UUID()
         let backdrop = URL(string: "https://image.tmdb.org/t/p/w1280/wide.jpg")!
         let catalogItems = [
             AppleCatalogItem(mediaID: "tt0000001", type: "series", name: "Wide",
@@ -76,16 +75,14 @@ struct AppleTopShelfLandscapeTests {
             AppleCatalogItem(mediaID: "tt0000002", type: "movie", name: "Private Backdrop",
                              backgroundURL: URL(string: "https://nas.local/backdrop.jpg")),
         ]
-        let sections = [AppleCatalogSection(source: source, catalog: AppleStremioCatalog(type: "movie", id: "top"),
-                                            items: catalogItems)]
-        var records = catalogItems.map { AppleMediaIngestion.catalogRecord(instanceID: source.id, item: $0) }
-        var unmatched = AppleMediaIngestion.catalogRecord(
-            instanceID: source.id, item: AppleCatalogItem(mediaID: "tt0000003", type: "movie", name: "Unlisted")
+        var records = catalogItems.map { AppleMediaIngestion.catalogRecord(instanceID: sourceID, item: $0) }
+        var unlisted = AppleMediaIngestion.catalogRecord(
+            instanceID: sourceID, item: AppleCatalogItem(mediaID: "tt0000003", type: "movie", name: "Unlisted")
         )
-        unmatched.progress = 0.2
+        unlisted.progress = 0.2
         records[0].progress = 0.6
         records[1].progress = 0.4
-        records.append(unmatched)
+        records.append(unlisted)
 
         // Most recently watched first (N52), so the order is stated outright.
         let now = Date.now
@@ -94,36 +91,13 @@ struct AppleTopShelfLandscapeTests {
         })
 
         let writer = AppleTopShelfSnapshotWriter(containerProvider: { root })
-        try await writer.write(records: records, sections: sections, watchedAt: watchedAt, enabled: true)
+        try await writer.write(records: records, watchedAt: watchedAt, enabled: true)
         let snapshot = try #require(AppleTopShelfSnapshotReader(containerProvider: { root }).read())
 
         #expect(snapshot.continueWatching.map(\.title) == ["Wide", "Private Backdrop", "Unlisted"])
         #expect(snapshot.continueWatching.map(\.landscapeArtworkURL) == [backdrop, nil, nil])
-        #expect(snapshot.topPicks.map(\.landscapeArtworkURL) == [backdrop, nil])
         // Other shelves stay posters only.
         #expect(snapshot.favorites.allSatisfy { $0.landscapeArtworkURL == nil })
         #expect(snapshot.recentlyAdded.allSatisfy { $0.landscapeArtworkURL == nil })
-    }
-
-    @Test func aLaterShelfWithABackdropStillSuppliesIt() async throws {
-        let root = try temporaryContainer()
-        defer { try? FileManager.default.removeItem(at: root) }
-        let source = AppleSource(kind: .stremio, name: "Cinemeta",
-                                 url: URL(string: "https://fixture.example/manifest.json")!)
-        let backdrop = URL(string: "https://image.tmdb.org/t/p/w1280/wide.jpg")!
-        let bare = AppleCatalogItem(mediaID: "tt0000001", type: "series", name: "Wide")
-        let withBackdrop = AppleCatalogItem(mediaID: "tt0000001", type: "series", name: "Wide", backgroundURL: backdrop)
-        let sections = [
-            AppleCatalogSection(source: source, catalog: AppleStremioCatalog(type: "series", id: "new"), items: [bare]),
-            AppleCatalogSection(source: source, catalog: AppleStremioCatalog(type: "series", id: "top"), items: [withBackdrop]),
-        ]
-        var record = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: bare)
-        record.progress = 0.5
-
-        let writer = AppleTopShelfSnapshotWriter(containerProvider: { root })
-        try await writer.write(records: [record], sections: sections, enabled: true)
-        let snapshot = try #require(AppleTopShelfSnapshotReader(containerProvider: { root }).read())
-
-        #expect(snapshot.continueWatching.map(\.landscapeArtworkURL) == [backdrop])
     }
 }

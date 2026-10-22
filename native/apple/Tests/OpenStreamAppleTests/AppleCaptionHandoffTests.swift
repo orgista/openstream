@@ -218,13 +218,13 @@ struct AppleCaptionHandoffTests {
 
     // MARK: - Which tracks travel
 
-    @Test func embeddedTextTracksTravelAddonFilesAndCEA708DoNot() {
+    @Test func embeddedTextTracksTravelSidecarFilesAndCEA708DoNot() {
         let tracks = [
             ApplePlaybackTrack(id: 2, title: "English", language: "eng", codec: "subrip"),
             ApplePlaybackTrack(id: 3, title: "English", language: "eng", codec: "hdmv_pgs_subtitle"),
             ApplePlaybackTrack(id: 4, title: "CC1", language: "eng", codec: "eia_608"),
             ApplePlaybackTrack(id: 5, title: "CC", language: "eng", codec: "eia_708"),
-            ApplePlaybackTrack(id: AetherPlaybackEngine.externalSubtitleTrackIDBase, title: "Add-on",
+            ApplePlaybackTrack(id: AetherPlaybackEngine.externalSubtitleTrackIDBase, title: "Sidecar",
                                language: "eng", codec: "srt"),
         ]
         #expect(AppleCaptionHandoff.wantedTrack(activeTrackID: 2, tracks: tracks) == 2)

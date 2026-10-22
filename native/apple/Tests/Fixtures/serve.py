@@ -185,35 +185,6 @@ class FixtureHandler(BaseHTTPRequestHandler):
         if parsed.path.startswith("/jf/"):
             return self._serve_jellyfin(parsed.path[len("/jf"):], query)
 
-        if path == "/addon/manifest.json":
-            return self._send_json({
-                "id": "org.openstream.fixture",
-                "version": "1.0.0",
-                "name": "Fixture Add-on",
-                "description": "Local test streams",
-                "resources": ["stream"],
-                "types": ["movie", "series"],
-                "idPrefixes": ["tt"],
-                "catalogs": [],
-            })
-
-        if re.match(r"^/addon/stream/(movie|series)/[^/]+\.json$", path):
-            stream_base_url = f"http://127.0.0.1:{self.server.server_address[1]}"
-            return self._send_json({
-                "streams": [
-                    {
-                        "name": "Fixture 1080p",
-                        "title": "Sample MKV (H.264/AAC)",
-                        "url": f"{stream_base_url}/media/mkv-h264-aac.mkv",
-                    },
-                    {
-                        "name": "Fixture HDR",
-                        "title": "Sample MP4 (HEVC HDR10)",
-                        "url": f"{stream_base_url}/media/hdr10-hevc.mp4",
-                    },
-                ],
-            })
-
         # E2E playback keeps a long generated clip alive; downloads trickle so
         # the tests can observe and cancel the real downloading state.
         if path in ("/media/e2e-long.mp4", "/e2e-download/e2e-long.mp4"):

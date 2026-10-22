@@ -297,7 +297,7 @@ enum AppleRecommendationInputs {
         let episode = AppleMediaSeriesInfo(mediaID: mediaID)
         let suffix = episode.map { "|s\($0.season)e\($0.episode)" } ?? ""
         let root = episode == nil ? mediaID : parts.dropLast(2).joined(separator: ":")
-        let strongID = item.imdbID ?? (AppleStremioMetadataClient.isIMDBIdentifier(root) ? root : nil)
+        let strongID = item.imdbID ?? (AppleMediaIdentifier.isIMDBIdentifier(root) ? root : nil)
             ?? (root.hasPrefix("tmdb:") ? root : nil)
         let identity: String
         if let strongID {

@@ -3,7 +3,7 @@ import Testing
 @testable import OpenStreamApple
 
 /// Owner-visible bug: the *9/11: One Day in America* hero and title page both
-/// read "the 9/11 Memorial &amp; Museum", because Cinemeta hands back an
+/// read "the 9/11 Memorial &amp; Museum", because the metadata service handed back an
 /// overview that was escaped for a web page upstream and nothing decoded it.
 @Suite("HTML entities in catalogue text")
 struct AppleHTMLEntitiesTests {
@@ -36,44 +36,17 @@ struct AppleHTMLEntitiesTests {
         #expect(AppleHTMLEntities.decoded(String?.none) == nil)
     }
 
-    @Test func aStremioOverviewIsDecodedOnTheWayIn() {
-        let value = AppleStremioEpisode(
+    @Test func anEpisodeOverviewIsDecodedOnTheWayIn() {
+        let value = AppleMediaEpisode(
             id: "tt14734548:1:1", title: "First Response",
             overview: "In collaboration with the 9/11 Memorial &amp; Museum.")
         #expect(value.overview == "In collaboration with the 9/11 Memorial & Museum.")
     }
 
-    @Test func aStremioTitleIsDecodedOnTheWayIn() {
-        let value = AppleStremioEpisode(id: "x", title: "Law &amp; Order")
+    @Test func anEpisodeTitleIsDecodedOnTheWayIn() {
+        let value = AppleMediaEpisode(id: "x", title: "Law &amp; Order")
         #expect(value.title == "Law & Order")
     }
-}
-
-/// The bug the owner could see: this is the payload shape Cinemeta actually
-/// returns for *9/11: One Day in America*, and the escaped ampersand reached
-/// the hero and the title page verbatim.
-@Test func aCinemetaDescriptionIsDecodedWhenTheCatalogIsParsed() async throws {
-    let source = AppleSource(
-        kind: .stremio,
-        name: "Cinemeta",
-        url: URL(string: "https://v3-cinemeta.strem.io/manifest.json")!,
-        resources: ["catalog"],
-        catalogs: [AppleStremioCatalog(type: "series", id: "top")]
-    )
-    let client = AppleStremioCatalogClient { request in
-        let response = HTTPURLResponse(
-            url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-        let data = Data(#"""
-        {"metas":[{"imdb_id":"tt14734548","type":"series","name":"Law &amp; Order",
-          "description":"In official collaboration with the 9/11 Memorial &amp; Museum."}]}
-        """#.utf8)
-        return (data, response)
-    }
-
-    let items = try await client.load(source: source, catalog: source.catalogs[0])
-
-    #expect(items.first?.name == "Law & Order")
-    #expect(items.first?.summary == "In official collaboration with the 9/11 Memorial & Museum.")
 }
 
 /// A fresh install still showed the escaped ampersand, because the catalogue

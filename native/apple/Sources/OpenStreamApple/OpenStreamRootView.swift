@@ -141,7 +141,6 @@ public struct OpenStreamRootView: View {
     #endif
     @Environment(\.scenePhase) private var restrictionScenePhase
     @State private var sourceStore = AppleSourceStore()
-    @State private var catalogStore = AppleCatalogStore()
     @State private var settingsStore = AppleSettingsStore()
     @State private var mediaIndex = AppleMediaIndexStore()
     @State private var backupController: AppleConfigurationController?
@@ -474,16 +473,11 @@ public struct OpenStreamRootView: View {
             AppleLaunchClock.begin()
             AppleInteractionTrace.begin()
             // `-OpenStreamDevSources <path>`: the owner's test sources, added
-            // through the normal store calls once per launch. The file is the
-            // whole setup: no test catalog is seeded beside it.
+            // through the normal store calls once per launch.
             let importsDevSources = AppleDevSourcesImport.isPending
-            if importsDevSources { sourceStore.markTestCatalogsSeeded() }
             Task { await AppleDevSourcesImport.importPendingIfNeeded(sourceStore: sourceStore, settings: settingsStore) }
             let playbackFixture = UserDefaults.standard.string(forKey: "OpenStreamVisionPlaybackURL").flatMap(URL.init(string:))
             if !importsDevSources, !UserDefaults.standard.bool(forKey: "OpenStreamVisionPlaybackIsLive"), playbackFixture?.isFileURL != true {
-        #if OPENSTREAM_ADDONS
-                Task { await sourceStore.seedTestCatalogsIfNeeded() }
-        #endif
             }
             // Simulator-only navigation to real screens; no fixtures or saved sources.
             let screen = debugScreen
@@ -523,7 +517,6 @@ public struct OpenStreamRootView: View {
                     case "add-files": path.append(AppleSourceRoute.addFiles)
                     case "add-live": path.append(AppleSourceRoute.addLiveTV)
                     case "add-media-server": path.append(AppleSourceRoute.addMediaServer)
-                    case "add-catalog": path.append(AppleSourceRoute.addManifest)
                     case "network-share": path.append(AppleSourceRoute.addNetworkShare)
                     case "web-management": path.append(AppleSourceRoute.webManagement)
                     default: break
@@ -595,10 +588,6 @@ public struct OpenStreamRootView: View {
             mediaServerLibrary.loadPersisted()
             // The engine's own log in the trace (scrubbed), while tracing is on.
             AppleEngineLogBridge.install()
-            // Add-ons saved before catalog paging pick up `skip` (once a day each).
-        #if OPENSTREAM_ADDONS
-            sourceStore.scheduleDailyManifestRefresh()
-        #endif
         }
         .onChange(of: sharePlay.revision) {
             if sharePlay.channel != nil { selectedTab = .live }
@@ -691,7 +680,7 @@ public struct OpenStreamRootView: View {
             )
         }
         .modifier(AppleSystemSurfacePublishing(
-            mediaIndex: mediaIndex, catalogStore: catalogStore, sourceStore: sourceStore,
+            mediaIndex: mediaIndex, sourceStore: sourceStore,
             settingsStore: settingsStore))
     }
 
@@ -759,7 +748,6 @@ public struct OpenStreamRootView: View {
         switch tab {
         case .search:
             AppleSearchView(
-                catalogStore: catalogStore,
                 sourceStore: sourceStore,
                 mediaIndex: mediaIndex,
                 router: router,
@@ -769,7 +757,6 @@ public struct OpenStreamRootView: View {
             .appleAlignedTabTitle(tab.title)
         case .home:
             AppleDiscoverView(
-                catalogStore: catalogStore,
                 sourceStore: sourceStore,
                 mediaIndex: mediaIndex,
                 mediaServerLibrary: mediaServerLibrary,
@@ -781,7 +768,6 @@ public struct OpenStreamRootView: View {
             .appleAlignedTabTitle(tab.title, overArtwork: true, phoneHero: true)
         case .library:
             AppleLibraryView(
-                catalogStore: catalogStore,
                 sourceStore: sourceStore,
                 mediaIndex: mediaIndex,
                 settings: settingsStore,
@@ -803,7 +789,6 @@ public struct OpenStreamRootView: View {
                 sourceStore: sourceStore,
                 webManagement: webManagement,
                 backupController: backupController,
-                catalogStore: catalogStore,
                 splitPath: settingsSplitPath
             )
             .appleAlignedTabTitle(tab.title)
@@ -1070,7 +1055,6 @@ public struct OpenStreamThreeBarMark: View {
 @MainActor
 private struct AppleSystemSurfacePublishing: ViewModifier {
     let mediaIndex: AppleMediaIndexStore
-    let catalogStore: AppleCatalogStore
     let sourceStore: AppleSourceStore
     let settingsStore: AppleSettingsStore
     @State private var pendingPublish: Task<Void, Never>?
@@ -1083,7 +1067,6 @@ private struct AppleSystemSurfacePublishing: ViewModifier {
                 schedulePublish()
             }
             .onChange(of: mediaIndex.records) { schedulePublish() }
-            .onChange(of: catalogStore.sections) { schedulePublish() }
             .onChange(of: sourceStore.sources) { schedulePublish() }
             .onChange(of: AppleLiveSystemChannels.shared.revision) { schedulePublish() }
             .onChange(of: settingsStore.topShelfEnabled) { schedulePublish() }
@@ -1102,7 +1085,7 @@ private struct AppleSystemSurfacePublishing: ViewModifier {
     }
 
     /// One publish for a burst of changes, from the state at the end of it:
-    /// at launch the catalog's sections arrive one after another, and each
+    /// at launch the index and sources change one after another, and each
     /// publish reads every record's playback state on the main actor
     /// (five publishes in 1.5 s, ~200 ms on an Apple TV 4K, 2026-10-15).
     /// None starts inside the launch window (`AppleLaunchWorkPolicy.launchWindow`).
@@ -1115,7 +1098,6 @@ private struct AppleSystemSurfacePublishing: ViewModifier {
             let started = ContinuousClock.now
             await AppleTopShelfPublisher.shared.publish(
                 records: mediaIndex.records,
-                sections: catalogStore.sections,
                 sources: sourceStore.sources,
                 heroes: AppleTopShelfHeroFeed.shared.heroes,
                 enabled: settingsStore.topShelfEnabled

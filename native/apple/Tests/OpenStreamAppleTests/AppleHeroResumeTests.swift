@@ -11,10 +11,10 @@ import Testing
 struct AppleHeroResumeTests {
     private let record = "instance:series:tt1234567"
     private let episodes = [
-        AppleStremioEpisode(id: "tt1234567:1:1", title: "One", season: 1, episode: 1),
-        AppleStremioEpisode(id: "tt1234567:1:2", title: "Two", season: 1, episode: 2),
-        AppleStremioEpisode(id: "tt1234567:1:3", title: "Three", season: 1, episode: 3),
-        AppleStremioEpisode(id: "tt1234567:2:1", title: "Four", season: 2, episode: 1),
+        AppleMediaEpisode(id: "tt1234567:1:1", title: "One", season: 1, episode: 1),
+        AppleMediaEpisode(id: "tt1234567:1:2", title: "Two", season: 1, episode: 2),
+        AppleMediaEpisode(id: "tt1234567:1:3", title: "Three", season: 1, episode: 3),
+        AppleMediaEpisode(id: "tt1234567:2:1", title: "Four", season: 2, episode: 1),
     ]
 
     @MainActor
@@ -54,8 +54,8 @@ struct AppleHeroResumeTests {
         let progress = try #require(store.progress(for: record))
 
         let label = AppleBillboardCopy.playTitle(progress: progress, type: "series")
-        let target = try #require(AppleStremioEpisodePolicy.savedEpisode(progress: progress, in: episodes))
-        let identity = try #require(AppleStremioMetadataClient.episodeIdentity(part))
+        let target = try #require(AppleMediaEpisodePolicy.savedEpisode(progress: progress, in: episodes))
+        let identity = try #require(AppleMediaIdentifier.episodeIdentity(part))
 
         #expect(label == "Resume S\(identity.season), E\(identity.episode)")
         #expect(target.id == part)
@@ -74,7 +74,7 @@ struct AppleHeroResumeTests {
         ]
         for entry in entries {
             #expect(AppleBillboardCopy.playTitle(progress: entry, type: "series") == "Play")
-            #expect(AppleStremioEpisodePolicy.savedEpisode(progress: entry, in: episodes) == nil)
+            #expect(AppleMediaEpisodePolicy.savedEpisode(progress: entry, in: episodes) == nil)
         }
     }
 
@@ -82,13 +82,13 @@ struct AppleHeroResumeTests {
         // Saved before entries named their episode: the page cannot resume it.
         let legacy = ApplePlaybackProgress(position: 600, duration: 3_000)
         #expect(AppleBillboardCopy.playTitle(progress: legacy, type: "series") == "Play")
-        #expect(AppleStremioEpisodePolicy.savedEpisode(progress: legacy, in: episodes) == nil)
+        #expect(AppleMediaEpisodePolicy.savedEpisode(progress: legacy, in: episodes) == nil)
         // A film has no parts, so the same entry is a real resume.
         #expect(AppleBillboardCopy.playTitle(progress: legacy, type: "movie") == "Resume")
     }
 
     @Test func anEpisodeMissingFromTheListLeavesThePageChoice() {
         let progress = ApplePlaybackProgress(position: 600, duration: 3_000, partID: "tt1234567:9:9")
-        #expect(AppleStremioEpisodePolicy.savedEpisode(progress: progress, in: episodes) == nil)
+        #expect(AppleMediaEpisodePolicy.savedEpisode(progress: progress, in: episodes) == nil)
     }
 }

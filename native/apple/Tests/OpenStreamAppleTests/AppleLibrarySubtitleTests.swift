@@ -23,7 +23,7 @@ import Testing
 
 @MainActor
 @Test(.timeLimit(.minutes(1)))
-func siblingSubtitlesPrecedeAddonsAndCacheTheFolderForThisPlay() async throws {
+func siblingSubtitlesLoadForPlaybackAndCacheTheFolderForThisPlay() async throws {
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: folder) }
@@ -66,15 +66,10 @@ func siblingSubtitlesPrecedeAddonsAndCacheTheFolderForThisPlay() async throws {
         engine.phase = .playing
     }
     let coordinator = ApplePlaybackCoordinator(engine: engine)
-    coordinator.externalSubtitleFetcher = { _ in
-        [AppleExternalSubtitleTrack(id: "addon", languageCode: "en", sourceName: "Fixture",
-            url: URL(string: "https://fixture.example/addon.srt")!)]
-    }
-    var request = ApplePlaybackRequest(url: video, mediaID: "fixture", sourceKind: .files,
-        hints: .init(addonMediaID: "fixture", addonMediaType: "movie"))
+    var request = ApplePlaybackRequest(url: video, mediaID: "fixture", sourceKind: .files)
     await coordinator.begin(request)
-    while engine.externalSubtitleTracks.count < 3 { try await Task.sleep(for: .milliseconds(10)) }
-    #expect(engine.externalSubtitleTracks.map(\.displayName) == ["English", "French", "English (Fixture)"])
+    while engine.externalSubtitleTracks.count < 2 { try await Task.sleep(for: .milliseconds(10)) }
+    #expect(engine.externalSubtitleTracks.map(\.displayName) == ["English", "French"])
     coordinator.stop()
     request.isLive = true
     await coordinator.begin(request)

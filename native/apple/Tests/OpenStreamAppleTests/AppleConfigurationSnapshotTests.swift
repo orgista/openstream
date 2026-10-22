@@ -24,15 +24,6 @@ struct AppleConfigurationSnapshotTests {
         }
     }
 
-    @Test func tombstoneAlsoRemovesUnsupportedSourcePayload() {
-        let id = UUID()
-        var stale = AppleConfigurationSnapshot()
-        stale.preservedSourcePayloads = [.object(["id": .string(id.uuidString), "kind": .string("future")])]
-        let deleted = AppleConfigurationSnapshot(sourceTombstones: [id: .now])
-        #expect(stale.merging(deleted).preservedSourcePayloads.isEmpty)
-        #expect(deleted.merging(stale).preservedSourcePayloads.isEmpty)
-    }
-
     @MainActor @Test func deletedSourceCannotReturnFromBackupOrAfterRelaunch() throws {
         let name = "source-tombstones.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: name))

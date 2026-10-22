@@ -27,9 +27,9 @@ public enum AppleCompletionPolicy {
         return playedThreshold(duration: duration).map { position >= $0 } ?? false
     }
 
-    public static func successor(after partID: String?, episodes: [AppleStremioEpisode],
-                                 completedIDs: Set<String>, now: Date = .now) -> AppleStremioEpisode? {
-        let ordered = AppleStremioEpisodePolicy.episodes(in: nil, from: episodes)
+    public static func successor(after partID: String?, episodes: [AppleMediaEpisode],
+                                 completedIDs: Set<String>, now: Date = .now) -> AppleMediaEpisode? {
+        let ordered = AppleMediaEpisodePolicy.episodes(in: nil, from: episodes)
         let regular = ordered.filter { $0.season != 0 }
         let candidates = regular.isEmpty ? ordered : regular
         guard let partID, let index = candidates.firstIndex(where: { $0.id == partID }) else { return nil }

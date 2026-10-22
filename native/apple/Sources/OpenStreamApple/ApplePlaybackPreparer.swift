@@ -80,6 +80,23 @@ public enum ApplePlaybackPreparationError: Swift.Error, LocalizedError, Equatabl
 /// offline copy, and an explicit remote URL or SMB mapping creates a real
 /// gateway session. Matroska is never handed to the native exporter.
 public actor ApplePlaybackPreparer {
+    /// Whether the system's own inspection says AVFoundation can play the asset as it is.
+    public static func decision(for inspection: AppleAssetInspection) -> OpenStreamPlaybackDecision {
+        let evidence = inspection.runtimeEvidence
+        guard evidence.supportsDirectPlayback else {
+            let reason: String
+            if evidence.hasProtectedContent && !evidence.assetIsPlayable {
+                reason = "Protected media failed the system playback check."
+            } else if !evidence.assetIsPlayable {
+                reason = "The asset failed the system playback check."
+            } else {
+                reason = "An enabled track failed the system playback check."
+            }
+            return OpenStreamPlaybackDecision(support: .unsupported, reasons: [reason])
+        }
+        return OpenStreamPlaybackDecision(support: .supported, reasons: [])
+    }
+
     private let exporter: AppleNativeMediaExporter
     private let gatewayClient: AppleTranscodeGatewayClient
 
@@ -116,7 +133,7 @@ public actor ApplePlaybackPreparer {
         }
         return try await prepare(
             sourceURL: sourceURL,
-            decision: AppleStremioPlaybackResolver.decision(for: inspection),
+            decision: Self.decision(for: inspection),
             inspectedAsset: inspection,
             gatewayRequest: gatewayRequest
         )

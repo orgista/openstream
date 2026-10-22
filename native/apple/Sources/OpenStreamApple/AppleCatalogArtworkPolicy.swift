@@ -64,16 +64,9 @@ enum AppleCatalogArtworkPolicy {
         let supplied = landscape
             ? [item.backgroundURL, fallback?.backgroundURL, item.posterURL]
             : [item.posterURL, fallback?.posterURL, item.backgroundURL]
-        var values = supplied.compactMap { $0 }
-        // Cinemeta's image service also works when an add-on returns no art,
-        // or a stale art URL. It requires a canonical IMDb id, never a title
-        // guessed from the rail or an add-on's private identifier.
-        if AppleStremioMetadataClient.isIMDBIdentifier(item.mediaID) {
-            let kinds = landscape ? ["background", "poster"] : ["poster", "background"]
-            values += kinds.compactMap { imageServiceURL(kind: $0, mediaID: item.mediaID) }
-        }
-        values += (landscape ? [fallback?.backgroundURL, fallback?.posterURL]
-                            : [fallback?.posterURL, fallback?.backgroundURL]).compactMap { $0 }
+        let values = supplied.compactMap { $0 }
+            + (landscape ? [fallback?.backgroundURL, fallback?.posterURL]
+                         : [fallback?.posterURL, fallback?.backgroundURL]).compactMap { $0 }
         var seen = Set<URL>()
         return values.filter { seen.insert($0).inserted }
     }
@@ -88,12 +81,6 @@ enum AppleCatalogArtworkPolicy {
         if url == item.posterURL || url == fallback?.posterURL { return .poster }
         if url == item.logoURL || url == fallback?.logoURL { return .logo }
         return preferred
-    }
-
-    /// Cinemeta's image-service art for an IMDb id: "poster" or "background".
-    static func imageServiceURL(kind: String, mediaID: String) -> URL? {
-        guard AppleStremioMetadataClient.isIMDBIdentifier(mediaID) else { return nil }
-        return URL(string: "https://images.metahub.space/\(kind)/medium/\(mediaID)/img")
     }
 
     /// How long a card that has run out of art waits before trying its
@@ -140,17 +127,12 @@ enum AppleCatalogArtworkPolicy {
 
     /// What a logo-on-a-plate poster is drawn over: the title's own backdrop,
     /// so the card reads as the title's art with its logo on it rather than
-    /// a grey box with the name on it (N49 #20). The add-on's backdrop first,
-    /// then a resolved one, then Cinemeta's for an IMDb id; never the image
-    /// the card is already showing. Nil leaves the logo on the dark tile.
+    /// a grey box with the name on it (N49 #20). The item's backdrop first,
+    /// then a resolved one; never the image the card is already showing. Nil
+    /// leaves the logo on the dark tile.
     static func plateBackdrop(item: AppleCatalogItem, fallback: AppleArtworkResolver.Artwork? = nil,
                               showing: URL?) -> URL? {
-        var values = [item.backgroundURL, fallback?.backgroundURL].compactMap { $0 }
-        if AppleStremioMetadataClient.isIMDBIdentifier(item.mediaID),
-           let url = URL(string: "https://images.metahub.space/background/medium/\(item.mediaID)/img") {
-            values.append(url)
-        }
-        return values.first { $0 != showing }
+        [item.backgroundURL, fallback?.backgroundURL].compactMap { $0 }.first { $0 != showing }
     }
 
     /// How loaded art sits in its card. A portrait poster in a 16:9 card

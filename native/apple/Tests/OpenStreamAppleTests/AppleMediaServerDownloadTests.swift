@@ -72,8 +72,8 @@ import Testing
     }
 
     @Test func serverOnlyLibraryIsVisibleInDiscover() {
-        #expect(AppleCatalogShelfPolicy.hasDiscoverContent(hasCatalog: false, hasLocalLibrary: false, hasMediaServerItems: true))
-        #expect(!AppleCatalogShelfPolicy.hasDiscoverContent(hasCatalog: false, hasLocalLibrary: false, hasMediaServerItems: false))
+        #expect(AppleCatalogShelfPolicy.hasDiscoverContent(hasLocalLibrary: false, hasMediaServerItems: true))
+        #expect(!AppleCatalogShelfPolicy.hasDiscoverContent(hasLocalLibrary: false, hasMediaServerItems: false))
     }
 
     @Test func offlineRequestUsesOnlySavedFileAndNoServerCredentials() throws {

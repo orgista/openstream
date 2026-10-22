@@ -80,7 +80,7 @@ public enum AppleStreamFormatBadge: Int, CaseIterable, Comparable, Sendable {
         guard !value.isEmpty else { return [] }
         func has(_ pattern: String) -> Bool { value.range(of: pattern, options: .regularExpression) != nil }
         var badges: [Self] = []
-        let resolution = AppleStremioCandidateRanking.resolution(value)
+        let resolution = AppleReleaseName.resolution(value)
         if resolution >= 2160 { badges.append(.uhd) } else if resolution >= 1080 { badges.append(.fullHD) }
         if has(#"\b(?:dv|dovi|dolby[ ._-]?vision)\b"#) {
             badges.append(.dolbyVision)
@@ -97,12 +97,6 @@ public enum AppleStreamFormatBadge: Int, CaseIterable, Comparable, Sendable {
         }
         if has(#"remux"#) { badges.append(.remux) }
         return badges
-    }
-
-    /// Badges for a stream candidate, from everything its add-on said about it.
-    public static func badges(for candidate: AppleStremioHTTPPlaybackCandidate) -> [Self] {
-        parse([candidate.qualityDescription ?? "", candidate.title, candidate.filename ?? "",
-               candidate.sourceURL.lastPathComponent].joined(separator: " "))
     }
 
     /// Badges the engine's probe proves.

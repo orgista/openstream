@@ -36,7 +36,7 @@ struct AppleLibrarySeries: Identifiable, Equatable, Sendable {
             let id = playbackID(first)
             var version = AppleMediaVersion(id: id, itemID: itemID, sourceID: first.sourceID,
                 label: [AppleLibraryTitleParser.parse(first).version,
-                    AppleStremioCandidateRanking.resolution(first.name) > 0 ? AppleLocalLibraryStore.format(first) : first.url.deletingPathExtension().lastPathComponent]
+                    AppleReleaseName.resolution(first.name) > 0 ? AppleLocalLibraryStore.format(first) : first.url.deletingPathExtension().lastPathComponent]
                     .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "),
                 parts: chain.enumerated().map { offset, file in
                     AppleMediaPart(id: "mp:" + ApplePlaybackIdentity.digest(for: id + ":" + String(offset + 1)),
@@ -80,7 +80,7 @@ struct AppleLibrarySeries: Identifiable, Equatable, Sendable {
                 if a.episode != b.episode { return (a.episode ?? 0) < (b.episode ?? 0) }
                 if a.part != b.part { return (a.part ?? 1) < (b.part ?? 1) }
                 // The best copy first: it is the one a card resolves and plays.
-                let lhs = AppleStremioCandidateRanking.resolution($0.name), rhs = AppleStremioCandidateRanking.resolution($1.name)
+                let lhs = AppleReleaseName.resolution($0.name), rhs = AppleReleaseName.resolution($1.name)
                 if lhs != rhs { return lhs > rhs }
                 return $0.id < $1.id
             }

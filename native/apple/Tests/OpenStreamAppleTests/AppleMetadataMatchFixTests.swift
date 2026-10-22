@@ -65,7 +65,7 @@ struct AppleMetadataMatchFixTests {
         #expect(AppleLibraryMetadataResolver.bestMatch([items[1]], parsed: AppleLibraryTitleParser.parse(name: "Dune Messiah.mkv"), aliases: ["new": ["Dune Messiah"]])?.mediaID == "new")
     }
 
-    /// Checklist row 20: Cinemeta has two series named "Chernobyl" (2019, 2022) and the folder has no year.
+    /// Checklist row 20: the metadata provider has two series named "Chernobyl" (2019, 2022) and the folder has no year.
     @Test func yearlessSeriesTakesTheFirstSameNamedResult() throws {
         let parsed = AppleLibraryTitleParser.parse(name: "Chernobyl - S01E01 - 1-23-45 WEBDL-1080p.mkv",
                                                    parentPath: "TV/Chernobyl/Season 1")
@@ -137,11 +137,11 @@ struct AppleMetadataMatchFixTests {
         let matches = root.appendingPathComponent("Matches")
         try FileManager.default.createDirectory(at: matches, withIntermediateDirectories: true)
         try JSONEncoder().encode(record).write(to: matches.appendingPathComponent(ApplePlaybackIdentity.digest(for: legacyID) + ".json"))
-        let resolver = AppleLibraryMetadataResolver(directory: root) { _, _, _, _ in
+        let resolver = AppleLibraryMetadataResolver(directory: root) { _, _, _ in
             Issue.record("A manual match must not be looked up again")
             return nil
         }
-        #expect(try await resolver.resolve(item, sources: [], tmdbKey: "", omdbKey: "") == manual)
+        #expect(try await resolver.resolve(item, tmdbKey: "", omdbKey: "") == manual)
         #expect(await resolver.cachedLookups(for: [group]).metadata[legacyID] == manual)
         #expect(AppleLibraryMetadataResolver.searchQueries(AppleLibraryTitleParser.parse(item)).first?.title == value.3)
     }
@@ -224,7 +224,7 @@ struct AppleMetadataMatchFixTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let results = try await AppleNetworkStub.$testRoot.withValue(root) {
             try await AppleLibraryMetadataResolver.correctionCandidates(query: "1917", year: nil,
-                kind: .movie, sources: [], tmdbKey: "fixture", omdbKey: "")
+                kind: .movie, tmdbKey: "fixture", omdbKey: "")
         }
         #expect(results.contains { $0.name == "Unrelated Film" })
         #expect(results.contains { $0.name == "1917" && $0.releaseInfo?.hasPrefix("2019") == true })
@@ -238,7 +238,7 @@ struct AppleMetadataMatchFixTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let results = try await AppleNetworkStub.$testRoot.withValue(root) {
             try await AppleLibraryMetadataResolver.correctionCandidates(query: value.0, year: nil,
-                kind: .movie, sources: [], tmdbKey: "fixture", omdbKey: "")
+                kind: .movie, tmdbKey: "fixture", omdbKey: "")
         }
         #expect(results.map(\.name) == [value.1])
     }
@@ -270,10 +270,10 @@ struct AppleMetadataMatchFixTests {
     @Test func folderFallback() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let resolver = AppleLibraryMetadataResolver(directory: root) { title, _, _, _ in
+        let resolver = AppleLibraryMetadataResolver(directory: root) { title, _, _ in
             title.title == "Correct Title" ? AppleCatalogItem(mediaID: "tt1234567", type: "movie", name: title.title) : nil
         }
-        #expect(try await resolver.resolve(file("Movies/Correct Title (2024)/Misleading.mkv"), sources: [], tmdbKey: "", omdbKey: "")?.name == "Correct Title")
+        #expect(try await resolver.resolve(file("Movies/Correct Title (2024)/Misleading.mkv"), tmdbKey: "", omdbKey: "")?.name == "Correct Title")
     }
 
     @Test func missingTypedIDFallsThroughToAnotherTypedID() async throws {
@@ -293,15 +293,14 @@ struct AppleMetadataMatchFixTests {
             configuration: .init(credential: "fixture"))?.mediaID == "tt1234567")
     }
 
-    @Test(arguments: ["tmdb", "catalog", "metadata"])
-    func missingProviderRecordIsCachedAsNoMatch(_ provider: String) async throws {
+    @Test func missingProviderRecordIsCachedAsNoMatch() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let item = file("Missing.2024.mkv")
         let probe = CacheMissProbe()
-        let resolver = AppleLibraryMetadataResolver(directory: root) { _, _, _, _ in try await probe.missingRecord(provider) }
-        #expect(try await resolver.resolve(item, sources: [], tmdbKey: "fixture", omdbKey: "") == nil)
-        #expect(try await resolver.resolve(item, sources: [], tmdbKey: "fixture", omdbKey: "") == nil)
+        let resolver = AppleLibraryMetadataResolver(directory: root) { _, _, _ in try await probe.missingRecord() }
+        #expect(try await resolver.resolve(item, tmdbKey: "fixture", omdbKey: "") == nil)
+        #expect(try await resolver.resolve(item, tmdbKey: "fixture", omdbKey: "") == nil)
         #expect(await probe.calls == 1)
         let path = root.appendingPathComponent(item.sourceID.uuidString)
             .appendingPathComponent(AppleLibraryMetadataResolver.cacheKey(item) + ".json")
@@ -309,56 +308,6 @@ struct AppleMetadataMatchFixTests {
         #expect(object["reason"] as? String == "noMatch")
     }
 
-    #if OPENSTREAM_ADDONS
-    @Test func correctionTypedIDUsesFallbackWhenConfiguredProviderIsUnavailable() async throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: root) }
-        let host = try #require(AppleStremioMetadataClient.defaultMetadataSource.url.host)
-        let directory = root.appendingPathComponent(host).appendingPathComponent("meta/movie")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try Data(#"{"meta":{"id":"tt1234567","type":"movie","name":"Correct Title"}}"#.utf8)
-            .write(to: directory.appendingPathComponent("tt1234567.json"))
-        let results = try await AppleNetworkStub.$testRoot.withValue(root) {
-            try await AppleLibraryMetadataResolver.correctionCandidates(query: "tt1234567", year: nil,
-                kind: .movie, sources: [], tmdbKey: "fixture", omdbKey: "")
-        }
-        #expect(results.map(\.mediaID) == ["tt1234567"])
-    }
-
-    @Test func correctionSearchUsesDefaultCatalogWithoutCredentials() async throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: root) }
-        let host = try #require(AppleStremioMetadataClient.defaultMetadataSource.url.host)
-        let directory = root.appendingPathComponent(host).appendingPathComponent("catalog/movie/top")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try Data(#"{"metas":[{"id":"tt1234567","type":"movie","name":"Fixture Film","releaseInfo":"2024"}]}"#.utf8)
-            .write(to: directory.appendingPathComponent("search=Fixture Film.json"))
-        let results = try await AppleNetworkStub.$testRoot.withValue(root) {
-            try await AppleLibraryMetadataResolver.correctionCandidates(query: "Fixture Film", year: 2024,
-                kind: .movie, sources: [], tmdbKey: "", omdbKey: "")
-        }
-        #expect(results.map(\.mediaID) == ["tt1234567"])
-    }
-
-    @Test func automaticIdentityDoesNotTrustAnUnverifiedFilenameID() async throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: root) }
-        let host = try #require(AppleStremioMetadataClient.defaultMetadataSource.url.host)
-        let directory = root.appendingPathComponent(host).appendingPathComponent("meta/movie")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try Data(#"{"meta":{"id":"tt1234567","type":"movie","name":"Correct Title"}}"#.utf8)
-            .write(to: directory.appendingPathComponent("tt1234567.json"))
-        let item = file("Wrong {tmdb-1} [imdbid-tt1234567].mkv")
-        let resolver = AppleLibraryMetadataResolver(directory: root.appendingPathComponent("cache"))
-        let result = try await AppleNetworkStub.$testRoot.withValue(root) {
-            try await resolver.resolve(item, sources: [], tmdbKey: "", omdbKey: "")
-        }
-        #expect(result?.mediaID == "tt1234567")
-        let identity = await resolver.strongMatchIDs(for: item)
-        #expect(identity?.imdb == "tt1234567")
-        #expect(identity?.tmdb == nil)
-    }
-    #endif
 
     @Test func cachePolicy() {
         let now = Date()
@@ -375,21 +324,21 @@ struct AppleMetadataMatchFixTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let item = file("Film.2024.mkv")
         let probe = CacheMissProbe()
-        let resolver = AppleLibraryMetadataResolver(directory: root) { _, _, _, _ in try await probe.lookup() }
-        #expect(try await resolver.resolve(item, sources: [], tmdbKey: "a", omdbKey: "") == nil)
-        #expect(try await resolver.resolve(item, sources: [], tmdbKey: "a", omdbKey: "") == nil)
+        let resolver = AppleLibraryMetadataResolver(directory: root) { _, _, _ in try await probe.lookup() }
+        #expect(try await resolver.resolve(item, tmdbKey: "a", omdbKey: "") == nil)
+        #expect(try await resolver.resolve(item, tmdbKey: "a", omdbKey: "") == nil)
         #expect(await probe.calls == 1)
         let path = root.appendingPathComponent(item.sourceID.uuidString).appendingPathComponent(AppleLibraryMetadataResolver.cacheKey(item) + ".json")
         var object = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any])
         #expect(object["reason"] as? String == "providerUnreachable")
-        #expect(object["configuration"] as? String == AppleLibraryMetadataResolver.configurationDigest([], "a", ""))
-        #expect(object["configuration"] as? String != AppleLibraryMetadataResolver.configurationDigest([], "b", ""))
-        #expect(try await resolver.resolve(item, sources: [], tmdbKey: "b", omdbKey: "") == nil)
+        #expect(object["configuration"] as? String == AppleLibraryMetadataResolver.configurationDigest("a", ""))
+        #expect(object["configuration"] as? String != AppleLibraryMetadataResolver.configurationDigest("b", ""))
+        #expect(try await resolver.resolve(item, tmdbKey: "b", omdbKey: "") == nil)
         #expect(await probe.calls == 2)
         object = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any])
         object["parserVersion"] = 0
         try JSONSerialization.data(withJSONObject: object).write(to: path)
-        #expect(try await resolver.resolve(item, sources: [], tmdbKey: "b", omdbKey: "") == nil)
+        #expect(try await resolver.resolve(item, tmdbKey: "b", omdbKey: "") == nil)
         #expect(await probe.calls == 3)
     }
 
@@ -398,16 +347,16 @@ struct AppleMetadataMatchFixTests {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let item = file("Film.2024.mkv")
-        let resolver = AppleLibraryMetadataResolver(directory: root) { title, _, _, _ in
+        let resolver = AppleLibraryMetadataResolver(directory: root) { title, _, _ in
             AppleCatalogItem(mediaID: "tt1234567", type: "movie", name: title.title)
         }
-        let original = try await resolver.resolve(item, sources: [], tmdbKey: "", omdbKey: "")
+        let original = try await resolver.resolve(item, tmdbKey: "", omdbKey: "")
         let path = root.appendingPathComponent(item.sourceID.uuidString).appendingPathComponent(AppleLibraryMetadataResolver.cacheKey(item) + ".json")
         var object = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any])
         object["checkedAt"] = Date().addingTimeInterval(-8 * 86400).timeIntervalSinceReferenceDate
         try JSONSerialization.data(withJSONObject: object).write(to: path)
         let probe = CacheMissProbe()
-        let offline = AppleLibraryMetadataResolver(directory: root) { _, _, _, _ in try await probe.lookup() }
+        let offline = AppleLibraryMetadataResolver(directory: root) { _, _, _ in try await probe.lookup() }
         let groups = AppleLibrarySeries.groups([item])
         #expect(await offline.cachedLookups(for: groups).metadata[groups[0].id] == original)
         #expect(await probe.calls == 0)
@@ -415,11 +364,11 @@ struct AppleMetadataMatchFixTests {
         object["checkedAt"] = Date().addingTimeInterval(-10 * 86400).timeIntervalSinceReferenceDate
         try JSONSerialization.data(withJSONObject: object).write(to: path)
         #expect(await offline.cachedLookups(for: groups).metadata[groups[0].id] == original)
-        #expect(await offline.needsRevalidation(item, sources: [], tmdbKey: "", omdbKey: ""))
-        let changed = AppleLibraryMetadataResolver(directory: root) { _, _, _, _ in
+        #expect(await offline.needsRevalidation(item, tmdbKey: "", omdbKey: ""))
+        let changed = AppleLibraryMetadataResolver(directory: root) { _, _, _ in
             AppleCatalogItem(mediaID: "tt7654321", type: "movie", name: "Updated")
         }
-        #expect(try await changed.resolve(item, sources: [], tmdbKey: "", omdbKey: "")?.name == "Updated")
+        #expect(try await changed.resolve(item, tmdbKey: "", omdbKey: "")?.name == "Updated")
     }
 
     @Test func revalidationDeadlineIsSpreadPerEntry() {
@@ -440,16 +389,16 @@ struct AppleMetadataMatchFixTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let item = file("Film.2024.mkv")
         let candidate = AppleCatalogItem(mediaID: "tt1234567", type: "movie", name: "Film")
-        _ = try await AppleLibraryMetadataResolver(directory: root) { _, _, _, _ in candidate }
-            .resolve(item, sources: [], tmdbKey: "", omdbKey: "")
+        _ = try await AppleLibraryMetadataResolver(directory: root) { _, _, _ in candidate }
+            .resolve(item, tmdbKey: "", omdbKey: "")
         let path = root.appendingPathComponent(item.sourceID.uuidString).appendingPathComponent(AppleLibraryMetadataResolver.cacheKey(item) + ".json")
         var object = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any])
         object["checkedAt"] = Date().addingTimeInterval(-10 * 86400).timeIntervalSinceReferenceDate
         try JSONSerialization.data(withJSONObject: object).write(to: path)
-        let empty = AppleLibraryMetadataResolver(directory: root) { _, _, _, _ in nil }
-        #expect(try await empty.resolve(item, sources: [], tmdbKey: "", omdbKey: "") == candidate)
-        #expect(await !empty.needsRevalidation(item, sources: [], tmdbKey: "", omdbKey: ""))
-        #expect(try await empty.resolve(item, sources: [], tmdbKey: "", omdbKey: "", refresh: true) == nil)
+        let empty = AppleLibraryMetadataResolver(directory: root) { _, _, _ in nil }
+        #expect(try await empty.resolve(item, tmdbKey: "", omdbKey: "") == candidate)
+        #expect(await !empty.needsRevalidation(item, tmdbKey: "", omdbKey: ""))
+        #expect(try await empty.resolve(item, tmdbKey: "", omdbKey: "", refresh: true) == nil)
     }
 
     @Test func stalePositiveSurvivesOutageButRetriesSoon() async throws {
@@ -457,46 +406,22 @@ struct AppleMetadataMatchFixTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let item = file("Film.2024.mkv")
         let candidate = AppleCatalogItem(mediaID: "tt1234567", type: "movie", name: "Film")
-        let resolver = AppleLibraryMetadataResolver(directory: root) { _, _, _, _ in candidate }
-        _ = try await resolver.resolve(item, sources: [], tmdbKey: "", omdbKey: "")
+        let resolver = AppleLibraryMetadataResolver(directory: root) { _, _, _ in candidate }
+        _ = try await resolver.resolve(item, tmdbKey: "", omdbKey: "")
         let path = root.appendingPathComponent(item.sourceID.uuidString).appendingPathComponent(AppleLibraryMetadataResolver.cacheKey(item) + ".json")
         var object = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any])
         object["checkedAt"] = Date().addingTimeInterval(-10 * 86400).timeIntervalSinceReferenceDate
         try JSONSerialization.data(withJSONObject: object).write(to: path)
         let probe = CacheMissProbe()
-        let offline = AppleLibraryMetadataResolver(directory: root) { _, _, _, _ in try await probe.lookup() }
-        #expect(try await offline.resolve(item, sources: [], tmdbKey: "", omdbKey: "") == candidate)
-        #expect(try await offline.resolve(item, sources: [], tmdbKey: "", omdbKey: "") == candidate)
+        let offline = AppleLibraryMetadataResolver(directory: root) { _, _, _ in try await probe.lookup() }
+        #expect(try await offline.resolve(item, tmdbKey: "", omdbKey: "") == candidate)
+        #expect(try await offline.resolve(item, tmdbKey: "", omdbKey: "") == candidate)
         #expect(await probe.calls == 1)
         object = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any])
         #expect(object["reason"] as? String == "providerUnreachable")
         object["checkedAt"] = Date().addingTimeInterval(-31).timeIntervalSinceReferenceDate
         try JSONSerialization.data(withJSONObject: object).write(to: path)
-        #expect(await offline.needsRevalidation(item, sources: [], tmdbKey: "", omdbKey: ""))
-    }
-
-    /// Smoke test only: the fixture library is one group, so this cannot show
-    /// a before/after match-count difference.
-    @Test func e2eLibraryFixtureResolves() async throws {
-        let project = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        let stubs = project.appendingPathComponent("Apps/TestPlans/Stubs")
-        let source = AppleSource(kind: .library, name: "Fixture Library", url: stubs.appendingPathComponent("library"))
-        let items = try await AppleLibraryScanner().scan(source: source)
-        let groups = AppleLibrarySeries.groups(items)
-        let catalog = AppleSource(kind: .stremio, name: "Fixture", url: URL(string: "https://fixture.example/manifest.json")!,
-            resources: ["catalog", "meta"], catalogs: [.init(type: "movie", id: "top", supportsSearch: true)])
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: root) }
-        let resolver = AppleLibraryMetadataResolver(directory: root)
-        var matched = 0
-        try await AppleNetworkStub.$testRoot.withValue(stubs) {
-            for group in groups {
-                if let item = group.items.first,
-                   try await resolver.resolve(item, sources: [catalog], tmdbKey: "", omdbKey: "") != nil { matched += 1 }
-            }
-        }
-        #expect(groups.count == 1)
-        #expect(matched == groups.count)
+        #expect(await offline.needsRevalidation(item, tmdbKey: "", omdbKey: ""))
     }
 
     @Test func correctionSearchUsesOMDbWhenItIsTheConfiguredProvider() async throws {
@@ -508,7 +433,7 @@ struct AppleMetadataMatchFixTests {
             .write(to: directory.appendingPathComponent("index.json"))
         let results = try await AppleNetworkStub.$testRoot.withValue(root) {
             try await AppleLibraryMetadataResolver.correctionCandidates(query: "Fixture Film", year: 2024,
-                kind: .movie, sources: [], tmdbKey: "", omdbKey: "fixture")
+                kind: .movie, tmdbKey: "", omdbKey: "fixture")
         }
         #expect(results.map(\.mediaID) == ["tt1234567"])
     }
@@ -517,11 +442,11 @@ struct AppleMetadataMatchFixTests {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let probe = SuspendedMatchProbe()
-        let resolver = AppleLibraryMetadataResolver(directory: root) { _, _, _, _ in await probe.lookup() }
+        let resolver = AppleLibraryMetadataResolver(directory: root) { _, _, _ in await probe.lookup() }
         let item = file("Film.2024.mkv")
-        let first = Task { try await resolver.resolve(item, sources: [], tmdbKey: "", omdbKey: "") }
+        let first = Task { try await resolver.resolve(item, tmdbKey: "", omdbKey: "") }
         await probe.waitUntilStarted()
-        let second = Task { try await resolver.resolve(item, sources: [], tmdbKey: "", omdbKey: "") }
+        let second = Task { try await resolver.resolve(item, tmdbKey: "", omdbKey: "") }
         while await resolver.activeLookupWaiterCount < 2 { await Task.yield() }
         first.cancel()
         // The cancelled card returns while the shared lookup is still suspended.
@@ -537,11 +462,11 @@ struct AppleMetadataMatchFixTests {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let probe = SuspendedMatchProbe()
-        let resolver = AppleLibraryMetadataResolver(directory: root) { _, _, _, _ in await probe.lookup() }
+        let resolver = AppleLibraryMetadataResolver(directory: root) { _, _, _ in await probe.lookup() }
         let item = file("Movie.2024.mkv")
-        let first = Task { try await resolver.resolve(item, sources: [], tmdbKey: "", omdbKey: "") }
+        let first = Task { try await resolver.resolve(item, tmdbKey: "", omdbKey: "") }
         await probe.waitUntilStarted()
-        let second = Task { try await resolver.resolve(item, sources: [], tmdbKey: "", omdbKey: "") }
+        let second = Task { try await resolver.resolve(item, tmdbKey: "", omdbKey: "") }
         while await resolver.activeLookupWaiterCount < 2 { await Task.yield() }
         let correct = AppleCatalogItem(mediaID: "tt7654321", type: "movie", name: "Correct")
         try await resolver.correctMatch(for: item, candidate: correct, provider: "fixture")
@@ -549,8 +474,8 @@ struct AppleMetadataMatchFixTests {
         #expect(try await first.value == correct)
         #expect(try await second.value == correct)
         #expect(await probe.calls == 1)
-        let reopened = AppleLibraryMetadataResolver(directory: root) { _, _, _, _ in nil }
-        #expect(try await reopened.resolve(item, sources: [], tmdbKey: "", omdbKey: "") == correct)
+        let reopened = AppleLibraryMetadataResolver(directory: root) { _, _, _ in nil }
+        #expect(try await reopened.resolve(item, tmdbKey: "", omdbKey: "") == correct)
     }
 }
 
@@ -583,12 +508,8 @@ private actor RequestLog {
 private actor CacheMissProbe {
     var calls = 0
     func lookup() throws -> AppleCatalogItem? { calls += 1; throw URLError(.cannotConnectToHost) }
-    func missingRecord(_ provider: String) throws -> AppleCatalogItem? {
+    func missingRecord() throws -> AppleCatalogItem? {
         calls += 1
-        switch provider {
-        case "catalog": throw AppleStremioCatalogError.requestFailed(404)
-        case "metadata": throw AppleStremioPlaybackError.requestFailed(404)
-        default: throw AppleTMDBError.requestFailed(404)
-        }
+        throw AppleTMDBError.requestFailed(404)
     }
 }

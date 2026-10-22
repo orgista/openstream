@@ -87,9 +87,9 @@ public extension AppleSimilarTitleProfile {
             cast: item.cast ?? [],
             director: item.director,
             writers: item.writers ?? [],
-            year: item.year ?? AppleStremioMetadataClient.leadingYear(item.releaseInfo),
+            year: item.year ?? AppleMediaIdentifier.leadingYear(item.releaseInfo),
             imdbRating: item.rating,
-            canonicalID: AppleStremioMetadataClient.canonicalMediaID(item.imdbID ?? item.mediaID),
+            canonicalID: AppleMediaIdentifier.canonicalMediaID(item.imdbID ?? item.mediaID),
             sourceID: sourceID
         )
     }

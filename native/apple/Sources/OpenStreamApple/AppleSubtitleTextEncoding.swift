@@ -8,8 +8,8 @@ import Foundation
 /// 1. a byte-order mark (UTF-8, UTF-32 LE/BE, UTF-16 LE/BE);
 /// 2. UTF-16 without one, from the pattern of zero bytes;
 /// 3. valid UTF-8;
-/// 4. the legacy code page of the subtitle's declared language (the add-on's
-///    `lang`), else a guess from the bytes: mostly high bytes is Cyrillic
+/// 4. the legacy code page of the subtitle's declared language, else a guess
+///    from the bytes: mostly high bytes is Cyrillic
 ///    Windows-1251, otherwise Western Windows-1252.
 public enum AppleSubtitleTextEncoding {
     public static func decode(_ data: Data, language: String? = nil) -> String? {

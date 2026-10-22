@@ -7,7 +7,7 @@ import Testing
 struct AppleNowPlayingInfoTests {
     private func episodeRequest() throws -> ApplePlaybackRequest {
         var request = ApplePlaybackRequest(url: try #require(URL(string: "https://fixture.example/e.mkv")),
-                                           mediaID: "tt1:1:3", title: "S1 E3 · Name", sourceKind: .stremio)
+                                           mediaID: "tt1:1:3", title: "S1 E3 · Name", sourceKind: .catalog)
         request.subtitle = "Fixture Show"
         request.artworkURL = URL(string: "https://fixture.example/poster.jpg")
         return request
@@ -55,7 +55,7 @@ struct AppleNowPlayingInfoTests {
         #expect(AppleNowPlayingMetadata(title: "  ", isLive: false).knownTitle == nil)
     }
 
-    @Test("Channel and add-on requests carry their artwork")
+    @Test("Channel requests carry their artwork")
     func requestsCarryArtwork() throws {
         let channel = AppleIPTVChannel(id: "ch", sourceID: UUID(), name: "Fixture",
                                        logoURL: URL(string: "https://fixture.example/logo.png"),

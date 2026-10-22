@@ -15,7 +15,7 @@ import Testing
     private func makeRequest(
         isLive: Bool = false,
         dvrWindowSeconds: Double? = nil,
-        sourceKind: ApplePlaybackRequest.SourceKind = .stremio
+        sourceKind: ApplePlaybackRequest.SourceKind = .catalog
     ) -> ApplePlaybackRequest {
         ApplePlaybackRequest(
             url: URL(string: "http://127.0.0.1:8765/media/movie.mp4")!,

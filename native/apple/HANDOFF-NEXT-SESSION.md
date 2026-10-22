@@ -704,6 +704,8 @@ ls $B/export-tvos-b$N/*.ipa                                          # "OpenStre
 ```
 Check the archived number before uploading:
 `/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$B/OpenStream-tvOS-b$N.xcarchive/Products/Applications/OpenStream tvOS.app/Info.plist"`.
+Then prove the archive has no add-on words (OpenStream has no add-ons since 2026-10-22; one build for
+TestFlight and App Review): `bash scripts/check-no-addons-in-release.sh "$B/OpenStream-tvOS-b$N.xcarchive"` must PASS.
 
 ### 9.2 Upload + groups (only after "ship N")
 ```
@@ -720,12 +722,15 @@ asc publish testflight --app 6807530757 --build-id <id> --group "TraceEnabled,Re
 asc builds list --app 6807530757 --output json | python3 -c "import json,sys; d=json.load(sys.stdin); pre={i['id']:i['attributes'].get('platform') for i in d.get('included',[]) if i.get('type')=='preReleaseVersions'}; [print(a['version'], pre.get((r.get('relationships',{}).get('preReleaseVersion',{}).get('data') or {}).get('id'),'?'), a.get('processingState'), r['id']) for r in d['data'] for a in [r['attributes']] if a.get('version')=='$N']"
 asc testflight distribution view --build-id <id> --output json     # internalBuildState / externalBuildState = IN_BETA_TESTING
 ```
-Then record in `DELIVERIES.md` (build → id → groups → commit) and FEEDBACK, and tell the owner the ids.
+Then expire the previous builds on every platform (`asc builds expire --build-id <old id> --confirm`; SHIP-CHECKLIST §0),
+record in `DELIVERIES.md` (build → id → groups → commit → check-no-addons PASS → app-store-review-hardening checklist)
+and FEEDBACK, and tell the owner the ids.
 
 ### 9.3a TestFlight "What to Test" notes — owner policy (2026-09-17, applies to every build)
 Concise, platform-specific "Added…" / "Fixed…" lines written from the exact shipped snapshot, with
 one useful testing request. Only verified user-visible changes: no raw commit messages, no Android
-items in Apple notes, no unshipped features, no test counts, no hype. Use the `copywriting` /
+items in Apple notes, no unshipped features, no test counts, no hype, and never add-on/Stremio/torrent/debrid
+words (describe sources as the user's own files, network shares, media servers and playlists). Use the `copywriting` /
 `copy-editing` skills for the wording. Set them with `asc publish testflight … --test-notes "<text>"
 --locale en-US` (or the testflight notes command from `asc-testflight-orchestration`) and read them back.
 

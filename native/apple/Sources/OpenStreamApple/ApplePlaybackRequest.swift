@@ -3,9 +3,6 @@ import Foundation
 public struct ApplePlaybackRequest: Equatable, Sendable {
     public enum SourceKind: String, Equatable, Sendable, CaseIterable {
         case catalog
-        #if OPENSTREAM_ADDONS
-        public static var stremio: Self { .catalog }
-        #endif
         case iptv
         case liveTV
         case files
@@ -25,11 +22,11 @@ public struct ApplePlaybackRequest: Equatable, Sendable {
         public var versionDuration: Double? = nil
         /// Original library file, before local export or the SMB playback proxy.
         public var libraryFileURL: URL?
-        /// The add-on media id for this title (`tt0111161`, or `tt0903747:1:2`
-        /// for an episode) and its type. Present only when the stream came from
-        /// an add-on, and used to ask add-ons for subtitle files.
-        public var addonMediaID: String?
-        public var addonMediaType: String?
+        /// The title's media id (`tt0111161`, or `tt0903747:1:2` for an
+        /// episode) and its type, which name the saved progress part when the
+        /// source supplies none.
+        public var titleMediaID: String?
+        public var titleMediaType: String?
         /// Hand the origin URL to AVPlayer as HLS instead of demuxing it
         /// (`AppleLiveStreamRoutePolicy`). Live channels only.
         public var nativeRemoteHLS: Bool
@@ -37,13 +34,6 @@ public struct ApplePlaybackRequest: Equatable, Sendable {
         /// synthesized master, which declares the CEA-608 the provider's
         /// manifest left out (`AppleLiveCaptionWrapPolicy`). Live channels only.
         public var declaresEmbeddedCaptions: Bool
-        /// The service an add-on stream belongs to (`AppleStreamServiceKey`),
-        /// so a service that is down can be skipped. Nil for everything else.
-        public var serviceKey: String?
-        /// How long the title runs, in seconds, when its metadata says. A
-        /// stream far shorter than this is a provider's error clip
-        /// (`AppleStreamPlaceholderPolicy`). Nil when unknown.
-        public var expectedRuntime: Double?
         /// A disc image: how it starts (Play Disc, Skip to Movie) or which of
         /// its titles plays. Nil for everything that is not a disc.
         public var disc: AppleDiscPlaybackChoice?
@@ -53,23 +43,19 @@ public struct ApplePlaybackRequest: Equatable, Sendable {
             proxyHeaders: [String: String] = [:],
             filename: String? = nil,
             libraryFileURL: URL? = nil,
-            addonMediaID: String? = nil,
-            addonMediaType: String? = nil,
+            titleMediaID: String? = nil,
+            titleMediaType: String? = nil,
             nativeRemoteHLS: Bool = false,
-            declaresEmbeddedCaptions: Bool = false,
-            serviceKey: String? = nil,
-            expectedRuntime: Double? = nil
+            declaresEmbeddedCaptions: Bool = false
         ) {
             self.notWebReady = notWebReady
             self.proxyHeaders = proxyHeaders
             self.filename = filename
             self.libraryFileURL = libraryFileURL
-            self.addonMediaID = addonMediaID
-            self.addonMediaType = addonMediaType
+            self.titleMediaID = titleMediaID
+            self.titleMediaType = titleMediaType
             self.nativeRemoteHLS = nativeRemoteHLS
             self.declaresEmbeddedCaptions = declaresEmbeddedCaptions
-            self.serviceKey = serviceKey
-            self.expectedRuntime = expectedRuntime
         }
     }
 

@@ -7,7 +7,7 @@ import AppKit
 
 /// How each platform puts the player on screen. Every entry point — hero
 /// Play, title page Play, an episode, a local file, a media server, Add Files —
-/// goes through `AppleStremioPlayerPresentationModifier`, which asks this.
+/// goes through `AppleMediaPlayerPresentationModifier`, which asks this.
 enum AppleMediaPlayerPresentationStyle: Equatable {
     /// The player takes over the window it was opened from (macOS,
     /// visionOS). On Vision Pro it used to open a second "Player" window;
@@ -81,7 +81,7 @@ enum AppleMacPlayerKeyPolicy {
 @MainActor
 @Observable
 final class AppleMacPlayerStage {
-    private(set) var presentation: AppleStremioPlayerPresentation?
+    private(set) var presentation: AppleMediaPlayerPresentation?
     @ObservationIgnored private var onDismiss: (() -> Void)?
     @ObservationIgnored weak var window: NSWindow?
     @ObservationIgnored private var keyMonitor: Any?
@@ -103,7 +103,7 @@ final class AppleMacPlayerStage {
 
     /// Shows `presentation`, replacing any player already up (whose page is
     /// told it closed).
-    func present(_ presentation: AppleStremioPlayerPresentation, onDismiss: @escaping () -> Void) {
+    func present(_ presentation: AppleMediaPlayerPresentation, onDismiss: @escaping () -> Void) {
         guard self.presentation?.id != presentation.id else { return }
         let replaced = self.onDismiss
         self.presentation = presentation
@@ -205,7 +205,7 @@ private struct AppleMacPlayerStageHost: ViewModifier {
                     // The picture ignores the safe area itself and runs under
                     // the title bar; the player's own buttons keep to it, so
                     // none sits under the traffic lights.
-                    AppleStremioPlayerView(presentation: presentation)
+                    AppleMediaPlayerView(presentation: presentation)
                         .id(presentation.id)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background(Color.black.ignoresSafeArea())
@@ -247,7 +247,7 @@ private struct AppleMacWindowReader: NSViewRepresentable {
 /// The page's end: hands the presentation to the window's stage and clears
 /// the page's binding when the player closes.
 struct AppleMacPlayerStagePresenter: ViewModifier {
-    @Binding var presentation: AppleStremioPlayerPresentation?
+    @Binding var presentation: AppleMediaPlayerPresentation?
     @Environment(AppleMacPlayerStage.self) private var stage: AppleMacPlayerStage?
     /// A window with no stage (a debug fixture window) gets its own, over
     /// the presenting view.
@@ -276,4 +276,3 @@ struct AppleMacPlayerStagePresenter: ViewModifier {
 }
 #endif
 
-typealias AppleStremioPlayerPresentationStyle = AppleMediaPlayerPresentationStyle

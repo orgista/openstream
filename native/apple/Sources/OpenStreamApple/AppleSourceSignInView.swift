@@ -28,9 +28,8 @@ struct AppleSourceSignInDestination: View {
     }
 }
 
-/// Signs a restored source back in: its full address (an add-on's manifest
-/// URL with its configuration), the account for Xtream and network shares,
-/// or the folder for a library.
+/// Signs a restored source back in: its full address, the account for Xtream
+/// and network shares, or the folder for a library.
 struct AppleSourceSignInView: View {
     let source: AppleSource
     let store: AppleSourceStore
@@ -50,7 +49,7 @@ struct AppleSourceSignInView: View {
     var body: some View {
         Form {
             if source.kind != .library {
-                TextField(source.isAddon ? "Manifest URL" : "Source address", text: $address)
+                TextField("Source address", text: $address)
                     .textContentType(.URL)
                     .autocorrectionDisabled()
                     #if os(iOS)
@@ -111,31 +110,14 @@ struct AppleSourceSignInView: View {
 
     private func signIn() {
         do {
-            let url: URL
-            #if OPENSTREAM_ADDONS
-            if source.isAddon {
-                url = try AppleManifestURLPolicy.normalize(address)
-            } else {
-                let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard let parsed = URL(string: trimmed),
-                      ["http", "https", "smb"].contains(parsed.scheme?.lowercased() ?? ""),
-                      parsed.host != nil else { throw AppleConfigurationError.invalidFile }
-                url = parsed
-            }
-            #else
-                let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard let parsed = URL(string: trimmed),
-                      ["http", "https", "smb"].contains(parsed.scheme?.lowercased() ?? ""),
-                      parsed.host != nil else { throw AppleConfigurationError.invalidFile }
-                url = parsed
-            #endif
+            let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let url = URL(string: trimmed),
+                  ["http", "https", "smb"].contains(url.scheme?.lowercased() ?? ""),
+                  url.host != nil else { throw AppleConfigurationError.invalidFile }
             try store.restoreSourceSignIn(id: source.id, address: url, username: username, password: password)
             appleTrace("source sign-in: restored \(source.kind.rawValue)")
             dismiss()
         } catch {
-            #if OPENSTREAM_ADDONS
-            if let policy = error as? AppleManifestURLPolicy.Error { self.error = policy.errorDescription; return }
-            #endif
             self.error = "Could not restore source"
         }
     }

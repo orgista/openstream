@@ -141,24 +141,6 @@ import MediaPlayer
     #expect(coordinator.phase == .idle)
 }
 
-@Test func healthOnlySourceChangesDoNotTriggerCatalogRefreshIdentity() {
-    let source = AppleSource(
-        kind: .stremio,
-        name: "Catalog",
-        url: URL(string: "https://catalog.example/manifest.json")!,
-        resources: ["catalog"]
-    )
-    var updated = source
-    updated.lastValidatedAt = Date(timeIntervalSince1970: 1_788_000_000)
-    updated.validationSummary = "Refreshed 10 titles"
-    updated.discoveredItemCount = 10
-    updated.capabilities = ["Catalog"]
-    updated.lastValidationFailureAt = Date(timeIntervalSince1970: 1_788_000_001)
-    updated.validationFailureSummary = "One catalog unavailable"
-
-    #expect(catalogConfigurationIdentity([source]) == catalogConfigurationIdentity([updated]))
-}
-
 @Test func smbRangeBridgeMeasuresSeekStartupAndReleasesItsListener() async throws {
     let payload = Data((0 ..< 8 * 1_024 * 1_024).map { UInt8($0 % 251) })
     let client = ApplePerformanceSMBClient(payload: payload)

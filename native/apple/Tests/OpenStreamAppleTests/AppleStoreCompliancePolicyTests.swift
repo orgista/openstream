@@ -70,39 +70,6 @@ struct AppleStoreCompliancePolicyTests {
         #expect(offenders.isEmpty, "Old app name: \(offenders.joined(separator: "; "))")
     }
 
-    // MARK: B4 — no service-brand row titles
-
-    /// The Streaming Catalogs add-on's catalogs, as its manifest names them,
-    /// plus the ids the app used to promote to brands.
-    private static let serviceCatalogIDs = ["nfx", "nfk", "hbm", "dnp", "hlu", "amp", "pmp", "atp", "pcp", "pct",
-                                            "cru", "streaming.nfx", "streaming.amp", "netflix-top10-us"]
-
-    @Test("The app never heads a row with a brand the add-on did not name")
-    func rowTitlesComeOnlyFromTheCatalogName() {
-        let brands = ["Netflix", "Disney+", "HBO Max", "Hulu", "Prime", "Paramount+", "Apple TV+", "Peacock", "Crunchyroll"]
-        for id in Self.serviceCatalogIDs {
-            for type in ["movie", "series"] {
-                let unnamed = AppleCatalogShelfPolicy.title(for: AppleStremioCatalog(type: type, id: id, name: nil))
-                #expect(!brands.contains { unnamed.localizedCaseInsensitiveContains($0) }, "\(id)/\(type) → \(unnamed)")
-                let neutral = AppleCatalogShelfPolicy.title(for: AppleStremioCatalog(type: type, id: id, name: "Popular Movies"))
-                #expect(neutral == "Popular Movies", "\(id)/\(type) → \(neutral)")
-            }
-        }
-    }
-
-    @Test("Discover's visible rows carry no brand the add-on did not give them")
-    func visibleRowsAreNotRebranded() {
-        let source = AppleSource(kind: .stremio, name: "Streaming Catalogs",
-                                 url: URL(string: "https://fixture.example/manifest.json")!)
-        let sections = [("nfx", "movie", "Popular Movies"), ("nfx", "series", "Popular Shows"),
-                        ("dnp", "movie", "Family Movies"), ("amp", "series", "Prime Video")].map { id, type, name in
-            AppleCatalogSection(source: source, catalog: AppleStremioCatalog(type: type, id: id, name: name),
-                                items: [AppleCatalogItem(mediaID: "tt-\(id)-\(type)", type: type, name: "Fixture \(id)")])
-        }
-        let titles = AppleCatalogShelfPolicy.visibleSections(sections, activeSourceIDs: [source.id]).compactMap(\.shelfTitle)
-        #expect(titles == ["Family Movies", "Popular Movies", "Popular Shows", "Prime Video"])
-    }
-
     // MARK: B5 — Netflix Top 10 off by default
 
     @MainActor
@@ -122,7 +89,7 @@ struct AppleStoreCompliancePolicyTests {
         let settings = AppleSettingsStore(defaults: defaults, keychain: NoCredentials())
         let sourceStore = AppleSourceStore(defaults: defaults, storageKey: "compliance.sources",
                                            documentsDirectory: FileManager.default.temporaryDirectory)
-        let ids = AppleDiscoverRowsSettingsView.rows(settings: settings, sourceStore: sourceStore, catalogStore: nil).map(\.id)
+        let ids = AppleDiscoverRowsSettingsView.rows(settings: settings, sourceStore: sourceStore).map(\.id)
         #expect(!ids.contains(AppleDiscoverRowOrder.top10Movies))
         #expect(!ids.contains(AppleDiscoverRowOrder.top10Shows))
     }

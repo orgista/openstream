@@ -135,7 +135,7 @@ struct AppleCaptionHandoff: Equatable, Sendable {
     }
 
     /// The active track if the engine can hand it to AVKit as a rendition:
-    /// a stream of the file's own (add-on files never become one) that is
+    /// a stream of the file's own (sidecar files never become one) that is
     /// not CEA-708, which the engine draws only itself. Text, CEA-608 and —
     /// on demand — bitmap tracks all have renditions.
     @MainActor static func wantedTrack(activeTrackID: Int?, tracks: [ApplePlaybackTrack]) -> Int? {

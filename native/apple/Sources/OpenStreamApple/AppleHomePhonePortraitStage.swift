@@ -92,7 +92,7 @@ struct AppleHomePhonePortraitStage: View {
 
     private func upgradeArtwork() async {
         let imdbID = AppleHeroArtworkUpgrade.upgradeableIMDBID(for: item)
-            ?? item.imdbID.flatMap { AppleStremioMetadataClient.isIMDBIdentifier($0) ? $0 : nil }
+            ?? item.imdbID.flatMap { AppleMediaIdentifier.isIMDBIdentifier($0) ? $0 : nil }
         guard let configuration, let imdbID else { return }
         let artwork = await AppleHeroArtworkUpgrade.shared.artwork(
             imdbID: imdbID, kind: item.type == "series" ? .series : .movie, configuration: configuration,

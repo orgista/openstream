@@ -221,7 +221,7 @@ struct AppleSetupTransferImportTests {
     }
 }
 
-/// The owner's real setup, shaped with fake values: six add-ons, an IPTV
+/// The owner's real setup, shaped with fake values: an IPTV
 /// provider and an SMB NAS; Radarr, Sonarr, TMDB and gateway settings; Live
 /// favourites; progress, history, ratings and a watchlist. Build 17's Apple TV
 /// refused it with "Couldn't import this setup." because the Apple TV cannot
@@ -303,13 +303,6 @@ struct AppleSetupTransferOwnerSetupTests {
     }
 
     private static func fillLikeTheOwner(_ phone: SetupTransferTestDevice) async throws {
-        #if OPENSTREAM_ADDONS
-        for number in 1 ... 6 {
-            _ = try phone.sources.addStremio(
-                manifestURL: try #require(URL(string: "https://fixture.example/addon-\(number)/manifest.json")),
-                name: "Add-on \(number)")
-        }
-        #endif
         _ = try phone.sources.addIPTV(name: "Provider", type: .xtream, endpoint: "https://fixture.example",
                                       username: "fixture-user", password: "fixture-password")
         _ = try phone.sources.addNetworkShare(name: "NAS", host: "192.0.2.10", share: "Media",
@@ -354,8 +347,7 @@ private struct SetupTransferTestDevice {
         defaults = try #require(UserDefaults(suiteName: suite))
         self.indexURL = indexURL
             ?? FileManager.default.temporaryDirectory.appending(path: "setup-transfer-index-\(UUID()).json")
-        sources = AppleSourceStore(defaults: defaults, keychain: sourceKeychain,
-                                   logoBackfillDelay: .seconds(3_600))
+        sources = AppleSourceStore(defaults: defaults, keychain: sourceKeychain)
         settings = AppleSettingsStore(defaults: defaults, keychain: SetupTransferTestCredentials())
         index = AppleMediaIndexStore(repository: AppleMediaIndexRepository(fileURL: self.indexURL))
         controller = AppleConfigurationController(sources: sources, settings: settings, mediaIndex: index,

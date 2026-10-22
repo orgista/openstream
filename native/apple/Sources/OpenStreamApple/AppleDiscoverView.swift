@@ -7,47 +7,10 @@ import UIKit
 import WebKit
 #endif
 
-func catalogConfigurationIdentity(_ sources: [AppleSource]) -> String {
-    sources
-        .filter { $0.isAddon }
-        .map { "\($0.id.uuidString)|\($0.configurationRevision)|\($0.isEnabled)" }
-        .joined(separator: ";")
-}
-
 private func searchConfigurationIdentity(_ sources: [AppleSource]) -> String {
     sources
         .map { "\($0.id.uuidString)|\($0.configurationRevision)|\($0.isEnabled)|\($0.name)" }
         .joined(separator: ";")
-}
-
-@MainActor
-private func applyCatalogRefreshHealth(
-    reports: [AppleCatalogSourceRefreshReport],
-    to sourceStore: AppleSourceStore
-) {
-    let validationDate = Date.now
-    for report in reports {
-        if let failureSummary = report.failureSummary {
-            sourceStore.recordValidationFailure(
-                id: report.sourceID,
-                summary: failureSummary,
-                at: validationDate
-            )
-        }
-        guard report.successfulCatalogCount > 0 else { continue }
-        let titleLabel = report.itemCount == 1 ? "title" : "titles"
-        var summary = "Refreshed \(report.itemCount) \(titleLabel)"
-        if report.failedCatalogCount > 0 {
-            let catalogLabel = report.failedCatalogCount == 1 ? "catalog" : "catalogs"
-            summary += " · \(report.failedCatalogCount) \(catalogLabel) unavailable"
-        }
-        sourceStore.recordValidationSuccess(
-            id: report.sourceID,
-            summary: summary,
-            discoveredItemCount: report.itemCount,
-            at: validationDate
-        )
-    }
 }
 
 @MainActor
@@ -73,18 +36,15 @@ struct AppleDiscoverView: View {
     @State private var continueWatchingChangeRevision = 0
     @State private var loadedCache = false
     @State private var continueWatchingCacheReady = false
-    @State private var catalogCacheLoad: Task<Void, Never>?
-    /// The source configuration whose catalog refresh last finished; until it
-    /// matches the current one an empty page is loading, not empty.
-    @State private var settledCatalogIdentity: String?
+    /// False until the first load has read the index and the servers; until
+    /// then an empty page is loading, not empty.
+    @State private var hasSettled = false
     @State private var showsSearch = false
     /// The router revision Discover last acted on (see its `router.revision` `onChange`).
     @State private var handledRouteRevision = 0
     @State private var selectedHero: IndexedCatalogItem?
     @State private var selectedHeroAutoPlay = false
     @State private var showsSelectedHero = false
-    @State private var selectedCatalog: AppleCatalogSection?
-    @State private var showsCatalog = false
     @State private var showsContinueWatching = false
     // macOS is in this list now. It was left out of all four of these debug
     // review hooks, which is why a headless macOS sweep could photograph the
@@ -98,8 +58,6 @@ struct AppleDiscoverView: View {
     /// the page scrolled (the collapsed navigation bar over the hero).
     @State private var reviewScrollPosition = ScrollPosition(edge: .top)
     #endif
-    @State private var catalogLookup = AppleCatalogSearchLookup()
-    @State private var catalogLookupRevision: UInt64 = 0
     @State private var ratingStoreRevision = AppleTitleRatingStore.revision
     @State private var heroArtworkRevision: UInt64 = 0
     @State private var relationRevision = AppleTMDBRelationCache.revision
@@ -108,11 +66,6 @@ struct AppleDiscoverView: View {
     @State private var top10Week: AppleNetflixTop10Week?
     @State private var top10Error: String?
     @State private var library = AppleLocalLibraryStore.shared
-    /// Wordmark art for the rotating heroes, keyed by media id. The prefetcher
-    /// already warms these into the preview-assets cache for the home screen;
-    /// the billboard simply never asked, which is why heroes only ever showed
-    /// text (owner 2026-09-15).
-    @State private var heroWordmarks: [String: URL] = [:]
     /// The heroes (media ids) whose wordmark lookup has finished; until then
     /// a hero with no wordmark yet holds its title slot empty rather than
     /// drawing the name a found logo would replace (N63).
@@ -123,7 +76,6 @@ struct AppleDiscoverView: View {
     /// The hero list that last held still for `AppleHeroTrailerGate.settleDelay`.
     @State private var settledHeroes: AppleHeroTrailerGate.SettlementInput?
 
-    let catalogStore: AppleCatalogStore
     let sourceStore: AppleSourceStore
     let mediaIndex: AppleMediaIndexStore
     let mediaServerLibrary: AppleMediaServerLibraryStore
@@ -133,7 +85,6 @@ struct AppleDiscoverView: View {
     /// Backup & Sync, for No Sources' restore and import. Nil until the root
     /// view has made it.
     let backupController: AppleConfigurationController?
-    private let playbackResolver: AppleStremioPlaybackResolver
 
     /// Keep scroll phase updates below Discover's recommendation/rail preparation.
     /// Artwork still observes the pause through its existing environment value.
@@ -170,14 +121,11 @@ struct AppleDiscoverView: View {
 
     /// Capture actor-owned data once, then transfer only immutable values.
     struct RecommendationSnapshot: Sendable {
-        let sections: [AppleCatalogSection]
         let relations: [AppleTMDBRelation]
         let sources: [AppleSource]
         let records: [AppleMediaRecord]
-        let lookup: AppleCatalogSearchLookup
         let progress: [String: ApplePlaybackProgress]
         let activity: [String: ApplePlaybackProgress]
-        let availableEpisodes: [String: [AppleStremioEpisode]]
         let completed: [String: Date]
         let unwatched: [String: Date]
         let removed: [String: Date]
@@ -190,17 +138,14 @@ struct AppleDiscoverView: View {
     }
 
     init(
-        catalogStore: AppleCatalogStore,
         sourceStore: AppleSourceStore,
         mediaIndex: AppleMediaIndexStore,
         mediaServerLibrary: AppleMediaServerLibraryStore,
         router: AppleAppRouter,
         settings: AppleSettingsStore,
         openSettings: @escaping () -> Void,
-        backupController: AppleConfigurationController? = nil,
-        playbackResolver: AppleStremioPlaybackResolver = AppleStremioPlaybackResolver()
+        backupController: AppleConfigurationController? = nil
     ) {
-        self.catalogStore = catalogStore
         self.sourceStore = sourceStore
         self.mediaIndex = mediaIndex
         self.mediaServerLibrary = mediaServerLibrary
@@ -208,33 +153,16 @@ struct AppleDiscoverView: View {
         self.settings = settings
         self.openSettings = openSettings
         self.backupController = backupController
-        self.playbackResolver = playbackResolver
-    }
-
-    private var visibleSections: [AppleCatalogSection] {
-        let activeSourceIDs = Set(
-            sourceStore.sources
-                .filter(\.isEnabled)
-                .map(\.id)
-        )
-        return AppleCatalogShelfPolicy.visibleSections(catalogStore.sections, activeSourceIDs: activeSourceIDs)
     }
 
     var body: some View {
         let continueWatching = recommendations.continueWatching
         let picks = recommendations.picks
         let heroes = recommendations.heroes
-        let heroSettlement = AppleHeroTrailerGate.SettlementInput(
-            heroIDs: heroes.map(\.id),
-            // A refresh that keeps the same heroes leaves a settled list (and
-            // its playing trailer) alone.
-            catalogReviewDone: sourceStore.sources.allSatisfy { AppleCatalogDiscoveryPolicy.catalogs(for: $0).isEmpty }
-                || (settledCatalogIdentity == catalogConfigurationIdentity(sourceStore.sources)
-                    && (!catalogStore.isLoading || settledHeroes?.heroIDs == heroes.map(\.id)))
-        )
+        let heroSettlement = AppleHeroTrailerGate.SettlementInput(heroIDs: heroes.map(\.id), catalogReviewDone: true)
         let recommendationRevision = recommendationRevision
         let hasContent = AppleCatalogShelfPolicy.hasDiscoverContent(
-            hasCatalog: !visibleSections.isEmpty, hasLocalLibrary: !library.groups.isEmpty,
+            hasLocalLibrary: !library.groups.isEmpty,
             hasMediaServerItems: mediaServerLibrary.shelves.contains { !$0.items.isEmpty }
                 || !AppleXtreamLibraryStore.shared.continueWatching.isEmpty
         )
@@ -273,10 +201,9 @@ struct AppleDiscoverView: View {
                                 #endif
                                 AppleHomeHeroCarousel(
                                     pageIDs: heroes.map(\.id), items: heroes.map { heroItem($0.item) },
-                                    wordmarks: heroes.map { heroWordmark($0, item: heroItem($0.item)) },
+                                    wordmarks: heroes.map { heroItem($0.item).logoURL },
                                     viewportSize: viewportSize, phoneLayout: phoneHeroLayout,
-                                    wideLayout: usesPadHero ? padHeroLayout : macHeroLayout,
-                                    prefetchTrailer: { await prefetchHeroTrailer(heroItem(heroes[$0].item)) }
+                                    wideLayout: usesPadHero ? padHeroLayout : macHeroLayout
                                 ) { index, failed, mode, count, shown, tv in
                                     featuredHero(heroes[index], rotationCount: count, rotationIndex: shown,
                                         wordmarkFailed: failed, phone: mode == .phone, mac: mode == .mac,
@@ -291,37 +218,19 @@ struct AppleDiscoverView: View {
                                     settledHeroes = heroSettlement
                                 }
                                 .task(id: heroes.map(\.item.mediaID).joined(separator: ",")) {
-                                    // What the cache already knows draws at once;
-                                    // the rest is asked for now that the billboard
-                                    // has drawn, first page first. Two fixed cache
-                                    // peeks left a fresh install on the names for
-                                    // the whole session (owner 2026-09-29).
-                                    var unanswered = await resolveHeroWordmarks(heroes)
-                                    unanswered = await fetchHeroWordmarks(unanswered)
-                                    guard !Task.isCancelled else { return }
                                     heroWordmarksResolved.formUnion(heroes.map(\.item.mediaID))
-                                    // Last, and only after the billboard has long
-                                    // since drawn: the textless backdrop is an
-                                    // upgrade, never something first paint waits on.
+                                    // Only after the billboard has drawn: the
+                                    // textless backdrop is an upgrade, never
+                                    // something first paint waits on.
                                     await upgradeHeroArtwork(heroes)
-                                    // An add-on that could not be reached is asked
-                                    // again, a bounded number of times.
-                                    var retry = 1
-                                    while !unanswered.isEmpty, let delay = AppleHeroWordmarkFetch.retryDelay(retry) {
-                                        try? await Task.sleep(for: delay)
-                                        guard !Task.isCancelled else { return }
-                                        unanswered = await fetchHeroWordmarks(unanswered)
-                                        retry += 1
-                                    }
                                 }
                             }
 
                             // One list of rails. The iPhone held upright and the
                             // Mac order it by the A4 rhythm (stills, then posters,
                             // then stills); everywhere else it is the list as built.
-                            let continueShelf = continueWatchingShelf(values: continueWatching)
-                            ForEach(displayedRails(continueWatching: continueShelf.values, picks: picks)) { row in
-                                railView(row.rail, continueWatching: continueShelf, picks: picks, allowed: row.allowed)
+                            ForEach(displayedRails(continueWatching: continueWatching, picks: picks)) { row in
+                                railView(row.rail, continueWatching: continueWatching, picks: picks, allowed: row.allowed)
                             }
                         }
                     }
@@ -363,26 +272,17 @@ struct AppleDiscoverView: View {
                 #endif
             }
         }
-        .navigationDestination(isPresented: $showsCatalog) {
-            if let selectedCatalog,
-               let source = sourceStore.sources.first(where: { $0.id == selectedCatalog.sourceID }) {
-                // The live shelf, so pages loaded while the list is open show in it.
-                catalogSection(liveSection(selectedCatalog), source: source).catalogList
-                    .environment(\.appleTabToolbar, tabToolbarContext)
-            }
-        }
         .navigationDestination(isPresented: $showsContinueWatching) {
-            let shelf = continueWatchingShelf(values: recommendations.continueWatching)
+            let shelf = recommendations.continueWatching
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 24) {
-                    continueWatchingCards(shelf.values, isFixture: shelf.isFixture)
+                    continueWatchingCards(shelf)
                 }
                 .padding()
             }
             .task(id: recommendationRevision) {
                 // A cached rail can open before Discover finishes its index load.
                 if !loadedCache && !continueWatchingCacheReady {
-                    await loadCachedCatalogSectionsIfNeeded()
                     await mediaIndex.load()
                     guard !Task.isCancelled else { return }
                     mediaIndex.beginSynchronizingPlaybackProgress()
@@ -398,13 +298,6 @@ struct AppleDiscoverView: View {
         .navigationDestination(isPresented: $showsSelectedHero) {
             if let selectedHero {
                 detail(selectedHero, initialAutoPlay: selectedHeroAutoPlay)
-            }
-        }
-        .overlay(alignment: .top) {
-            // Not over the centred loading state, which already says it.
-            if catalogStore.isLoading, hasContent {
-                ProgressView()
-                    .padding()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: ApplePlaybackProgressFeed.continueWatchingChangeNotification)) { _ in
@@ -437,11 +330,11 @@ struct AppleDiscoverView: View {
         .toolbar {
             #if os(iOS)
             if usesPadLandingChrome {
-                AppleTabToolbar(tab: .home, isRefreshing: isRefreshing || catalogStore.isLoading,
+                AppleTabToolbar(tab: .home, isRefreshing: isRefreshing,
                                 onSearch: { showsSearch = true }, onRefresh: refresh)
             }
             #else
-            AppleTabToolbar(tab: .home, isRefreshing: isRefreshing || catalogStore.isLoading,
+            AppleTabToolbar(tab: .home, isRefreshing: isRefreshing,
                             onSearch: { showsSearch = true }, onRefresh: refresh)
             #endif
         }
@@ -449,12 +342,12 @@ struct AppleDiscoverView: View {
         #if os(iOS)
         .modifier(ApplePhoneLandingChrome(title: "Discover", identifier: "discover.compact-title",
             hasHero: !heroes.isEmpty && hasContent && !reviewLoadingState,
-            isRefreshing: isRefreshing || catalogStore.isLoading,
+            isRefreshing: isRefreshing,
             onSearch: { showsSearch = true }, onRefresh: refresh, accessory: { EmptyView() }))
         #endif
         #if os(macOS)
         .onChange(of: AppleMacCommandCenter.shared.refreshRevision) {
-            guard AppleMacCommandCenter.shared.refreshTarget == .discover, !isRefreshing, !catalogStore.isLoading else { return }
+            guard AppleMacCommandCenter.shared.refreshTarget == .discover, !isRefreshing else { return }
             appleTrace("discover refresh from the menu")
             refresh()
         }
@@ -463,7 +356,7 @@ struct AppleDiscoverView: View {
         .navigationDestination(isPresented: $visionReviewDetail) {
             if let value = visionReviewItem { detail(value, initialAutoPlay: visionReviewAutoPlay) }
         }
-        .task(id: visibleSections.count) {
+        .task(id: hasContent) {
             let screen = UserDefaults.standard.string(forKey: "OpenStreamVisionScreen")
             // Search is a page pushed from Discover everywhere except Apple TV,
             // so it had no debug route at all and no sweep could reach it —
@@ -472,7 +365,7 @@ struct AppleDiscoverView: View {
             // screen already has.
             if screen == "search" { showsSearch = true }
             let scrollY = UserDefaults.standard.double(forKey: "OpenStreamDiscoverScrollY")
-            if scrollY > 0, visibleSections.count > 0 {
+            if scrollY > 0, hasContent {
                 // `OpenStreamDiscoverScrollDelay` scrolls later than 3 s, so a
                 // capture can see the hero's trailer playing and then stop.
                 let delay = UserDefaults.standard.double(forKey: "OpenStreamDiscoverScrollDelay")
@@ -530,10 +423,9 @@ struct AppleDiscoverView: View {
             }
         }
         #endif
-        .appleTraceScreen("discover", detail: "\(visibleSections.count) sections, loading=\(catalogStore.isLoading)")
+        .appleTraceScreen("discover", detail: "loading=\(discoverIsLoading)")
         .navigationDestination(isPresented: $showsSearch) {
             AppleSearchView(
-                catalogStore: catalogStore,
                 sourceStore: sourceStore,
                 mediaIndex: mediaIndex,
                 router: router,
@@ -565,7 +457,6 @@ struct AppleDiscoverView: View {
                     revision: router.revision, handledRevision: handledRouteRevision) else { return }
             handledRouteRevision = router.revision
             showsSelectedHero = false
-            showsCatalog = false
             showsContinueWatching = false
             #if DEBUG
             visionReviewDetail = false
@@ -573,13 +464,10 @@ struct AppleDiscoverView: View {
             showsSearch = AppleSearchRoutePolicy.discoverShowsSearch(
                 for: route, hasDedicatedSearchTab: AppleSearchRoutePolicy.platformHasDedicatedSearchTab)
         }
-        .task(id: catalogConfigurationIdentity(sourceStore.sources)) {
+        .task {
             let index = mediaIndex
             let indexStarted = ContinuousClock.now
             async let indexLoaded: Void = index.load()
-            let cacheStarted = ContinuousClock.now
-            await loadCachedCatalogSectionsIfNeeded()
-            appleTrace("discover catalog cache loaded \(AppleLaunchMarks.milliseconds(cacheStarted.duration(to: .now)))ms sections=\(catalogStore.sections.count)")
             if recommendationsRevision == nil { await restoreCachedRecommendations() }
             await indexLoaded
             guard !Task.isCancelled else { return }
@@ -593,41 +481,19 @@ struct AppleDiscoverView: View {
             if !loadedCache {
                 loadedCache = true
                 #if DEBUG
-                AppleLaunchClock.mark("discover.cache(\(catalogStore.sections.count))")
+                AppleLaunchClock.mark("discover.cache(0)")
                 #endif
             }
             // Nothing cached to put in the billboard: the launch cover
-            // has nothing to wait for. (Not the billboard candidates —
-            // building them walks the media index and digests every
-            // catalog item, ~90 ms on the Apple TV sim, and sat between
-            // the cache and the billboard's first draw.)
-            if catalogStore.sections.allSatisfy(\.items.isEmpty) {
-                AppleLaunchReadiness.shared.markFirstScreenReady()
-            }
+            // has nothing to wait for.
+            AppleLaunchReadiness.shared.markFirstScreenReady()
             try? await progressWrite.value
             appleTrace("discover progress synchronized \(AppleLaunchMarks.milliseconds(progressStarted.duration(to: .now)))ms")
             guard !Task.isCancelled else { return }
-            await catalogStore.refresh(sources: sourceStore.sources)
-            if !Task.isCancelled {
-                settledCatalogIdentity = catalogConfigurationIdentity(sourceStore.sources)
-            }
-            #if DEBUG
-            AppleInteractionTrace.record(.network,
-                "catalog review sources=\(sourceStore.sources.count) credentialError=\(sourceStore.credentialError != nil) sections=\(catalogStore.sections.count) failures=\(catalogStore.partialErrors.count)")
-            #endif
+            hasSettled = true
             await mediaServerLibrary.reload(sources: sourceStore.sources) { try sourceStore.mediaServerSession(for: $0) }
-            applyCatalogRefreshHealth(reports: catalogStore.sourceRefreshReports, to: sourceStore)
-            await indexCatalogs()
             try? await mediaIndex.synchronizePlaybackProgress()
         }
-        .task(id: catalogLookupIdentity) {
-            await rebuildCatalogLookup()
-        }
-        // The billboard titles' preview assets, which a content page would
-        // otherwise wait 1.36 s for (owner: "preload metadata like wordmark
-        // art so that it loads basically instantly"), are fetched by the
-        // hero's own task (`fetchHeroWordmarks`), which also draws each
-        // wordmark as it lands. A second warm here asked every add-on twice.
         .task(id: settings.top10ListsEnabled) {
             guard settings.top10ListsEnabled else { return }
             loadTop10()
@@ -656,25 +522,10 @@ struct AppleDiscoverView: View {
         .environment(\.appleTabToolbar, tabToolbarContext)
     }
 
-    /// Share the first disk read with an early rail navigation; later appearances keep the live catalog.
-    private func loadCachedCatalogSectionsIfNeeded() async {
-        if let catalogCacheLoad {
-            await catalogCacheLoad.value
-            return
-        }
-        guard !loadedCache, !continueWatchingCacheReady, catalogStore.sections.isEmpty else { return }
-        let catalog = catalogStore
-        let sources = sourceStore.sources
-        let load = Task { await catalog.loadCachedSections(sources: sources) }
-        catalogCacheLoad = load
-        await load.value
-    }
-
     /// All selection inputs have cheap revision tokens. Geometry, scrolling,
     /// carousel ticks and wordmark publication do not invalidate this snapshot.
     private var recommendationRevision: String {
-        let sectionsIdentity = catalogLookupIdentity
-        return "\(sectionsIdentity)|loaded:\(loadedCache || continueWatchingCacheReady)|lookup:\(catalogLookupRevision)|play:\(ApplePlaybackProgressFeed.shared.revision)"
+        "\(searchConfigurationIdentity(sourceStore.sources))|loaded:\(loadedCache || continueWatchingCacheReady)|play:\(ApplePlaybackProgressFeed.shared.revision)"
             + "|ratings:\(ratingStoreRevision)|index:\(mediaIndex.revision)|server:\(mediaServerLibrary.contentRevision)"
             + "|relations:\(relationRevision)|metadata:\(AppleCatalogArtworkPolicy.configurationMarker(metadataConfiguration))"
             + "|xtream:\(AppleXtreamLibraryStore.shared.revision)|removed:\(continueWatchingRemovalRevision)|art:\(heroArtworkRevision)"
@@ -682,7 +533,6 @@ struct AppleDiscoverView: View {
 
     private var recommendationCacheScope: String {
         [searchConfigurationIdentity(sourceStore.sources),
-         sourceStore.sources.map { AppleCatalogDiscoveryPolicy.sourceConfigurationID(for: $0) }.joined(separator: ";"),
          AppleSourceKind.allCases.map(\.rawValue).joined(separator: ";"),
          ApplePlaybackStore().namespace, AppleCatalogArtworkPolicy.configurationMarker(metadataConfiguration),
          UserDefaults.standard.string(forKey: "OpenStreamHeroTitle") ?? ""].joined(separator: "|")
@@ -735,10 +585,10 @@ struct AppleDiscoverView: View {
         #else
         let wanted: String? = nil
         #endif
-        let snapshot = RecommendationSnapshot(sections: catalogStore.sections,
+        let snapshot = RecommendationSnapshot(
             relations: await AppleTMDBRelationCache.shared.snapshot(configuration: metadataConfiguration), sources: sourceStore.sources,
-            records: mediaIndex.records, lookup: catalogLookup, progress: store.configurationProgress(),
-            activity: store.activities(), availableEpisodes: await store.availableEpisodes(),
+            records: mediaIndex.records, progress: store.configurationProgress(),
+            activity: store.activities(),
             completed: store.configurationWatchedHistory(), unwatched: store.configurationWatchedTombstones(),
             removed: store.configurationContinueWatchingRemovals(), ratings: AppleTitleRatingStore().allRatings,
             serverContinueWatching: mergedContinueWatching(local: []), serverShelves: mediaServerLibrary.shelves,
@@ -781,40 +631,8 @@ struct AppleDiscoverView: View {
 
     @concurrent nonisolated static func buildRecommendations(_ snapshot: RecommendationSnapshot) async throws -> RecommendationResult {
         try Task.checkCancellation()
-        let visibleSections = AppleCatalogShelfPolicy.visibleSections(snapshot.sections,
-            activeSourceIDs: Set(snapshot.sources.filter(\.isEnabled).map(\.id)))
-        let saved: (AppleMediaRecord) -> ApplePlaybackProgress? = { record in
-            ApplePlaybackIdentity.storageKey(for: record.id).flatMap { snapshot.progress[$0] }
-        }
-        let activity: (AppleMediaRecord) -> ApplePlaybackProgress? = { record in
-            ApplePlaybackIdentity.storageKey(for: record.id).flatMap { snapshot.activity[$0] } ?? saved(record)
-        }
-        let ordered = AppleContinueWatchingResolver.inProgress(snapshot.records, saved: saved, activity: activity,
-            successorAvailable: { record in
-                guard let key = ApplePlaybackIdentity.storageKey(for: record.id) else { return false }
-                let episodes = snapshot.availableEpisodes[key] ?? []
-                let completed = Set(episodes.compactMap { episode -> String? in
-                    guard let key = ApplePlaybackIdentity.storageKey(for: episode.id),
-                          let watched = snapshot.completed[key], watched > (snapshot.unwatched[key] ?? .distantPast) else { return nil }
-                    return episode.id
-                })
-                return AppleCompletionPolicy.successor(after: activity(record)?.partID, episodes: episodes,
-                    completedIDs: completed, now: snapshot.now) != nil
-            }, removedAt: { record in
-                ApplePlaybackIdentity.storageKey(for: record.id).flatMap { snapshot.removed[$0] }
-            }) {
-                activity($0)?.updatedAt ?? $0.lastVerified
-            }
-        let entries = AppleContinueWatchingResolver.entries(ordered, in: [snapshot.lookup])
-        if snapshot.lookup.hasSources { AppleContinueWatchingResolver.logHidden(entries) }
-        let local = Array(entries.compactMap { entry in
-            entry.resolution.match.map {
-                IndexedCatalogItem(record: entry.record, item: $0.item, source: $0.source,
-                    continueWatchingUpdatedAt: activity(entry.record)?.updatedAt)
-            }
-        })
-        var seen = Set(local.map(\.item.mediaID))
-        let merged = AppleCatalogShelfPolicy.uniqueByID(local + snapshot.serverContinueWatching.filter {
+        var seen = Set<String>()
+        let merged = AppleCatalogShelfPolicy.uniqueByID(snapshot.serverContinueWatching.filter {
             seen.insert($0.item.mediaID).inserted
         })
         let heroContinueWatching = merged.filter { value in
@@ -823,10 +641,9 @@ struct AppleDiscoverView: View {
                 lastPlayedAt: snapshot.activity[key]?.updatedAt ?? snapshot.progress[key]?.updatedAt)
         }
         var identities = AppleRecommendationInputs.IdentityMemo()
-        let selection = try topPicks(snapshot, visibleSections: visibleSections, continueWatching: local, identities: &identities)
+        let selection = try topPicks(snapshot, identities: &identities)
         try Task.checkCancellation()
-        let heroes = featuredCandidates(snapshot, visibleSections: visibleSections,
-            continueWatching: heroContinueWatching, picks: selection.picks, states: selection.heroStates, identities: &identities)
+        let heroes = featuredCandidates(snapshot, continueWatching: heroContinueWatching, picks: selection.picks, states: selection.heroStates, identities: &identities)
         try Task.checkCancellation()
         return RecommendationResult(continueWatching: heroContinueWatching, picks: selection.picks, heroes: heroes,
             seedHeading: selection.seedHeading, seedItems: selection.seedItems)
@@ -835,21 +652,10 @@ struct AppleDiscoverView: View {
     /// Lead resume, two relevant unseen picks, one dated unseen release, then today's fallback.
     /// Prepared on the concurrent recommendation pass; rendering only reads the finished deck.
     nonisolated private static func featuredCandidates(_ snapshot: RecommendationSnapshot,
-                                    visibleSections: [AppleCatalogSection], continueWatching: [IndexedCatalogItem],
+                                    continueWatching: [IndexedCatalogItem],
                                     picks: [IndexedCatalogItem], states: [String: AppleHeroMixPolicy.State],
                                     identities: inout AppleRecommendationInputs.IdentityMemo) -> [IndexedCatalogItem] {
         let enabled = Set(snapshot.sources.filter(\.isEnabled).map(\.id))
-        let matches = AppleRecommendationRowPolicy.accessibleCatalogs(snapshot.sections, sources: snapshot.sources)
-        let catalogs = Dictionary(grouping: matches, by: { $0.source.id })
-        // Include hidden duplicate headings too; availability is independent of rail presentation.
-        let sections = snapshot.sections.compactMap { section -> [IndexedCatalogItem]? in
-            guard AppleCatalogDiscoveryPolicy.isTitleType(section.catalog.type),
-                  let source = snapshot.sources.first(where: { $0.id == section.sourceID && $0.isEnabled }),
-                  section.sourceConfigurationID == AppleCatalogDiscoveryPolicy.sourceConfigurationID(for: source) else { return nil }
-            return section.items.filter { !$0.name.isEmpty && AppleCatalogDiscoveryPolicy.isTitleType($0.type) }.map {
-                IndexedCatalogItem(record: AppleMediaIngestion.catalogRecord(instanceID: source.id, item: $0), item: $0, source: source)
-            }
-        }
         let servers = snapshot.serverShelves.map { shelf in
             shelf.items.filter { !$0.name.isEmpty && AppleCatalogDiscoveryPolicy.isTitleType($0.type) }.compactMap { item -> IndexedCatalogItem? in
                 guard let reference = AppleMediaServerItemReference.parse(item.mediaID),
@@ -859,22 +665,12 @@ struct AppleDiscoverView: View {
         }
         let accessible: (IndexedCatalogItem) -> Bool = { value in
             guard enabled.contains(value.source.id) else { return false }
-            // Current server shelves and lookup-resolved resumes already carry playable routes.
+            // Current server shelves already carry playable routes.
             return AppleMediaServerItemReference.parse(value.item.mediaID) != nil
                 || AppleXtreamReference.parse(value.item.mediaID) != nil
-                || catalogs[value.source.id, default: []].contains { $0.item.mediaID == value.item.mediaID }
-                || AppleContinueWatchingResolver.resolve(value.record, in: [snapshot.lookup]).match != nil
         }
         var values = continueWatching.filter(accessible) + picks.filter(accessible) + servers.flatMap { $0 }
-        // Keep today's first-section fallback; additional sections are gathered fairly for quotas and sparse fills.
-        if let first = visibleSections.first(where: { AppleCatalogDiscoveryPolicy.isTitleType($0.catalog.type) }),
-           let source = snapshot.sources.first(where: { $0.id == first.sourceID && $0.isEnabled }),
-           first.sourceConfigurationID == AppleCatalogDiscoveryPolicy.sourceConfigurationID(for: source) {
-            values += first.items.filter { !$0.name.isEmpty }.prefix(AppleHeroRotation.maximumCandidates * 4).map {
-                IndexedCatalogItem(record: AppleMediaIngestion.catalogRecord(instanceID: source.id, item: $0), item: $0, source: source)
-            }
-        }
-        values += AppleHeroMixPolicy.fairlyGather(sections + servers)
+        values += AppleHeroMixPolicy.fairlyGather(servers)
         let relevant = Set(picks.map { identities.identity($0.item, sourceID: $0.source.id.uuidString) })
         var resumeIDs = Set<String>()
         var resumeDates: [String: Date] = [:]
@@ -995,18 +791,14 @@ struct AppleDiscoverView: View {
         }
     }
 
-    nonisolated private static func topPicks(_ snapshot: RecommendationSnapshot, visibleSections: [AppleCatalogSection],
-                                            continueWatching: [IndexedCatalogItem], identities: inout AppleRecommendationInputs.IdentityMemo) throws -> RecommendationResult {
+    nonisolated private static func topPicks(_ snapshot: RecommendationSnapshot,
+                                            identities: inout AppleRecommendationInputs.IdentityMemo) throws -> RecommendationResult {
         let now = snapshot.now
         let storedRatings = snapshot.ratings
         let progress = snapshot.progress
         let completed = snapshot.completed
         let unwatched = snapshot.unwatched
         var candidates: [IndexedCatalogItem] = []
-        for match in AppleRecommendationRowPolicy.accessibleCatalogs(snapshot.sections, sources: snapshot.sources) {
-            try Task.checkCancellation()
-            candidates.append(IndexedCatalogItem(record: AppleMediaIngestion.catalogRecord(instanceID: match.source.id, item: match.item), item: match.item, source: match.source))
-        }
         for shelf in snapshot.serverShelves {
             for item in shelf.items where AppleCatalogDiscoveryPolicy.isTitleType(item.type) {
                 guard let reference = AppleMediaServerItemReference.parse(item.mediaID),
@@ -1014,21 +806,11 @@ struct AppleDiscoverView: View {
                 candidates.append(IndexedCatalogItem(record: AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item), item: item, source: source))
             }
         }
-        // Indexed playable titles can outlive a catalog's current page.
-        for record in snapshot.records where record.kind == .movie || record.kind == .series {
-            try Task.checkCancellation()
-            guard let match = AppleContinueWatchingResolver.resolve(record, in: [snapshot.lookup]).match,
-                  match.source.isEnabled else { continue }
-            candidates.append(IndexedCatalogItem(record: record, item: match.item, source: match.source))
-        }
-        var historyValues = candidates + continueWatching + snapshot.serverContinueWatching
-        // Use already-loaded metadata for indexed history, including titles
-        // which are no longer present in a visible catalog. No enrichment ask.
+        var historyValues = candidates + snapshot.serverContinueWatching
+        // Indexed history counts too, from the metadata it was saved with. No enrichment ask.
         for record in snapshot.records where record.kind == .movie || record.kind == .series || record.kind == .episode {
             try Task.checkCancellation()
-            if let match = AppleContinueWatchingResolver.resolve(record, in: [snapshot.lookup]).match {
-                historyValues.append(IndexedCatalogItem(record: record, item: match.item, source: match.source))
-            } else if let id = record.canonicalID {
+            if let id = record.canonicalID {
                 // Historical episodes may no longer be listed. Their canonical
                 // root still lets the ranker cap all of a show's observations.
                 let item = AppleCatalogItem(mediaID: id, type: record.kind.rawValue, name: record.title,
@@ -1129,8 +911,7 @@ struct AppleDiscoverView: View {
         #endif
         let relevant = ranked.filter { $0.viewingScore + $0.likedScore + $0.relationScore > 0 }
         var result = RecommendationResult(picks: relevant.prefix(20).compactMap { byID[$0.title.id] }, heroStates: heroStates)
-        let headings = visibleSections.map { $0.shelfTitle ?? AppleCatalogShelfPolicy.title(for: $0.catalog) }
-            + snapshot.serverShelves.map(\.title)
+        let headings = snapshot.serverShelves.map(\.title)
             + ["Continue Watching", "Library", "Top Picks for You", "Top 10 Movies in the US", "Top 10 Shows in the US"]
         // One meaningful watched seed, most recent first. New rows are appended
         // after the viewer's configured rails, outside the automatic rhythm.
@@ -1164,7 +945,6 @@ struct AppleDiscoverView: View {
         case becauseWatched
         case top10(String)
         case top10StaleNote
-        case catalog(String)
         var id: Self { self }
 
         /// The stable id the Discover Rows setting stores for this rail.
@@ -1177,7 +957,6 @@ struct AppleDiscoverView: View {
             case .becauseWatched: "becauseWatched"
             case .top10(let type): type == "movie" ? AppleDiscoverRowOrder.top10Movies : AppleDiscoverRowOrder.top10Shows
             case .top10StaleNote: "top10StaleNote"
-            case .catalog(let id): AppleDiscoverRowOrder.catalogID(id)
             }
         }
     }
@@ -1187,22 +966,12 @@ struct AppleDiscoverView: View {
     private var customRowOrder: [String]? {
         #if DEBUG
         if let tokens = UserDefaults.standard.string(forKey: "OpenStreamDebugDiscoverOrder"), !tokens.isEmpty {
-            return AppleDiscoverRowOrder.debugOrder(
-                tokens, catalogTitles: visibleSections.map { ($0.id, $0.shelfTitle ?? AppleCatalogShelfPolicy.title(for: $0.catalog)) })
+            return AppleDiscoverRowOrder.debugOrder(tokens, catalogTitles: [])
         }
         #endif
         return settings.discoverRowOrder
     }
 
-    /// Continue Watching as the shelf shows it. Review builds can stand in an
-    /// in-memory fixture (`-OpenStreamDebugContinueWatching YES`) when the
-    /// simulator has no progress; it is never written anywhere.
-    private func continueWatchingShelf(values: [IndexedCatalogItem]) -> (values: [IndexedCatalogItem], isFixture: Bool) {
-        #if DEBUG
-        if values.isEmpty, AppleContinueWatchingFixture.isEnabled { return (continueWatchingFixture, true) }
-        #endif
-        return (values, false)
-    }
 
     private func discoverRails(continueWatching: [IndexedCatalogItem], picks: [IndexedCatalogItem]) -> [DiscoverRail] {
         var rails: [(DiscoverRail, AppleDiscoverRailRhythm.Shape)] = []
@@ -1213,10 +982,6 @@ struct AppleDiscoverView: View {
         if settings.top10ListsEnabled {
             if !(top10Week?.films ?? []).isEmpty { rails.append((.top10("movie"), .still)) }
             if !(top10Week?.tv ?? []).isEmpty { rails.append((.top10("series"), .still)) }
-        }
-        for section in visibleSections where sourceStore.sources.contains(where: { $0.id == section.sourceID }) {
-            let isRanked = AppleCatalogShelfPolicy.style(for: section.catalog) == .ranked
-            rails.append((.catalog(section.id), isRanked ? .still : .poster))
         }
         var ordered: [DiscoverRail]
         if let custom = customRowOrder {
@@ -1251,14 +1016,11 @@ struct AppleDiscoverView: View {
     }
 
     private func top10Identity(_ entry: AppleNetflixTop10Entry, type: String) -> String {
-        if let match = catalogLookup.match(title: entry.title, type: type,
-            seasonTitle: entry.seasonTitle, ignoringLeadingArticle: true) { return rowIdentity(match.item, source: match.source) }
-        return "\(type):\(entry.title.lowercased())"
+        "\(type):\(entry.title.lowercased())"
     }
 
     private func displayedRails(continueWatching: [IndexedCatalogItem], picks: [IndexedCatalogItem]) -> [DisplayedRail] {
         let rails = discoverRails(continueWatching: continueWatching, picks: picks)
-        let sections = visibleSections
         let keys = rails.map { rail -> [String] in
             switch rail {
             case .continueWatching: return AppleContinueWatchingResolver.rail(continueWatching).map { rowIdentity($0.item, source: $0.source) }
@@ -1267,11 +1029,6 @@ struct AppleDiscoverView: View {
             case .topPicks: return picks.map { rowIdentity($0.item, source: $0.source) }
             case .becauseWatched: return recommendations.seedItems.map { rowIdentity($0.item, source: $0.source) }
             case .top10(let type): return (type == "movie" ? top10Week?.films ?? [] : top10Week?.tv ?? []).map { top10Identity($0, type: type) }
-            case .catalog(let id):
-                guard let section = sections.first(where: { $0.id == id }) else { return [] }
-                let items = AppleCatalogShelfPolicy.style(for: section.catalog) == .ranked ? Array(section.items.prefix(10)) : section.items
-                let source = sourceStore.sources.first { $0.id == section.sourceID }
-                return items.map { rowIdentity($0, source: source) }
             case .top10StaleNote: return []
             }
         }
@@ -1293,16 +1050,15 @@ struct AppleDiscoverView: View {
     }
 
     @ViewBuilder
-    private func railView(_ rail: DiscoverRail, continueWatching: (values: [IndexedCatalogItem], isFixture: Bool),
+    private func railView(_ rail: DiscoverRail, continueWatching: [IndexedCatalogItem],
                           picks: [IndexedCatalogItem], allowed: Set<String>) -> some View {
         switch rail {
         case .continueWatching:
             AppleMediaShelf(title: "Continue Watching",
-                onOpen: AppleContinueWatchingResolver.hasFullList(count: continueWatching.values.count)
+                onOpen: AppleContinueWatchingResolver.hasFullList(count: continueWatching.count)
                     ? { showsContinueWatching = true } : nil,
                 headingIdentifier: "home.continue.heading") {
-                continueWatchingCards(rowItems(AppleContinueWatchingResolver.rail(continueWatching.values), allowed: allowed, item: { $0.item }, source: { $0.source }),
-                                      isFixture: continueWatching.isFixture)
+                continueWatchingCards(rowItems(AppleContinueWatchingResolver.rail(continueWatching), allowed: allowed, item: { $0.item }, source: { $0.source }))
             }
         case .library:
             AppleLocalTitleShelf(title: "Your Library", groups: rowItems(library.resolvedGroups, allowed: allowed, item: { library.catalogItem(for: $0) }),
@@ -1353,31 +1109,26 @@ struct AppleDiscoverView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 16)
-        case .catalog(let id):
-            if let section = visibleSections.first(where: { $0.id == id }),
-               let source = sourceStore.sources.first(where: { $0.id == section.sourceID }) {
-                catalogSection(section, source: source, allowed: allowed)
-            }
         }
     }
 
     /// A2 on the iPhone and the Mac: stills with the time left, the accent
     /// bar, and a caption row carrying a ⋯ menu.
     @ViewBuilder
-    private func continueWatchingCards(_ values: [IndexedCatalogItem], isFixture: Bool) -> some View {
+    private func continueWatchingCards(_ values: [IndexedCatalogItem]) -> some View {
         if discoverRowStyle != nil {
-            continueWatchingRowCards(values, isFixture: isFixture)
+            continueWatchingRowCards(values)
         } else {
             indexedCards(identifier: "continue", values: values, showsProgress: true)
         }
     }
 
-    private func continueWatchingRowCards(_ values: [IndexedCatalogItem], isFixture: Bool) -> some View {
+    private func continueWatchingRowCards(_ values: [IndexedCatalogItem]) -> some View {
         let store = ApplePlaybackStore()
         return ForEach(Array(values.enumerated()), id: \.element.id) { index, value in
             AppleContinueWatchingTile(
                 item: value.item,
-                info: continueWatchingInfo(value, index: index, isFixture: isFixture, store: store),
+                info: continueWatchingInfo(value, store: store),
                 isInList: mediaIndex.record(id: value.record.id)?.isFavorite ?? value.record.isFavorite,
                 onOpenTitle: { selectHero(value, autoPlay: false) },
                 onToggleList: { toggleHeroInList(value) },
@@ -1392,38 +1143,14 @@ struct AppleDiscoverView: View {
         }
     }
 
-    private func continueWatchingInfo(_ value: IndexedCatalogItem, index: Int, isFixture: Bool,
-                                      store: ApplePlaybackStore) -> AppleContinueWatchingTileInfo {
-        #if DEBUG
-        if isFixture { return AppleContinueWatchingFixture.info(index: index, type: value.item.type) }
-        #endif
+    private func continueWatchingInfo(_ value: IndexedCatalogItem, store: ApplePlaybackStore) -> AppleContinueWatchingTileInfo {
         let key = AppleTitleProgressIdentity.key(
             among: AppleTitleProgressIdentity.candidates(item: value.item, sourceID: value.source.id),
             progress: { store.progress(for: $0) }) ?? value.record.id
         return .live(type: value.item.type, recordID: key, recordProgress: value.record.progress, store: store)
     }
 
-    #if DEBUG
-    /// Real catalogue titles with backdrops standing in as Continue Watching.
-    private var continueWatchingFixture: [IndexedCatalogItem] {
-        var values: [IndexedCatalogItem] = []
-        for section in visibleSections {
-            guard let source = sourceStore.sources.first(where: { $0.id == section.sourceID }) else { continue }
-            for item in section.items where item.backgroundURL != nil
-                && !values.contains(where: { $0.item.mediaID == item.mediaID }) {
-                let record = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item)
-                values.append(IndexedCatalogItem(record: record, item: item, source: source))
-                if values.count == AppleContinueWatchingFixture.count { return values }
-            }
-        }
-        return values
-    }
-    #endif
-
     private func loadTop10() {
-        #if DEBUG
-        if AppleTop10Fixture.isEnabled { return }
-        #endif
         Task {
             // Before the rows exist, so they draw with the art matched on an earlier launch.
             await AppleTop10ArtworkStore.shared.load()
@@ -1451,15 +1178,14 @@ struct AppleDiscoverView: View {
             AppleMediaShelf(title: title) {
                 ForEach(ordered, id: \.rank) { entry in
                     Group {
-                        let match = catalogLookup.match(title: entry.title, type: type, seasonTitle: entry.seasonTitle, ignoringLeadingArticle: true)
-                            ?? AppleTop10ArtworkStore.shared.cached(title: entry.title, type: type)
-                                .map { AppleTop10ArtworkStore.match($0, sources: sourceStore.sources) }
+                        let match = AppleTop10ArtworkStore.shared.cached(title: entry.title, type: type)
+                            .map(AppleTop10ArtworkStore.match)
                         if let match {
                             let record = AppleMediaIngestion.catalogRecord(instanceID: match.source.id, item: match.item)
                             let value = IndexedCatalogItem(record: record, item: match.item, source: match.source)
                             NavigationLink { detail(value) } label: { AppleTop10Card(item: match.item, rank: entry.rank) }
                         } else {
-                            AppleTop10SearchCard(entry: entry, type: type, sources: sourceStore.sources,
+                            AppleTop10SearchCard(entry: entry, type: type,
                                                  metadataConfiguration: metadataConfiguration) { match in
                                 let record = AppleMediaIngestion.catalogRecord(instanceID: match.source.id, item: match.item)
                                 detail(IndexedCatalogItem(record: record, item: match.item, source: match.source))
@@ -1470,63 +1196,6 @@ struct AppleDiscoverView: View {
                 }
             }
         }
-    }
-
-    /// `section` as the store holds it now (more pages may have landed),
-    /// keeping the heading Discover gave it.
-    private func liveSection(_ section: AppleCatalogSection) -> AppleCatalogSection {
-        guard var live = catalogStore.sections.first(where: { $0.id == section.id }) else { return section }
-        live.shelfTitle = section.shelfTitle
-        return live
-    }
-
-    private func catalogSection(_ section: AppleCatalogSection, source: AppleSource, allowed: Set<String>? = nil) -> AppleCatalogSectionView {
-        AppleCatalogSectionView(
-            section: section,
-            source: source,
-            viewportWidth: viewportSize.width,
-            relatedItems: catalogLookup.relatedItems(for: source.id),
-            mediaIndex: mediaIndex,
-            playbackSources: sourceStore.sources,
-            metadataConfiguration: metadataConfiguration,
-            gatewayConfig: gatewayConfig,
-            playbackResolver: playbackResolver,
-            settings: settings,
-            openSettings: openSettings,
-            tabToolbar: tabToolbarContext,
-            onOpen: { selectedCatalog = section; showsCatalog = true },
-            onReachEnd: { [catalogStore, sourceStore] in
-                Task { await catalogStore.loadNextPage(sectionID: section.id, sources: sourceStore.sources) }
-            },
-            allowedIdentities: allowed,
-            nextArtworkRow: nextArtworkRow(after: section.id)
-        )
-    }
-
-    /// The catalog row below `sectionID`, whose art is fetched and decoded
-    /// with this row's so it is ready when focus moves down.
-    private func nextArtworkRow(after sectionID: String) -> AppleArtworkPrefetchRow? {
-        guard let index = visibleSections.firstIndex(where: { $0.id == sectionID }),
-              index + 1 < visibleSections.count else { return nil }
-        let next = visibleSections[index + 1]
-        let style = AppleCatalogShelfPolicy.style(for: next.catalog)
-        let source = sourceStore.sources.first { $0.id == next.sourceID }
-        let candidates = style == .ranked ? Array(next.items.prefix(10)) : next.items
-        return AppleArtworkPrefetchRow(items: AppleCatalogShelfPolicy.visibleItems(candidates, allowed: nil, source: source), style: style)
-    }
-
-    /// Loads the next hero page's trailer player while this one shows
-    /// (`AppleTrailerPlayerPrefetch`).
-    private func prefetchHeroTrailer(_ item: AppleCatalogItem) async {
-        #if os(iOS) || os(visionOS)
-        guard AppleTitlePagePolicy.offersTrailers(),
-              AppleTrailerPlayerPrefetch.mayPrefetch(autoPlaySetting: settings.autoPlayTrailer)
-        else { return }
-        let assets = await AppleStremioMetadataClient().previewAssets(sources: sourceStore.sources, type: item.type,
-                                                                      mediaID: item.mediaID)
-        guard !Task.isCancelled, let key = assets?.trailerYouTubeKeys.first else { return }
-        AppleTrailerPlayerPrefetch.shared.prefetch(key: key)
-        #endif
     }
 
     /// Not `@ViewBuilder`: it returns one view, and the `let` below needs an
@@ -1545,7 +1214,7 @@ struct AppleDiscoverView: View {
             onOpenDetails: { selectHero(value, autoPlay: false) },
             settings: settings,
             viewportSize: viewportSize,
-            wordmark: wordmarkFailed ? nil : heroWordmark(value, item: item),
+            wordmark: wordmarkFailed ? nil : item.logoURL,
             wordmarkLookupPending: AppleHeroTitlePolicy.wordmarkLookupPending(
                 mediaID: value.item.mediaID, resolved: heroWordmarksResolved, wordmarkFailed: wordmarkFailed
             ),
@@ -1607,14 +1276,10 @@ struct AppleDiscoverView: View {
             isLargeLayout: isLargeLayout)
     }
 
-    private func heroWordmark(_ value: IndexedCatalogItem, item: AppleCatalogItem) -> URL? {
-        heroWordmarks[value.item.mediaID] ?? item.logoURL
-    }
-
     private func topShelfHeroes(_ heroes: [IndexedCatalogItem]) -> [AppleTopShelfHero] {
         heroes.map { value in
             let item = heroItem(value.item)
-            return .page(record: value.record, item: item, wordmark: heroWordmark(value, item: item))
+            return .page(record: value.record, item: item, wordmark: item.logoURL)
         }
     }
 
@@ -1650,125 +1315,6 @@ struct AppleDiscoverView: View {
         }
     }
 
-    /// Reads whatever is already cached for the heroes. Cache only — never a
-    /// fetch — so the first draw cannot be made slower by looking for a logo.
-    /// A hero the cache has answered is resolved; the rest are returned, in
-    /// page order, for `fetchHeroWordmarks`.
-    private func resolveHeroWordmarks(_ heroes: [IndexedCatalogItem]) async -> [IndexedCatalogItem] {
-        var found: [String: URL] = [:]
-        var answered: Set<String> = []
-        var unanswered: [IndexedCatalogItem] = []
-        for hero in heroes {
-            let key = AppleStremioPreviewAssetsCache.key(
-                type: hero.item.type, mediaID: hero.item.mediaID
-            )
-            guard let entry = await AppleStremioPreviewAssetsCache.shared.entry(for: key) else {
-                unanswered.append(hero)
-                continue
-            }
-            answered.insert(hero.item.mediaID)
-            if let logo = entry.assets?.logoURL {
-                found[hero.item.mediaID] = logo
-            }
-        }
-        guard !Task.isCancelled else { return [] }
-        let merged = heroWordmarks.merging(found) { _, new in new }
-        if merged != heroWordmarks { heroWordmarks = merged }
-        heroWordmarksResolved.formUnion(answered)
-        return unanswered
-    }
-
-    /// Asks the add-ons for the preview assets of the heroes the cache could
-    /// not answer, in page order and at most
-    /// `AppleMetadataPrefetcher.maximumConcurrent` at a time, and draws each
-    /// wordmark as it arrives. This is also what warms the cache for the
-    /// title pages the heroes open. Returns the heroes no add-on could be
-    /// reached for, so they can be asked again.
-    ///
-    /// A page already showing its name keeps it
-    /// (`AppleHeroTitlePolicy`, N62/N63: the title never swaps under the
-    /// viewer); the found mark is drawn the next time that page comes round.
-    private func fetchHeroWordmarks(_ heroes: [IndexedCatalogItem]) async -> [IndexedCatalogItem] {
-        let requests = heroes.map {
-            HeroWordmarkRequest(mediaID: $0.item.mediaID, type: $0.item.type, title: $0.item.name,
-                                preferredSourceID: $0.source.id)
-        }
-        guard !requests.isEmpty else { return [] }
-        let sources = sourceStore.sources
-        var unanswered: Set<String> = []
-        await withTaskGroup(of: HeroWordmarkAnswer.self) { group in
-            var next = 0
-            var inFlight = 0
-            while true {
-                // At most `maximumConcurrent` asks at a time: add-ons are
-                // someone else's server.
-                while inFlight < AppleMetadataPrefetcher.maximumConcurrent, next < requests.count {
-                    let request = requests[next]
-                    next += 1
-                    inFlight += 1
-                    group.addTask { await Self.askHeroWordmark(request, sources: sources) }
-                }
-                guard let answer = await group.next() else { break }
-                inFlight -= 1
-                if Task.isCancelled {
-                    group.cancelAll()
-                    return
-                }
-                AppleInteractionTrace.record(.network, AppleHeroWordmarkFetch.traceLine(
-                    title: answer.request.title, outcome: answer.outcome, milliseconds: answer.milliseconds
-                ))
-                switch answer.outcome {
-                case .found(let logo):
-                    heroWordmarks[answer.request.mediaID] = logo
-                case .none:
-                    break
-                case .transient:
-                    unanswered.insert(answer.request.mediaID)
-                }
-                // The lookup has finished either way: a page with no mark
-                // stops holding its slot and draws the name.
-                heroWordmarksResolved.insert(answer.request.mediaID)
-            }
-        }
-        guard !Task.isCancelled else { return [] }
-        return heroes.filter { unanswered.contains($0.item.mediaID) }
-    }
-
-    private struct HeroWordmarkRequest: Sendable {
-        let mediaID: String
-        let type: String
-        let title: String
-        let preferredSourceID: AppleSource.ID
-    }
-
-    private struct HeroWordmarkAnswer: Sendable {
-        let request: HeroWordmarkRequest
-        let outcome: AppleHeroWordmarkFetch.Outcome
-        let milliseconds: Int
-    }
-
-    /// One hero's ask, off the main actor. `previewAssets` caches every
-    /// answer, so an empty cache afterwards means no add-on was reached.
-    private nonisolated static func askHeroWordmark(
-        _ request: HeroWordmarkRequest, sources: [AppleSource]
-    ) async -> HeroWordmarkAnswer {
-        let clock = ContinuousClock()
-        let start = clock.now
-        let assets = await AppleStremioMetadataClient().previewAssets(
-            sources: sources, preferredSourceID: request.preferredSourceID,
-            type: request.type, mediaID: request.mediaID
-        )
-        let key = AppleStremioPreviewAssetsCache.key(type: request.type, mediaID: request.mediaID)
-        let answered = await AppleStremioPreviewAssetsCache.shared.entry(for: key) != nil
-        let elapsed = (clock.now - start).components
-        let milliseconds = Int(elapsed.seconds * 1000 + elapsed.attoseconds / 1_000_000_000_000_000)
-        return HeroWordmarkAnswer(
-            request: request,
-            outcome: AppleHeroWordmarkFetch.outcome(assets: assets, answered: answered),
-            milliseconds: milliseconds
-        )
-    }
-
     #if DEBUG
     /// Captures can compare a title that is absent from the current catalog, without saving a source or watch event.
     private func reviewHero(source: AppleSource?) -> IndexedCatalogItem? {
@@ -1788,29 +1334,13 @@ struct AppleDiscoverView: View {
         // series, so a sweep can photograph both kinds of title page.
         // `OpenStreamDetailTitle` picks a title by name, so before and after
         // shots can photograph the same page.
-        // `OpenStreamDebugPlayID tt… -OpenStreamDebugPlayType movie|series`:
-        // any title by its IMDb id, opened as a Discover add-on title is, so
-        // a playback sweep can reach titles no Discover row lists.
-        if let playID = UserDefaults.standard.string(forKey: "OpenStreamDebugPlayID"),
-           ApplePlayGatingPolicy.canonicalMediaID(playID) != nil,
-           let section = visibleSections.first,
-           let source = sourceStore.sources.first(where: { $0.id == section.sourceID }) {
-            let item = AppleCatalogItem(
-                mediaID: playID,
-                type: UserDefaults.standard.string(forKey: "OpenStreamDebugPlayType") ?? "movie",
-                name: UserDefaults.standard.string(forKey: "OpenStreamDebugPlayName") ?? playID
-            )
-            return IndexedCatalogItem(record: AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item), item: item, source: source)
-        }
         let type = UserDefaults.standard.string(forKey: "OpenStreamVisionScreen") == "detail-movie" ? "movie" : "series"
         let wanted = UserDefaults.standard.string(forKey: "OpenStreamDetailTitle") ?? ""
-        let sections = visibleSections.filter { $0.catalog.type == type }
-        let named = wanted.isEmpty ? nil : sections.lazy.compactMap { section in
-            section.items.first { $0.name.localizedCaseInsensitiveContains(wanted) }.map { (section, $0) }
-        }.first
-        guard let pick = named ?? sections.first.flatMap({ section in section.items.first.map { (section, $0) } }),
-              let source = sourceStore.sources.first(where: { $0.id == pick.0.sourceID }) else { return nil }
-        let item = pick.1
+        let items = mediaServerLibrary.shelves.flatMap(\.items).filter { $0.type == type }
+        let named = wanted.isEmpty ? nil : items.first { $0.name.localizedCaseInsensitiveContains(wanted) }
+        guard let item = named ?? items.first,
+              let reference = AppleMediaServerItemReference.parse(item.mediaID),
+              let source = sourceStore.sources.first(where: { $0.id == reference.sourceID }) else { return nil }
         return IndexedCatalogItem(record: AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item), item: item, source: source)
     }
     #endif
@@ -1871,12 +1401,11 @@ struct AppleDiscoverView: View {
             AppleCatalogItemDetailView(
                 item: value.item,
                 source: value.source,
-                relatedItems: catalogLookup.relatedItems(for: value.source.id),
+                relatedItems: [],
                 mediaIndex: mediaIndex,
                 playbackSources: sourceStore.sources,
                 metadataConfiguration: metadataConfiguration,
                 gatewayConfig: gatewayConfig,
-                playbackResolver: playbackResolver,
                 settings: settings,
                 openSettings: openSettings,
                 initialAutoPlay: initialAutoPlay,
@@ -1885,25 +1414,6 @@ struct AppleDiscoverView: View {
             )
             .environment(\.appleDiscoverRows, nil)
         }
-    }
-
-    private var catalogLookupIdentity: String {
-        "\(catalogStore.contentRevision)#\(searchConfigurationIdentity(sourceStore.sources))"
-    }
-
-    private func rebuildCatalogLookup() async {
-        let updated = await AppleCatalogSearchLookup.buildOffMain(
-            sections: catalogStore.sections,
-            sources: sourceStore.sources
-        )
-        guard !Task.isCancelled else { return }
-        catalogLookup = updated
-        catalogLookupRevision &+= 1
-        #if DEBUG
-        // Only once the lookup exists, so every fixture rank matches a
-        // catalogue title and nothing falls back to a network search.
-        if AppleTop10Fixture.isEnabled { top10Week = AppleTop10Fixture.week(sections: catalogStore.sections) }
-        #endif
     }
 
     private var featuredHeight: CGFloat {
@@ -1943,7 +1453,7 @@ struct AppleDiscoverView: View {
 
     /// Discover's Search and Refresh, for the pages pushed from here.
     private var tabToolbarContext: AppleTabToolbarContext {
-        AppleTabToolbarContext(tab: .home, isRefreshing: { isRefreshing || catalogStore.isLoading },
+        AppleTabToolbarContext(tab: .home, isRefreshing: { isRefreshing },
                                onSearch: openSearchFromPushedPage, onRefresh: refresh)
     }
 
@@ -1971,50 +1481,27 @@ struct AppleDiscoverView: View {
     }
 
     private var discoverIsLoading: Bool {
-        catalogIsStillLoading || mediaServerLibrary.isLoading || library.isLoading
+        AppleDiscoverEmptyState.isStillLoading(sourceCount: sourceStore.sources.count, hasSettled: hasSettled)
+            || mediaServerLibrary.isLoading || library.isLoading
     }
 
-    private var catalogIsStillLoading: Bool {
-        AppleDiscoverEmptyState.isStillLoading(
-            sourceCount: sourceStore.sources.count,
-            isLoading: catalogStore.isLoading,
-            hasSettled: settledCatalogIdentity == catalogConfigurationIdentity(sourceStore.sources)
-        )
-    }
-
-    /// No Sources, a catalog that couldn't be read (Try Again, then
-    /// Settings), or sources with nothing in them.
+    /// No Sources, or sources with nothing in them.
     @ViewBuilder
     private var discoverEmptyState: some View {
-        let state = AppleDiscoverEmptyState(
-            sources: sourceStore.sources,
-            catalogFailureCount: catalogStore.partialErrors.count,
-            hasSourceError: sourceStore.credentialError != nil
-        )
-        if state.offersRetry {
-            AppleSourceEmptyState(
-                title: state.title,
-                systemImage: OpenStreamTab.home.systemImage,
-                actionTitle: "Try Again",
-                action: refresh,
-                secondaryActionTitle: "Open Settings",
-                secondaryAction: openSettings
-            )
+        let state = AppleDiscoverEmptyState(sourceCount: sourceStore.sources.count)
+        #if os(tvOS)
+        openSettingsEmptyState(state)
+        #else
+        // No Sources with Backup & Sync at hand: restore or import first.
+        if state == .noSources, let backupController {
+            AppleDiscoverRestoreEmptyState(
+                title: state.title, footnote: state.footnote, controller: backupController,
+                offersICloud: state.offersICloudRestore(AppleICloudSyncProbe.current()),
+                openSettings: openSettings)
         } else {
-            #if os(tvOS)
             openSettingsEmptyState(state)
-            #else
-            // No Sources with Backup & Sync at hand: restore or import first.
-            if state == .noSources, let backupController {
-                AppleDiscoverRestoreEmptyState(
-                    title: state.title, footnote: state.footnote, controller: backupController,
-                    offersICloud: state.offersICloudRestore(AppleICloudSyncProbe.current()),
-                    openSettings: openSettings)
-            } else {
-                openSettingsEmptyState(state)
-            }
-            #endif
         }
+        #endif
     }
 
     private func openSettingsEmptyState(_ state: AppleDiscoverEmptyState) -> some View {
@@ -2036,20 +1523,8 @@ struct AppleDiscoverView: View {
         isRefreshing = true
         let started = ContinuousClock.now
         defer { isRefreshing = false }
-        await catalogStore.refresh(sources: sourceStore.sources, force: true)
         await mediaServerLibrary.reload(sources: sourceStore.sources) { try sourceStore.mediaServerSession(for: $0) }
-        applyCatalogRefreshHealth(reports: catalogStore.sourceRefreshReports, to: sourceStore)
-        await indexCatalogs()
         try? await Task.sleep(for: AppleProgressVisibility.remaining(since: started))
-    }
-
-    private func indexCatalogs() async {
-        let catalogs = sourceStore.sources.filter { $0.isAddon && $0.isEnabled }.map { source in
-            (instanceID: source.id, records: catalogStore.sections
-                .filter { $0.sourceID == source.id }
-                .flatMap { AppleMediaIngestion.catalogRecords(section: $0) })
-        }
-        try? await mediaIndex.replaceCatalogs(catalogs)
     }
 }
 
@@ -2061,8 +1536,8 @@ struct AppleSearchView: View {
     @State private var showsSharedLinkError = false
     @State private var sharedLinkLoading = false
     @State private var sharedLinkGeneration = 0
-    @State private var sharedPlayer: AppleStremioPlayerPresentation?
-    @State private var pendingSharedPlayer: AppleStremioPlayerPresentation?
+    @State private var sharedPlayer: AppleMediaPlayerPresentation?
+    @State private var pendingSharedPlayer: AppleMediaPlayerPresentation?
     #if os(iOS)
     @Environment(\.scenePhase) private var scenePhase
     @State private var hasCopiedURL = false
@@ -2070,7 +1545,6 @@ struct AppleSearchView: View {
     @State private var searchStore = AppleCatalogSearchStore()
     @State private var routedResult: RoutedResult?
     @State private var deliveredRouteRevision: Int?
-    @State private var catalogLookup = AppleCatalogSearchLookup()
     @State private var recentSearches = AppleRecentSearchStore()
     #if DEBUG
     @State private var debugOpenedFirstResult = false
@@ -2088,13 +1562,11 @@ struct AppleSearchView: View {
         func hash(into hasher: inout Hasher) { hasher.combine(id) }
     }
 
-    let catalogStore: AppleCatalogStore
     let sourceStore: AppleSourceStore
     let mediaIndex: AppleMediaIndexStore
     let router: AppleAppRouter
     let settings: AppleSettingsStore
     let openSettings: () -> Void
-    private let playbackResolver = AppleStremioPlaybackResolver()
 
     var body: some View {
         Group {
@@ -2111,7 +1583,7 @@ struct AppleSearchView: View {
                     ContentUnavailableView(
                         "Search Your Sources",
                         systemImage: "magnifyingglass",
-                        description: Text("Titles appear here after you add and refresh a catalog source.")
+                        description: Text("Titles appear here after you add a source.")
                     )
                 } else if !recentSearches.recents.isEmpty {
                     recentSearchesList
@@ -2127,12 +1599,11 @@ struct AppleSearchView: View {
                             AppleCatalogItemDetailView(
                                 item: result.item,
                                 source: result.source,
-                                relatedItems: relatedItems(for: result.source.id),
+                                relatedItems: [],
                                 mediaIndex: mediaIndex,
                                 playbackSources: sourceStore.sources,
                                 metadataConfiguration: metadataConfiguration,
                                 gatewayConfig: gatewayConfig,
-                                playbackResolver: playbackResolver,
                                 settings: settings,
                                 openSettings: openSettings,
                                 tabToolbar: tabToolbar
@@ -2194,12 +1665,11 @@ struct AppleSearchView: View {
             AppleCatalogItemDetailView(
                 item: value.item,
                 source: value.source,
-                relatedItems: catalogLookup.relatedItems(for: value.source.id),
+                relatedItems: [],
                 mediaIndex: mediaIndex,
                 playbackSources: sourceStore.sources,
                 metadataConfiguration: metadataConfiguration,
                 gatewayConfig: gatewayConfig,
-                playbackResolver: playbackResolver,
                 settings: settings,
                 openSettings: openSettings,
                 initialAutoPlay: value.action == .play,
@@ -2242,8 +1712,6 @@ struct AppleSearchView: View {
                 return
             }
             query = record.title
-            await catalogStore.loadCachedSections(sources: sourceStore.sources)
-            await rebuildCatalogLookup()
             deliverMediaRoute(revision: revision)
         }
         .task(id: query + ":" + String(AppleXtreamLibraryStore.shared.revision)) {
@@ -2254,11 +1722,7 @@ struct AppleSearchView: View {
                 await openSharedLink(link, revision: revision)
                 return
             }
-            await searchStore.search(
-                query: query,
-                sources: sourceStore.sources,
-                baseSections: catalogStore.sections
-            ) { value in
+            await searchStore.search(query: query) { value in
                 await mediaIndex.search(value) + AppleXtreamLibraryStore.shared.search(value)
             }
             deliverMediaRoute(revision: revision)
@@ -2272,12 +1736,6 @@ struct AppleSearchView: View {
         }
         .task {
             await mediaIndex.load()
-            if catalogStore.sections.isEmpty {
-                await catalogStore.loadCachedSections(sources: sourceStore.sources)
-            }
-        }
-        .task(id: catalogLookupIdentity) {
-            await rebuildCatalogLookup()
         }
         #if DEBUG
         // `-OpenStreamDebugSearchQuery <text>` types a query and opens the
@@ -2305,15 +1763,7 @@ struct AppleSearchView: View {
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     Task { @MainActor in
-                        await catalogStore.refresh(sources: sourceStore.sources, force: true)
-                        applyCatalogRefreshHealth(reports: catalogStore.sourceRefreshReports, to: sourceStore)
-                        await indexCatalogs()
-                        await rebuildCatalogLookup()
-                        await searchStore.search(
-                            query: query,
-                            sources: sourceStore.sources,
-                            baseSections: catalogStore.sections
-                        ) { value in
+                        await searchStore.search(query: query) { value in
                             await mediaIndex.search(value) + AppleXtreamLibraryStore.shared.search(value)
                         }
                     }
@@ -2321,7 +1771,6 @@ struct AppleSearchView: View {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
                 .accessibilityLabel("Refresh")
-                .disabled(catalogStore.isLoading)
             }
         }
         #endif
@@ -2341,36 +1790,14 @@ struct AppleSearchView: View {
         sharedLinkLoading = true
         defer { if generation == sharedLinkGeneration { sharedLinkLoading = false } }
         do {
-            if case .youtube(let videoID) = link {
-                #if OPENSTREAM_ADDONS
-                // Only installed sources that advertise a YouTube catalog or identity are eligible.
-                let sources = AppleSharedLinkYouTubePolicy.sources(in: sourceStore.sources)
-                for source in sources {
-                    let item = AppleSharedLinkYouTubePolicy.item(videoID: videoID, source: source)
-                    do {
-                        let resolved = try await AppleMediaPlaybackResolver().resolve(source: source, item: item, gatewayConfig: gatewayConfig)
-                        try Task.checkCancellation()
-                        guard revision == router.revision, generation == sharedLinkGeneration else { return }
-                        pendingSharedPlayer = AppleStremioPlayerPresentation(request: ApplePlaybackRequest(
-                            url: resolved.preparedPlayback.url, headers: resolved.preparedPlayback.requestHeaders,
-                            mediaID: item.mediaID, title: item.name, sourceKind: .catalog,
-                            hints: .init(addonMediaID: item.mediaID, addonMediaType: item.type)), settings: settings)
-                        if case .sharedLink = router.route { deliveredRouteRevision = revision }
-                        appleTrace("shared link YouTube playable stream")
-                        return
-                    } catch is CancellationError { throw CancellationError() }
-                    catch { continue }
-                }
-                #endif
+            if case .youtube = link {
                 throw AppleSharedLinkError.unsupportedYouTube
             }
             await mediaIndex.load()
-            await catalogStore.loadCachedSections(sources: sourceStore.sources)
-            await rebuildCatalogLookup()
             try Task.checkCancellation()
             let resolution = try await AppleSharedLinkResolution.resolve(link, records: mediaIndex.records,
                 sources: sourceStore.sources, configuration: metadataConfiguration) { name in
-                    await searchStore.search(query: name, sources: sourceStore.sources, baseSections: catalogStore.sections) {
+                    await searchStore.search(query: name) {
                         await mediaIndex.search($0)
                     }
                     return searchStore.results
@@ -2383,7 +1810,7 @@ struct AppleSearchView: View {
                 routedResult = .init(record: record, item: match.item, source: match.source, action: .display, revision: revision)
                 appleTrace("shared link match title page \(record.title)")
             } else if let item = resolution.item {
-                let source = AppleTop10ArtworkStore.match(item, sources: sourceStore.sources).source
+                let source = AppleTop10ArtworkStore.match(item).source
                 let record = AppleMediaRecord(canonicalID: item.mediaID, kind: item.type == "movie" ? .movie : .series,
                                              title: item.name, year: item.year, availability: [])
                 query = item.name
@@ -2439,8 +1866,6 @@ struct AppleSearchView: View {
                 .clipShape(.rect(cornerRadius: 8))
             VStack(alignment: .leading, spacing: 4) {
                 Text(record.title).font(.headline)
-                // The same name the row headings show ("AIOMetadata", not
-                // "AIOMetadata  | ElfHosted").
                 Text(AppleCatalogShelfPolicy.displaySourceName(sourceName)).font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Text(record.kind.rawValue.capitalized)
@@ -2453,46 +1878,20 @@ struct AppleSearchView: View {
     }
 
     private func sourceName(for record: AppleMediaRecord) -> String {
-        searchStore.lookup.sourceName(for: record)
+        let names = record.availability.compactMap { route in sourceStore.sources.first { $0.id == route.instanceID }?.name }
+        return names.isEmpty ? "Local source" : names.joined(separator: ", ")
     }
 
     private func searchMatch(for record: AppleMediaRecord) -> AppleCatalogSearchMatch? {
-        AppleXtreamLibraryStore.shared.match(record) ?? AppleCatalogSearchLookup.match(for: record, in: [searchStore.lookup, catalogLookup])
+        AppleXtreamLibraryStore.shared.match(record)
     }
 
-    /// Every row either opens its title page or is not a catalog title at all
-    /// (a file or a channel); see `AppleCatalogSearchLookup.listsUnmatched`.
+    /// Every row either opens its title page or is a file, server title or
+    /// channel; see `AppleCatalogSearchStore.listsUnmatched`.
     private var listedResults: [AppleMediaRecord] {
         searchStore.results.filter {
-            AppleCatalogSearchLookup.listsUnmatched($0) || searchMatch(for: $0) != nil
+            AppleCatalogSearchStore.listsUnmatched($0) || searchMatch(for: $0) != nil
         }
-    }
-
-    private func relatedItems(for sourceID: AppleSource.ID) -> [AppleCatalogItem] {
-        let searchItems = searchStore.lookup.relatedItems(for: sourceID)
-        return searchItems.isEmpty ? catalogLookup.relatedItems(for: sourceID) : searchItems
-    }
-
-    private func indexCatalogs() async {
-        let catalogs = sourceStore.sources.filter { $0.isAddon && $0.isEnabled }.map { source in
-            (instanceID: source.id, records: catalogStore.sections
-                .filter { $0.sourceID == source.id }
-                .flatMap { AppleMediaIngestion.catalogRecords(section: $0) })
-        }
-        try? await mediaIndex.replaceCatalogs(catalogs)
-    }
-
-    private var catalogLookupIdentity: String {
-        "\(catalogStore.contentRevision)#\(searchConfigurationIdentity(sourceStore.sources))"
-    }
-
-    private func rebuildCatalogLookup() async {
-        let updated = await AppleCatalogSearchLookup.buildOffMain(
-            sections: catalogStore.sections,
-            sources: sourceStore.sources
-        )
-        guard !Task.isCancelled else { return }
-        catalogLookup = updated
     }
 
     private var gatewayConfig: AppleTranscodeGatewayConfig? {
@@ -2506,182 +1905,6 @@ struct AppleSearchView: View {
 
 
     private var metadataConfiguration: AppleTMDBConfiguration? { settings.tmdbConfiguration }
-}
-
-private struct AppleArtworkPrefetchRow {
-    let items: [AppleCatalogItem]
-    let style: AppleCatalogShelfPolicy.Style
-}
-
-private struct AppleCatalogSectionView: View {
-    let section: AppleCatalogSection
-    let source: AppleSource
-    let viewportWidth: CGFloat
-    let relatedItems: [AppleCatalogItem]
-    let mediaIndex: AppleMediaIndexStore
-    let playbackSources: [AppleSource]
-    let metadataConfiguration: AppleTMDBConfiguration?
-    let gatewayConfig: AppleTranscodeGatewayConfig?
-    let playbackResolver: AppleStremioPlaybackResolver
-    let settings: AppleSettingsStore
-    let openSettings: () -> Void
-    /// Discover's Search and Refresh, for the title pages its posters open.
-    let tabToolbar: AppleTabToolbarContext?
-    let onOpen: () -> Void
-    /// Asks for the catalog's next page (`AppleCatalogPaging`); the store
-    /// ignores it for a catalog without `skip` or one that has run out.
-    var onReachEnd: (() -> Void)? = nil
-    var allowedIdentities: Set<String>? = nil
-    var nextArtworkRow: AppleArtworkPrefetchRow? = nil
-    @Environment(\.displayScale) private var displayScale
-    @Environment(\.appleDiscoverRows) private var rowStyle
-    @ScaledMetric(relativeTo: .body) private var scaledCardWidth = 140.0
-    @State private var prefetchedFirstPaint = false
-    @FocusState private var focusedItemID: String?
-    @State private var artworkSettledFocusID: String?
-    @State private var artworkVisibleItemID: String?
-    @Environment(\.appleArtworkLoadsPaused) private var inheritedArtworkPause
-
-    private var title: String {
-        section.shelfTitle ?? AppleCatalogShelfPolicy.title(for: section.catalog)
-    }
-
-    private var displayedItems: [AppleCatalogItem] {
-        let items = AppleCatalogShelfPolicy.style(for: section.catalog) == .ranked
-            ? Array(section.items.prefix(10)) : section.items
-        return AppleCatalogShelfPolicy.visibleItems(items, allowed: allowedIdentities, source: source)
-    }
-
-    private func prefetchRequests(items: [AppleCatalogItem], style: AppleCatalogShelfPolicy.Style,
-                                  after itemID: String? = nil) -> [AppleArtworkPrefetchPolicy.Request] {
-        let sizing: AppleCatalogCardSizing = switch style {
-        case .featured: .portraitPromo
-        case .ranked: .ranked
-        case .poster: .catalog
-        }
-        let width = AppleCatalogCard.width(sizing: sizing, rowStyle: rowStyle, scaledCardWidth: scaledCardWidth,
-                                           viewportWidth: viewportWidth, regularWidth: false)
-        let height = AppleCatalogCard.height(sizing: sizing, width: width)
-        return AppleArtworkPrefetchPolicy.requests(items: items,
-            pixels: CGSize(width: (width * displayScale).rounded(.up), height: (height * displayScale).rounded(.up)),
-            landscape: style == .ranked, after: itemID)
-    }
-
-    var body: some View {
-        AppleHomeShelf(title: title,
-                        headingIdentifier: "discover.shelf.\(source.manifestID ?? source.id.uuidString).\(section.catalog.type).\(section.catalog.id)", onOpen: onOpen) {
-            ForEach(Array(displayedItems.enumerated()), id: \.element.id) { index, item in
-                NavigationLink {
-                    detail(item)
-                } label: {
-                    if AppleCatalogShelfPolicy.style(for: section.catalog) == .ranked {
-                        AppleTop10Card(item: item, rank: (section.items.firstIndex { $0.id == item.id } ?? index) + 1)
-                    } else if AppleCatalogShelfPolicy.style(for: section.catalog) == .featured {
-                        ApplePortraitPromoCard(item: item, viewportWidth: viewportWidth)
-                    } else {
-                        AppleCatalogCard(item: item)
-                    }
-                }
-                .focused($focusedItemID, equals: item.id)
-                .accessibilityIdentifier("home.media.\(item.id)")
-                .onAppear { requestMoreIfNearEnd(item) }
-                .onScrollVisibilityChange(threshold: 0.5) { visible in
-                    if visible { artworkVisibleItemID = item.id }
-                }
-            }
-        } destination: { catalogList }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("home.catalog.\(section.id)")
-        .environment(\.appleArtworkLoadsPaused, inheritedArtworkPause || (focusedItemID != nil && artworkSettledFocusID != focusedItemID))
-        .task(id: "\(section.id)|anchor:\(focusedItemID ?? artworkVisibleItemID ?? "")|scroll:\(inheritedArtworkPause)") {
-            guard !inheritedArtworkPause else { return }
-            if prefetchedFirstPaint {
-                do { try await Task.sleep(for: AppleArtworkLoadingPolicy.dwell) } catch { return }
-            }
-            let anchor = prefetchedFirstPaint ? focusedItemID ?? artworkVisibleItemID : nil
-            var requests = prefetchRequests(items: displayedItems,
-                style: AppleCatalogShelfPolicy.style(for: section.catalog), after: anchor)
-            if let nextArtworkRow {
-                requests += prefetchRequests(items: nextArtworkRow.items, style: nextArtworkRow.style)
-            }
-            await AppleRemoteImageCache.shared.prefetch(requests)
-            guard !Task.isCancelled else { return }
-            prefetchedFirstPaint = true
-        }
-        // The focused poster's art loads once focus has rested for the dwell,
-        // on every platform and whether or not its detail is prefetched below.
-        .task(id: focusedItemID) {
-            guard let focusedItemID else { return }
-            do { try await Task.sleep(for: AppleArtworkLoadingPolicy.dwell) } catch { return }
-            artworkSettledFocusID = focusedItemID
-        }
-        #if os(tvOS)
-        .defaultFocus($focusedItemID, section.items.first?.id)
-        // A poster that keeps focus is the next page the viewer opens, so
-        // its details and episodes are fetched while they decide. Moving on
-        // cancels the wait, so a swipe across a row costs nothing.
-        .task(id: focusedItemID) {
-            guard let focusedItemID,
-                  let item = section.items.first(where: { $0.id == focusedItemID }),
-                  let title = AppleMetadataPrefetcher.detailTarget(type: item.type, mediaID: item.mediaID)
-            else { return }
-            try? await Task.sleep(for: AppleMetadataPrefetcher.focusDwell)
-            guard !Task.isCancelled else { return }
-            await AppleMetadataPrefetcher.warmDetail(
-                title,
-                sources: playbackSources,
-                preferredSourceID: source.id,
-                configuration: metadataConfiguration
-            )
-        }
-        #endif
-    }
-
-    var catalogList: some View {
-        List(section.items) { item in
-            NavigationLink { detail(item) } label: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(item.name).font(.headline)
-                    let subtitle = AppleCatalogShelfPolicy.rankedSubtitle(for: item)
-                    if !subtitle.isEmpty { Text(subtitle).foregroundStyle(.secondary) }
-                }
-                .frame(minHeight: 44, alignment: .leading)
-            }
-            .onAppear { requestMoreIfNearEnd(item) }
-        }
-        .navigationTitle(title)
-        .scrollIndicators(.hidden)
-        .tint(.primary)
-    }
-
-    /// A ranked Top 10 row shows ten and never pages.
-    private func requestMoreIfNearEnd(_ item: AppleCatalogItem) {
-        guard let onReachEnd, AppleCatalogShelfPolicy.style(for: section.catalog) != .ranked,
-              AppleCatalogPaging.isNearEnd(itemID: item.id, in: displayedItems) else { return }
-        onReachEnd()
-    }
-
-    private func detail(_ item: AppleCatalogItem) -> some View {
-        // Built when pushed, not with every card (`AppleLazyDestination`).
-        AppleLazyDestination {
-            AppleCatalogItemDetailView(
-                item: item,
-                source: source,
-                relatedItems: relatedItems,
-                mediaIndex: mediaIndex,
-                playbackSources: playbackSources,
-                metadataConfiguration: metadataConfiguration,
-                gatewayConfig: gatewayConfig,
-                playbackResolver: playbackResolver,
-                settings: settings,
-                openSettings: openSettings,
-                initialAutoPlay: AppleCatalogDiscoveryPolicy.opensStraightToPlayback(item: item, source: source),
-                tabToolbar: tabToolbar
-            )
-            .environment(\.appleDiscoverRows, nil)
-        }
-    }
-
 }
 
 private struct AppleTop10Card: View {
@@ -2739,7 +1962,6 @@ private struct AppleTop10Card: View {
 private struct AppleTop10SearchCard<Destination: View>: View {
     let entry: AppleNetflixTop10Entry
     let type: String
-    let sources: [AppleSource]
     let metadataConfiguration: AppleTMDBConfiguration?
     @ViewBuilder let destination: (AppleCatalogSearchMatch) -> Destination
     @State private var match: AppleCatalogSearchMatch?
@@ -2757,22 +1979,18 @@ private struct AppleTop10SearchCard<Destination: View>: View {
                     .accessibilityValue(isLoading ? "Finding artwork" : "Unavailable from connected catalogs")
             }
         }
-        .task(id: "\(entry.title):\(catalogConfigurationIdentity(sources)):\(metadataConfiguration != nil)") {
+        .task(id: "\(entry.title):\(metadataConfiguration != nil)") {
             match = nil
             isLoading = true
             do {
                 try await Task.sleep(for: AppleLaunchWorkPolicy.remainingLaunchWindow(processAge: AppleLaunchMarks.launchAge()))
             } catch { return }
-            // TMDB first: it knows the documentaries and older titles a catalog search by exact
-            // name misses, and its answer is kept on disk for the next launch.
+            // TMDB's answer is kept on disk for the next launch.
             if let metadataConfiguration,
                let item = await AppleTop10ArtworkStore.shared.resolve(title: entry.title, type: type,
                                                                        configuration: metadataConfiguration) {
                 guard !Task.isCancelled else { return }
-                match = AppleTop10ArtworkStore.match(item, sources: sources)
-            } else {
-                match = await AppleTop10ArtworkLookup.find(title: entry.title, type: type,
-                    seasonTitle: entry.seasonTitle, sources: sources)
+                match = AppleTop10ArtworkStore.match(item)
             }
             guard !Task.isCancelled else { return }
             isLoading = false
@@ -3187,8 +2405,7 @@ struct AppleCatalogCard: View {
         Self.height(sizing: sizing, width: cardWidth)
     }
 
-    /// The tile's size in points. `AppleCatalogSectionView` prefetches at the same
-    /// size, so the tile finds its decoded bucket already in memory.
+    /// The tile's size in points.
     nonisolated static func width(sizing: AppleCatalogCardSizing, rowStyle: AppleDiscoverRowStyle?,
                                   scaledCardWidth: CGFloat, viewportWidth: CGFloat?, regularWidth: Bool) -> CGFloat {
         if let activeRowStyle = activeRowStyle(rowStyle, sizing: sizing) {
@@ -3360,7 +2577,6 @@ struct AppleCatalogItemDetailView: View {
     let playbackSources: [AppleSource]
     let metadataConfiguration: AppleTMDBConfiguration?
     let gatewayConfig: AppleTranscodeGatewayConfig?
-    let playbackResolver: AppleStremioPlaybackResolver
     let settings: AppleSettingsStore
     let openSettings: () -> Void
     let initialAutoPlay: Bool
@@ -3431,31 +2647,11 @@ struct AppleCatalogItemDetailView: View {
         playbackUI.request = UUID()
     }
 
-    /// Format badges for this title: the local file's probe (or name), else
-    /// the stream Automatic would play, once streams are known. No network.
+    /// Format badges for this title: the local file's probe (or name). No network.
     private func refreshTitleStreamBadges() {
-        if let file = localFiles.first {
-            titlePageStreamBadges = playbackUI.localInspection?.badges ?? AppleStreamFormatBadge.parse(file.name)
-            return
-        }
-        guard !playbackUI.streamChoices.isEmpty else { titlePageStreamBadges = []; return }
-        let first = AppleStremioCandidateRanking.playbackOrder(
-            playbackUI.streamChoices, choice: .automatic, device: .current,
-            title: item.name, year: item.year).first
-        titlePageStreamBadges = first.map { AppleStreamFormatBadge.normalized(AppleStreamFormatBadge.badges(for: $0)) } ?? []
-    }
-
-    /// The badges a Quality row shows for `choice`: those of the stream it
-    /// would play, less the resolution the row already names.
-    private func qualityRowBadges(_ choice: AppleStreamQualityChoice) -> [AppleStreamFormatBadge] {
-        // Automatic plays this title's own file first when there is one.
-        if choice == .automatic, !localFiles.isEmpty {
-            return AppleStreamFormatBadge.rowBadges(titlePageStreamBadges)
-        }
-        let first = AppleStremioCandidateRanking.playbackOrder(
-            playbackUI.streamChoices, choice: choice, device: .current,
-            title: item.name, year: item.year).first
-        return first.map { AppleStreamFormatBadge.rowBadges(AppleStreamFormatBadge.normalized(AppleStreamFormatBadge.badges(for: $0))) } ?? []
+        titlePageStreamBadges = localFiles.first.map {
+            playbackUI.localInspection?.badges ?? AppleStreamFormatBadge.parse($0.name)
+        } ?? []
     }
 
     @State private var playbackCoordinator = ApplePlaybackCoordinator()
@@ -3501,7 +2697,6 @@ struct AppleCatalogItemDetailView: View {
     private let playbackStore = ApplePlaybackStore()
     private let ratingStore = AppleTitleRatingStore()
 
-    private let metadataClient = AppleStremioMetadataClient()
     private let metadataResolver = AppleMetadataResolver()
     private let playbackPreparer = ApplePlaybackPreparer()
 
@@ -3513,7 +2708,6 @@ struct AppleCatalogItemDetailView: View {
         playbackSources: [AppleSource],
         metadataConfiguration: AppleTMDBConfiguration?,
         gatewayConfig: AppleTranscodeGatewayConfig?,
-        playbackResolver: AppleStremioPlaybackResolver,
         settings: AppleSettingsStore,
         openSettings: @escaping () -> Void,
         initialAutoPlay: Bool = false,
@@ -3526,16 +2720,9 @@ struct AppleCatalogItemDetailView: View {
         self.source = source
         self.relatedItems = relatedItems
         self.mediaIndex = mediaIndex
-        #if DEBUG
-        self.playbackSources = AppleTitlePageStreamFixture.opensQuality
-            ? AppleTitlePageStreamFixture.sources
-            : playbackSources + AppleTitlePageStreamFixture.sources
-        #else
         self.playbackSources = playbackSources
-        #endif
         self.metadataConfiguration = metadataConfiguration
         self.gatewayConfig = gatewayConfig
-        self.playbackResolver = playbackResolver
         self.settings = settings
         self.openSettings = openSettings
         self.initialAutoPlay = initialAutoPlay
@@ -3797,12 +2984,6 @@ struct AppleCatalogItemDetailView: View {
         .sheet(item: $prompts.watchOnInstructions) { instructions in
             AppleWatchOnInstructionsView(instructions: instructions)
         }
-        .sheet(isPresented: $prompts.streamPicker) {
-            streamPicker
-                #if os(visionOS)
-                .frame(width: 720, height: 540)
-                #endif
-        }
         // Exactly once per press: SwiftUI reruns this task whenever the page
         // reappears (another tab and back), and an unconsumed request then
         // started playback by itself without the episode it named
@@ -3824,7 +3005,6 @@ struct AppleCatalogItemDetailView: View {
         .onChange(of: pageMetadata.resolvedMediaID) { _, _ in refreshTitleLocalFiles() }
         .onChange(of: episodeList.episodes) { _, _ in refreshTitleLocalFiles() }
         .onChange(of: episodeList.selectedEpisodeID) { _, _ in refreshTitleLocalFiles() }
-        .onChange(of: playbackUI.streamChoices) { _, _ in refreshTitleStreamBadges() }
         // The local file's format and, for a disc image, its titles: read by
         // the engine from the file itself, once per page.
         .task(id: localFiles.map(\.id)) {
@@ -3927,7 +3107,7 @@ struct AppleCatalogItemDetailView: View {
             AppleLaunchClock.mark("detail.logoURL")
             #endif
             // The first wordmark that is a clean transparent PNG. TMDB's pick
-            // can fail it (an SVG, an opaque plate) where the add-on's logo the
+            // can fail it (an SVG, an opaque plate) where the preview logo the
             // Discover hero draws passes (Project Hail Mary, iPad v2).
             if let logoURL = await AppleTransparentPNGLogoValidator.firstValid(in: candidates), !Task.isCancelled {
                 #if DEBUG
@@ -4000,9 +3180,6 @@ struct AppleCatalogItemDetailView: View {
                     appleTrace("detail autoplay skipped: nothing on this page can play (\(item.name))")
                 }
             }
-            #if DEBUG
-            if AppleTitlePageStreamFixture.opensQuality { await chooseStreams() }
-            #endif
         }
         .task(id: "similar:\(item.id):\(relatedItems.count):\(pageMetadata.details?.mediaID ?? "")") {
             await refreshSuggestions()
@@ -4036,7 +3213,7 @@ struct AppleCatalogItemDetailView: View {
             systemVideoAutoplayEnabled = UIAccessibility.isVideoAutoplayEnabled
         }
         #endif
-        .modifier(AppleStremioPlayerPresentationModifier(presentation: $playbackUI.presentation))
+        .modifier(AppleMediaPlayerPresentationModifier(presentation: $playbackUI.presentation))
         // Hosted on its own view so it takes the system tint: a page opened
         // from Search inherits its `.tint(.primary)`, which drew the focused
         // button's title white on the white focus fill (Apple TV, 2026-10-01).
@@ -4829,9 +4006,6 @@ struct AppleCatalogItemDetailView: View {
         .contextMenu {
             versionMenu
             AppleLibraryFixMatchMenuAction()
-            Button("Quality", systemImage: "slider.horizontal.3") {
-                Task { await chooseStreams() }
-            }
         }
     }
 
@@ -5084,7 +4258,6 @@ struct AppleCatalogItemDetailView: View {
                                 playbackSources: playbackSources,
                                 metadataConfiguration: metadataConfiguration,
                                 gatewayConfig: gatewayConfig,
-                                playbackResolver: playbackResolver,
                                 settings: settings,
                                 openSettings: openSettings,
                                 tabToolbar: tabToolbar
@@ -5170,21 +4343,12 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private var optionalDetailTasks: some View {
-        AppleTitlePageOptionalTasks(enabled: usesCatalogDetailEnrichment, itemID: item.id, generation: preparationGeneration,
+        AppleTitlePageOptionalTasks(enabled: usesCatalogDetailEnrichment, generation: preparationGeneration,
             resolvedMediaID: pageMetadata.resolvedMediaID, detailsSettled: pageMetadata.detailsSettled,
             episodesLoadFinished: episodeList.loadFinished,
-            episodeCount: episodeList.episodes.count, loadPreview: loadDetailPreviewAssets,
+            episodeCount: episodeList.episodes.count,
             loadWatchProviders: loadWatchProviders, loadArtwork: loadOptionalDetailArtwork,
             recordEpisodes: recordDetailEpisodeProgress)
-    }
-
-    private func loadDetailPreviewAssets() async {
-        let generation = preparationGeneration
-        guard !Task.isCancelled else { return }
-        let preview = await metadataClient.previewAssets(sources: playbackSources,
-            preferredSourceID: source.id, type: item.type, mediaID: item.mediaID)
-        guard !Task.isCancelled, preparationGeneration == generation else { return }
-        pageMetadata.previewAssets = preview
     }
 
     private func loadOptionalDetailArtwork() async {
@@ -5305,11 +4469,10 @@ struct AppleCatalogItemDetailView: View {
         return nil
     }
 
-    /// Every wordmark this title has, best first: TMDB's, the add-on's (the
-    /// one the Discover hero draws), then the catalog record's.
+    /// Every wordmark this title has, best first: TMDB's, then the record's.
     private var titleLogoCandidates: [URL] {
         var seen = Set<URL>()
-        return [pageMetadata.details?.logoURL, pageMetadata.previewAssets?.logoURL, item.logoURL]
+        return [pageMetadata.details?.logoURL, item.logoURL]
             .compactMap { $0 }
             .filter { seen.insert($0).inserted }
     }
@@ -5331,8 +4494,7 @@ struct AppleCatalogItemDetailView: View {
             return keys.split(separator: ",").compactMap { AppleTrailerPreviewPolicy.validYouTubeKey(String($0)) }
         }
         #endif
-        let keys = (pageMetadata.details?.trailerYouTubeKeys ?? [])
-            + (pageMetadata.previewAssets?.trailerYouTubeKeys ?? [])
+        let keys = pageMetadata.details?.trailerYouTubeKeys ?? []
         var seen = Set<String>()
         return keys.filter { seen.insert($0).inserted }
     }
@@ -5405,67 +4567,6 @@ struct AppleCatalogItemDetailView: View {
         #else
         return AppleTrailerPreviewPolicy.titlePageAutoplays(on: .tv, setting: settings.autoPlayTrailer, reduceMotion: reduceMotion)
         #endif
-    }
-
-    /// Automatic and one row per resolution this device can play — no
-    /// codecs, containers or source names (owner 2026-09-24). A resolution
-    /// plays its best candidate for this device, falling to the nearest one.
-    private var streamPicker: some View {
-        let tiers = AppleStremioCandidateRanking.qualityTiers(playbackUI.streamChoices, device: .current)
-        return NavigationStack {
-            List {
-                Button {
-                    choosePlaybackQuality(nil)
-                } label: {
-                    qualityRowLabel("Automatic", badges: qualityRowBadges(.automatic))
-                }
-                .accessibilityIdentifier("detail.quality.automatic")
-                ForEach(tiers, id: \.self) { tier in
-                    Button {
-                        choosePlaybackQuality(tier)
-                    } label: {
-                        qualityRowLabel(tier.title, badges: qualityRowBadges(.tier(tier)))
-                    }
-                    .accessibilityIdentifier("detail.quality.\(tier.title)")
-                }
-            }
-            .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
-            .navigationTitle("Quality")
-            #if os(iOS) || os(visionOS)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { prompts.streamPicker = false }
-                        .accessibilityIdentifier("detail.quality.done")
-                }
-            }
-            #elseif os(macOS)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Done") { prompts.streamPicker = false } }
-            }
-            #endif
-        }
-        #if os(macOS)
-        .frame(width: 360, height: 300)
-        #endif
-        .presentationDetents([.medium])
-    }
-
-    /// A Quality row: the resolution, then the format badges of the stream
-    /// it plays (Dolby Vision, Atmos, 5.1, Remux).
-    private func qualityRowLabel(_ title: String, badges: [AppleStreamFormatBadge]) -> some View {
-        HStack(spacing: 8) {
-            Text(title)
-            if !badges.isEmpty { AppleStreamFormatBadgeInline(badges: badges) }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func choosePlaybackQuality(_ tier: AppleStreamQualityTier?) {
-        playbackUI.selectedLocalFile = nil
-        playbackUI.selectedQuality = tier
-        prompts.streamPicker = false
-        playbackUI.request = UUID()
     }
 
     private func toggleTrailerPlayback() {
@@ -5870,10 +4971,10 @@ struct AppleCatalogItemDetailView: View {
         return episodeNumber(episode).replacingOccurrences(of: " ", with: ":")
     }
 
-    private var selectedEpisodeSelection: AppleStremioEpisodeSelection? {
+    private var selectedEpisodeSelection: AppleMediaEpisodeSelection? {
         guard let selectedEpisodeID = episodeList.selectedEpisodeID,
               let episode = episodeList.episodes.first(where: { $0.id == selectedEpisodeID }) else { return nil }
-        return AppleStremioEpisodeSelection(
+        return AppleMediaEpisodeSelection(
             seriesMediaID: pageMetadata.resolvedMediaID ?? item.mediaID,
             episode: episode
         )
@@ -6356,12 +5457,12 @@ struct AppleCatalogItemDetailView: View {
 
     /// The title `startDownload(episode:)` hands the coordinator, so a row can
     /// tell its own download from another episode's.
-    private func episodeDownloadTitle(_ episode: AppleStremioEpisode) -> String {
-        AppleStremioEpisodeSelection(seriesMediaID: pageMetadata.resolvedMediaID ?? item.mediaID, episode: episode)?.displayTitle
+    private func episodeDownloadTitle(_ episode: AppleMediaEpisode) -> String {
+        AppleMediaEpisodeSelection(seriesMediaID: pageMetadata.resolvedMediaID ?? item.mediaID, episode: episode)?.displayTitle
             ?? episode.displayTitle
     }
 
-    private func episodeDownloadIndicator(for episode: AppleStremioEpisode) -> AppleEpisodeDownloadIndicator {
+    private func episodeDownloadIndicator(for episode: AppleMediaEpisode) -> AppleEpisodeDownloadIndicator {
         AppleEpisodeDownloadIndicator.resolve(
             episodeTitle: episodeDownloadTitle(episode),
             coordinatorState: downloadCoordinator.state,
@@ -6396,7 +5497,7 @@ struct AppleCatalogItemDetailView: View {
         }
     }
 
-    private func episodeRow(_ episode: AppleStremioEpisode, isWatched: Bool) -> some View {
+    private func episodeRow(_ episode: AppleMediaEpisode, isWatched: Bool) -> some View {
         HStack(spacing: 0) {
             Button {
                 episodeList.selectedEpisodeID = episode.id
@@ -6451,7 +5552,7 @@ struct AppleCatalogItemDetailView: View {
     /// The per-episode download control; none for a library title or where
     /// downloads are not offered.
     @ViewBuilder
-    private func episodeDownloadButton(_ episode: AppleStremioEpisode) -> some View {
+    private func episodeDownloadButton(_ episode: AppleMediaEpisode) -> some View {
         #if os(iOS) || os(macOS)
         if localGroup == nil,
            AppleTitlePagePolicy.showsEpisodeDownload(offersDownload: offersDownload,
@@ -6536,7 +5637,6 @@ struct AppleCatalogItemDetailView: View {
                     playbackSources: playbackSources,
                     metadataConfiguration: metadataConfiguration,
                     gatewayConfig: gatewayConfig,
-                    playbackResolver: playbackResolver,
                     settings: settings,
                     openSettings: openSettings,
                     tabToolbar: tabToolbar
@@ -6576,7 +5676,7 @@ struct AppleCatalogItemDetailView: View {
         season == 0 ? "Specials" : "Season \(season)"
     }
 
-    private func episodeNumber(_ episode: AppleStremioEpisode) -> String {
+    private func episodeNumber(_ episode: AppleMediaEpisode) -> String {
         if let season = episode.season, let number = episode.episode {
             return "S\(season) E\(number)"
         }
@@ -6656,18 +5756,6 @@ struct AppleCatalogItemDetailView: View {
             "title progress candidates=[\(held.joined(separator: ", "))] chosen=\(progressRecordID) label=\(regularPlayTitle)")
     }
 
-    /// The stock player's line above the title (`ApplePlaybackRequest.subtitle`
-    /// and `releaseYear`): the show for an episode, and the year it aired or
-    /// the film's year.
-    private var stockPlayerSubtitle: String? {
-        item.type == "series" ? item.name : nil
-    }
-
-    private var stockPlayerYear: Int? {
-        let releaseInfo = item.type == "series" ? selectedEpisode?.releaseInfo : item.releaseInfo
-        return releaseInfo.flatMap { Int($0.prefix(4)) } ?? (item.type == "series" ? nil : item.year)
-    }
-
     private var offlineRecordID: String {
         if let reference = AppleMediaServerItemReference.parse(item.mediaID) {
             return AppleMediaServerItemReference(sourceID: reference.sourceID, itemID: episodeList.selectedEpisodeID ?? reference.itemID).mediaID
@@ -6709,11 +5797,7 @@ struct AppleCatalogItemDetailView: View {
         if AppleMediaServerItemReference.parse(item.mediaID) != nil {
             return offlineState.serverDownloadsAllowed || downloadCoordinator.state.isCompleted
         }
-        return AppleTitlePagePolicy.offersDownload(
-            item: item, sources: playbackSources,
-            hasCompletedDownload: downloadCoordinator.state.isCompleted,
-            episodesUnavailable: episodeListPresentation == .unavailable
-        )
+        return AppleTitlePagePolicy.offersDownload(item: item, hasCompletedDownload: downloadCoordinator.state.isCompleted)
     }
 
     private var canStartDownload: Bool {
@@ -6725,14 +5809,14 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private var seasonNumbers: [Int] {
-        AppleStremioEpisodePolicy.seasons(in: episodeList.episodes)
+        AppleMediaEpisodePolicy.seasons(in: episodeList.episodes)
     }
 
-    private var visibleEpisodes: [AppleStremioEpisode] {
+    private var visibleEpisodes: [AppleMediaEpisode] {
         AppleLocalLibraryStore.visibleEpisodes(in: episodeList.selectedSeason, from: episodeList.episodes)
     }
 
-    private func episodeMetadata(_ episode: AppleStremioEpisode) -> String {
+    private func episodeMetadata(_ episode: AppleMediaEpisode) -> String {
         [episodeNumber(episode), episode.formattedReleaseInfo, episode.runtimeMinutes.map { "\($0) min" }]
             .compactMap { $0 }.joined(separator: " · ")
     }
@@ -6815,7 +5899,7 @@ struct AppleCatalogItemDetailView: View {
             if let reference = AppleMediaServerItemReference.parse(item.mediaID) {
                 return (episode.id, AppleMediaServerItemReference(sourceID: reference.sourceID, itemID: episode.id).mediaID)
             }
-            guard let selection = AppleStremioEpisodeSelection(
+            guard let selection = AppleMediaEpisodeSelection(
                 seriesMediaID: pageMetadata.resolvedMediaID ?? item.mediaID,
                 episode: episode
             ) else { return nil }
@@ -6826,20 +5910,7 @@ struct AppleCatalogItemDetailView: View {
         offlineState.downloadedEpisodeIDs = Set(resolvedIDs.filter { downloaded.contains($0.1) }.map(\.0))
     }
 
-    private func chooseStreams() async {
-        playbackUI.pickingStreams = true
-        defer { playbackUI.pickingStreams = false }
-        do {
-            playbackUI.streamChoices = try await playbackResolver.rankedCandidates(sources: playbackSources,
-                preferredSourceID: source.id, item: item.withMediaID(selectedPlaybackMediaID))
-        } catch {
-            playbackUI.streamChoices = []
-            if localFiles.isEmpty { playbackCoordinator.fail(error); return }
-        }
-        prompts.streamPicker = true
-    }
-
-    private func configuredSources(_ presentation: AppleStremioPlayerPresentation, selectedID: URL? = nil) -> AppleStremioPlayerPresentation {
+    private func configuredSources(_ presentation: AppleMediaPlayerPresentation, selectedID: URL? = nil) -> AppleMediaPlayerPresentation {
         var result = presentation
         result.sourceID = presentation.request.hints.libraryFileURL ?? selectedID ?? presentation.request.url
         // Every path that opens the player from this page comes through here,
@@ -6897,7 +5968,6 @@ struct AppleCatalogItemDetailView: View {
             case .openStream:
                 appleTrace("native fallback → openStream after \(unplayable.triedSourceURLs.count) failures")
                 playbackUI.engineOverride = .openStream
-                playbackUI.fallbackTriedSources = Set(unplayable.triedSourceURLs)
                 playbackUI.startsFromBeginning = fromBeginning
                 playbackCoordinator.beginResolving()
                 playbackUI.request = UUID()
@@ -6911,61 +5981,17 @@ struct AppleCatalogItemDetailView: View {
             result.sourceOptionsLoader = nil
             return result
         }
-        let engineOverride = presentation.engineOverride
         let files = localFiles
         let library = library
         let settings = settings
         let store = localSourceStore ?? AppleSourceStore()
-        let selectedItem = item.withMediaID(selectedPlaybackMediaID)
-        let mediaID = progressRecordID
-        let title = selectedEpisodeSelection?.displayTitle ?? item.name
-        let subtitle = stockPlayerSubtitle
-        let releaseYear = stockPlayerYear
-        let artwork = item.posterURL
-        let episode = AppleStremioSeriesInfo(mediaID: selectedItem.mediaID).map { (season: $0.season, episode: $0.episode) }
-        let runtime = expectedRuntime
-        // MP4-first order only under the DEBUG Native override; the OpenStream
-        // engine keeps the quality-first order.
-        let stockPlayerOnly = (engineOverride ?? settings.playbackEngine) == .native
         result.sourceOptionsLoader = {
             let localOptions = files.map { file in
                 ApplePlaybackSourceOption(id: file.url, tier: nil) { _ in
                     try await library.presentation(for: file, sourceStore: store, settings: settings)
                 }
             }
-            var streams: [AppleStremioHTTPPlaybackCandidate] = []
-            var loadError: Error?
-            do {
-                streams = try await playbackResolver.rankedCandidates(sources: playbackSources,
-                    preferredSourceID: source.id, item: selectedItem)
-            } catch { loadError = error }
-            if localOptions.isEmpty && streams.isEmpty, let loadError { throw loadError }
-            let partID = AppleDetailResume.partID(type: selectedItem.type, mediaID: selectedItem.mediaID)
-            @MainActor func option(_ candidate: AppleStremioHTTPPlaybackCandidate) -> ApplePlaybackSourceOption {
-                ApplePlaybackSourceOption(id: candidate.sourceURL,
-                    tier: AppleStremioCandidateRanking.traits(of: candidate).tier,
-                    serviceKey: candidate.serviceKey,
-                    badges: AppleStreamFormatBadge.normalized(AppleStreamFormatBadge.badges(for: candidate))) { resume in
-                        AppleStremioPlayerPresentation(request: candidate.playbackRequest(mediaID: mediaID, title: title,
-                            resume: resume ?? AppleDetailResume.position(mediaID: mediaID, partID: partID),
-                            addonMediaID: selectedItem.mediaID, addonMediaType: selectedItem.type,
-                            expectedRuntime: runtime, subtitle: subtitle, releaseYear: releaseYear,
-                            artworkURL: artwork), settings: settings,
-                            engineOverride: engineOverride)
-                    }
-            }
-            let device = AppleStreamDeviceCapabilities.current
-            @MainActor func order(_ choice: AppleStreamQualityChoice) -> [ApplePlaybackSourceOption] {
-                AppleStremioCandidateRanking.playbackOrder(streams, choice: choice, device: device,
-                    episode: episode, title: selectedItem.name, year: selectedItem.year,
-                    unhealthyServices: AppleStreamServiceHealth.shared.unhealthyKeys(),
-                    stockPlayerOnly: stockPlayerOnly).map(option)
-            }
-            let tiers = AppleStremioCandidateRanking.qualityTiers(streams, device: device)
-            return ApplePlaybackSourceOptions(
-                tiers: tiers,
-                automatic: localOptions + order(.automatic),
-                byTier: Dictionary(uniqueKeysWithValues: tiers.map { ($0, order(.tier($0))) }))
+            return ApplePlaybackSourceOptions(tiers: [], automatic: localOptions, byTier: [:])
         }
         return result
     }
@@ -7019,14 +6045,13 @@ struct AppleCatalogItemDetailView: View {
         let remaining = episodeList.episodes.filter { candidate in
             candidate.id == current.id || !currentFiles.contains { AppleLocalLibraryStore.matchesEpisode($0, episode: candidate) }
         }
-        guard let next = AppleStremioEpisodePolicy.following(current, in: remaining) else { return nil }
+        guard let next = AppleMediaEpisodePolicy.following(current, in: remaining) else { return nil }
         return AppleNextEpisodeContext(title: next.displayTitle) { carryOver in
             Task { @MainActor in
                 // One handover per episode, however many times it is asked for.
                 guard self.episodeList.selectedEpisodeID != next.id else { return }
                 appleTrace("next episode → \(next.displayTitle)")
                 let ending = self.playbackUI.presentation?.id
-                self.playbackUI.preferredServiceKey = self.playbackCoordinator.currentRequest?.hints.serviceKey
                 self.playbackUI.trackCarryOver = carryOver.isEmpty ? nil : carryOver
                 self.episodeList.selectedEpisodeID = next.id
                 // The ending player keeps its own coordinator; the page
@@ -7079,8 +6104,6 @@ struct AppleCatalogItemDetailView: View {
         playbackUI.retryStartedAt = nil
         let engineOverride = playbackUI.engineOverride
         playbackUI.engineOverride = nil
-        let fallbackTried = playbackUI.fallbackTriedSources
-        playbackUI.fallbackTriedSources = []
         let fromBeginning = playbackUI.startsFromBeginning
         playbackUI.startsFromBeginning = false
         playbackUI.pressFromBeginning = fromBeginning
@@ -7094,7 +6117,7 @@ struct AppleCatalogItemDetailView: View {
                 let partID = item.type == "series" ? episodeList.selectedEpisodeID : nil
                 let request = try await AppleXtreamLibraryStore.shared.request(reference: reference,
                     episodeID: partID, mediaID: progressRecordID, fromBeginning: fromBeginning)
-                let presentation = AppleStremioPlayerPresentation(request: request, settings: settings, engineOverride: engineOverride)
+                let presentation = AppleMediaPlayerPresentation(request: request, settings: settings, engineOverride: engineOverride)
                 let identity = progressRecordID
                 let store = ApplePlaybackStore()
                 presentation.coordinator.progressWriter = { position, duration in
@@ -7108,7 +6131,7 @@ struct AppleCatalogItemDetailView: View {
                let offline = await downloadCoordinator.record(for: offlineRecordID) {
                 let request = try AppleMediaServerLibraryStore.offlinePlaybackRequest(record: offline,
                     title: offlineDisplayTitle, resumePosition: fromBeginning ? nil : ApplePlaybackStore().progress(for: offline.mediaID)?.position)
-                let presentation = AppleStremioPlayerPresentation(request: request, settings: settings,
+                let presentation = AppleMediaPlayerPresentation(request: request, settings: settings,
                     engineOverride: engineOverride)
                 playbackCoordinator = presentation.coordinator
                 playbackUI.presentation = configuredSources(presentation, selectedID: offline.localURL)
@@ -7138,46 +6161,44 @@ struct AppleCatalogItemDetailView: View {
                     failedVersions: serverFailedVersions, confirmedVersionID: confirmed)
                 guard !Task.isCancelled, playbackUI.request == resolvingRequest else { return }
                 selectedServerVersion = nil
-                let presentation = AppleStremioPlayerPresentation(request: req, settings: settings, engineOverride: engineOverride)
+                let presentation = AppleMediaPlayerPresentation(request: req, settings: settings, engineOverride: engineOverride)
                 msLibrary.attach(to: presentation.coordinator)
                 playbackCoordinator = presentation.coordinator
                 playbackUI.presentation = configuredSources(presentation, selectedID: req.url)
                 return
             }
 
-            if playbackUI.selectedQuality == nil {
-                let automaticFallback = automaticLocalVersionFallback
-                automaticLocalVersionFallback = false
-                let explicitlySelected = playbackUI.selectedLocalFile != nil && !automaticFallback
-                let confirmed = confirmedVersionID
-                confirmedVersionID = nil
-                let files = playbackUI.selectedLocalFile.map { selected in
-                    [selected] + localFiles.filter { $0.id != selected.id && !ApplePlaybackFailureHistory.shared.contains($0.url) }
-                } ?? localFiles.filter { !ApplePlaybackFailureHistory.shared.contains($0.url) }
-                playbackUI.selectedLocalFile = nil
-                for (fileIndex, file) in files.enumerated() {
-                    var attempted = file
-                    do {
-                        let presentation = try await library.presentation(attempting: &attempted,
-                            sourceStore: localSourceStore ?? AppleSourceStore(), settings: settings,
-                            fromBeginning: fromBeginning, disc: discChoice,
-                            explicitVersion: explicitlySelected && fileIndex == 0, confirmedVersionID: fileIndex == 0 ? confirmed : nil,
-                            automaticFallback: automaticFallback || fileIndex > 0, engineOverride: engineOverride)
-                        guard !Task.isCancelled, playbackUI.request == resolvingRequest else { return }
-                        playbackCoordinator = presentation.coordinator
-                        playbackUI.presentation = configuredSources(presentation, selectedID: file.url)
-                        return
-                    } catch let confirmation as AppleVersionResumeConfirmation {
-                        guard !Task.isCancelled, playbackUI.request == resolvingRequest else { return }
-                        versionResume = confirmation
-                        confirmsVersionResume = true
-                        playbackCoordinator.reset()
-                        return
-                    } catch is CancellationError { throw CancellationError() }
-                    catch { ApplePlaybackFailureHistory.shared.record(attempted.url) }
-                }
+            let automaticFallback = automaticLocalVersionFallback
+            automaticLocalVersionFallback = false
+            let explicitlySelected = playbackUI.selectedLocalFile != nil && !automaticFallback
+            let confirmed = confirmedVersionID
+            confirmedVersionID = nil
+            let files = playbackUI.selectedLocalFile.map { selected in
+                [selected] + localFiles.filter { $0.id != selected.id && !ApplePlaybackFailureHistory.shared.contains($0.url) }
+            } ?? localFiles.filter { !ApplePlaybackFailureHistory.shared.contains($0.url) }
+            playbackUI.selectedLocalFile = nil
+            for (fileIndex, file) in files.enumerated() {
+                var attempted = file
+                do {
+                    let presentation = try await library.presentation(attempting: &attempted,
+                        sourceStore: localSourceStore ?? AppleSourceStore(), settings: settings,
+                        fromBeginning: fromBeginning, disc: discChoice,
+                        explicitVersion: explicitlySelected && fileIndex == 0, confirmedVersionID: fileIndex == 0 ? confirmed : nil,
+                        automaticFallback: automaticFallback || fileIndex > 0, engineOverride: engineOverride)
+                    guard !Task.isCancelled, playbackUI.request == resolvingRequest else { return }
+                    playbackCoordinator = presentation.coordinator
+                    playbackUI.presentation = configuredSources(presentation, selectedID: file.url)
+                    return
+                } catch let confirmation as AppleVersionResumeConfirmation {
+                    guard !Task.isCancelled, playbackUI.request == resolvingRequest else { return }
+                    versionResume = confirmation
+                    confirmsVersionResume = true
+                    playbackCoordinator.reset()
+                    return
+                } catch is CancellationError { throw CancellationError() }
+                catch { ApplePlaybackFailureHistory.shared.record(attempted.url) }
             }
-            if playbackUI.selectedQuality == nil, let offlineRecord = await downloadCoordinator.record(for: offlineRecordID),
+            if let offlineRecord = await downloadCoordinator.record(for: offlineRecordID),
                !ApplePlaybackFailureHistory.shared.contains(offlineRecord.localURL) {
                 do {
                     playbackCoordinator.update(.loading)
@@ -7185,11 +6206,11 @@ struct AppleCatalogItemDetailView: View {
                     playbackCoordinator.update(.loading)
                     let prepared = try await playbackPreparer.prepare(
                         sourceURL: offlineRecord.localURL,
-                        decision: AppleStremioPlaybackResolver.decision(for: inspection),
+                        decision: ApplePlaybackPreparer.decision(for: inspection),
                         inspectedAsset: inspection,
                         gatewayRequest: nil
                     )
-                    let presentation = AppleStremioPlayerPresentation(
+                    let presentation = AppleMediaPlayerPresentation(
                         request: ApplePlaybackRequest(
                             url: prepared.url,
                             headers: prepared.requestHeaders,
@@ -7202,7 +6223,7 @@ struct AppleCatalogItemDetailView: View {
                             sourceKind: .catalog,
                             // Names the episode, so its position is saved
                             // under it (`AppleSeriesProgressGuard`).
-                            hints: .init(addonMediaID: selectedPlaybackMediaID, addonMediaType: item.type)
+                            hints: .init(titleMediaID: selectedPlaybackMediaID, titleMediaType: item.type)
                         ),
                         settings: settings
                     )
@@ -7213,63 +6234,7 @@ struct AppleCatalogItemDetailView: View {
                 catch { ApplePlaybackFailureHistory.shared.record(offlineRecord.localURL) }
             }
 
-            // Series: play the selected episode id (already IMDB-shaped from the
-            // resolved series meta). Movie: play the resolved IMDB id, falling
-            // back to the raw catalog id only if meta resolution found nothing.
-            let streamID = selectedPlaybackMediaID
-            let selectedItem = item.withMediaID(streamID)
-            let ranked = try await playbackResolver.rankedCandidates(
-                sources: playbackSources,
-                preferredSourceID: source.id,
-                item: selectedItem
-            )
-            try Task.checkCancellation()
-            playbackUI.streamChoices = ranked
-            // Automatic, or the resolution picked in the Quality sheet: the
-            // best candidate this device plays, then the rest as fallbacks.
-            let chosen = playbackUI.selectedQuality
-            let ordered = AppleStremioCandidateRanking.playbackOrder(
-                ranked, choice: chosen.map(AppleStreamQualityChoice.tier) ?? .automatic,
-                device: AppleStreamDeviceCapabilities.current,
-                episode: AppleStremioSeriesInfo(mediaID: streamID).map { (season: $0.season, episode: $0.episode) },
-                title: item.name, year: item.year,
-                unhealthyServices: AppleStreamServiceHealth.shared.unhealthyKeys(),
-                preferredService: playbackUI.preferredServiceKey,
-                // DEBUG Native override only; quality-first otherwise.
-                stockPlayerOnly: (engineOverride ?? settings.playbackEngine) == .native)
-            playbackUI.preferredServiceKey = nil
-            let mediaID = progressRecordID
-            let title = selectedEpisodeSelection?.displayTitle ?? item.name
-            let subtitle = stockPlayerSubtitle
-            let releaseYear = stockPlayerYear
-            let artwork = item.posterURL
-            let runtime = expectedRuntime
-            // A stream the Native player failed is not a failure for the
-            // OpenStream engine, so its fallback keeps them all, the ones the
-            // Native player never tried first.
-            let kept = ordered.filter { chosen != nil || engineOverride != nil
-                || !ApplePlaybackFailureHistory.shared.contains($0.sourceURL) }
-            let requests = ApplePlaybackEngineFallback.fallbackOrder(kept, url: \.sourceURL,
-                tried: fallbackTried).map { candidate in
-                candidate.playbackRequest(mediaID: mediaID, title: title,
-                    resume: AppleTitlePagePolicy.startPosition(
-                        saved: AppleDetailResume.position(mediaID: mediaID,
-                            partID: AppleDetailResume.partID(type: selectedItem.type, mediaID: selectedItem.mediaID)),
-                        fromBeginning: fromBeginning),
-                    addonMediaID: selectedItem.mediaID, addonMediaType: selectedItem.type,
-                    expectedRuntime: runtime, subtitle: subtitle, releaseYear: releaseYear,
-                    artworkURL: artwork)
-            }
-            playbackUI.selectedQuality = nil
-            guard let first = requests.first else { throw AppleLibrarySourceError.noMedia }
-            let presentation = AppleStremioPlayerPresentation(
-                request: first,
-                fallbackCandidates: Array(requests.dropFirst()),
-                settings: settings,
-                engineOverride: engineOverride
-            )
-            playbackCoordinator = presentation.coordinator
-            playbackUI.presentation = configuredSources(presentation)
+            throw AppleLibrarySourceError.noMedia
         } catch let confirmation as AppleVersionResumeConfirmation {
             guard !Task.isCancelled, playbackUI.request == resolvingRequest else { return }
             versionResume = confirmation
@@ -7293,13 +6258,9 @@ struct AppleCatalogItemDetailView: View {
         }
     }
 
-    private func startDownload(episode: AppleStremioEpisode? = nil) {
+    private func startDownload(episode: AppleMediaEpisode? = nil) {
         guard !seasonDownloads.isRunning else { return }
-        let selection = episode.flatMap { AppleStremioEpisodeSelection(seriesMediaID: pageMetadata.resolvedMediaID ?? item.mediaID, episode: $0) }
-        let streamID = selection?.mediaID ?? selectedPlaybackMediaID
-        let selectedItem = item.withMediaID(streamID)
-        let sources = playbackSources
-        let preferredSourceID = source.id
+        let selection = episode.flatMap { AppleMediaEpisodeSelection(seriesMediaID: pageMetadata.resolvedMediaID ?? item.mediaID, episode: $0) }
         downloadCoordinator.start(
             request: .init(
                 mediaID: AppleMediaServerItemReference.parse(item.mediaID) != nil ? offlineRecordID : (selection.map { "\(recordID):\($0.mediaID)" } ?? offlineRecordID),
@@ -7314,15 +6275,9 @@ struct AppleCatalogItemDetailView: View {
                 // coordinator walks them in order when one fails, which is what
                 // makes "a source is chosen by default but is not necessarily
                 // available" (tester, build 10) safe without asking.
-                if let reference = AppleMediaServerItemReference.parse(item.mediaID), let mediaServerLibrary {
-                    let target = AppleMediaServerItemReference(sourceID: reference.sourceID, itemID: episode?.id ?? episodeList.selectedEpisodeID ?? reference.itemID)
-                    return [try await mediaServerLibrary.downloadPlan(reference: target)]
-                }
-                return try await playbackResolver.resolveDownloadPlans(
-                    sources: sources,
-                    preferredSourceID: preferredSourceID,
-                    item: selectedItem
-                )
+                guard let reference = AppleMediaServerItemReference.parse(item.mediaID), let mediaServerLibrary else { return [] }
+                let target = AppleMediaServerItemReference(sourceID: reference.sourceID, itemID: episode?.id ?? episodeList.selectedEpisodeID ?? reference.itemID)
+                return [try await mediaServerLibrary.downloadPlan(reference: target)]
             },
             revokeCapabilities: { capabilities in
                 for capability in capabilities {
@@ -7375,33 +6330,8 @@ struct AppleCatalogItemDetailView: View {
     private func startSeasonDownload() {
         guard !pageMetadata.isPreparing, !downloadCoordinator.state.ownsDownload else { return }
         offlineState.downloadSeason = episodeList.selectedSeason
-        if let reference = AppleMediaServerItemReference.parse(item.mediaID), let mediaServerLibrary {
-            startServerSeasonDownload(reference: reference, library: mediaServerLibrary)
-            return
-        }
-        let selections = visibleEpisodes.compactMap {
-            AppleStremioEpisodeSelection(seriesMediaID: pageMetadata.resolvedMediaID ?? item.mediaID, episode: $0)
-        }
-        let byID = selections.reduce(into: [String: AppleStremioEpisodeSelection]()) { $0[$1.mediaID] = $1 }
-        let baseID = recordID
-        seasonDownloads.start(episodeIDs: selections.map(\.mediaID)) { id in
-            guard let selection = byID[id] else { return }
-            let selectedItem = item.withMediaID(id)
-            try await downloadCoordinator.downloadAndWait(
-                request: .init(mediaID: "\(baseID):\(id)", itemTitle: "\(item.name) · \(selection.displayTitle)",
-                    subtitle: selection.displayTitle, artworkURL: item.posterURL,
-                    destinationLabel: "oStream Offline Storage"),
-                resolvePlans: {
-                    return try await playbackResolver.resolveDownloadPlans(sources: playbackSources,
-                        preferredSourceID: source.id, item: selectedItem)
-                },
-                revokeCapabilities: { capabilities in
-                    for capability in capabilities {
-                        await AppleProtectedHTTPPlaybackServer.shared.revoke(playbackURL: capability)
-                    }
-                }
-            )
-        }
+        guard let reference = AppleMediaServerItemReference.parse(item.mediaID), let mediaServerLibrary else { return }
+        startServerSeasonDownload(reference: reference, library: mediaServerLibrary)
     }
 
     private var offlineTitle: String {
@@ -7421,7 +6351,7 @@ struct AppleCatalogItemDetailView: View {
         return title.isEmpty ? episodeNumber(episode) : "\(episodeNumber(episode)) · \(title)"
     }
 
-    private func applyEpisodes(_ fetched: [AppleStremioEpisode]) {
+    private func applyEpisodes(_ fetched: [AppleMediaEpisode]) {
         let mediaID = pageMetadata.resolvedMediaID ?? item.mediaID
         episodeList.episodes = localGroup.map { AppleLocalLibraryStore.episodes(group: $0,
             mediaID: mediaID, enriched: fetched) } ?? fetched
@@ -7429,7 +6359,7 @@ struct AppleCatalogItemDetailView: View {
         episodeList.selectedSeason = savedEpisode(in: episodeList.episodes)?.season
             ?? library.resumeEpisode(for: item, group: localGroup, episodes: episodeList.episodes)?.season
             ?? upNextEpisode(in: episodeList.episodes)?.season
-            ?? AppleStremioEpisodePolicy.initialSeason(in: episodeList.episodes)
+            ?? AppleMediaEpisodePolicy.initialSeason(in: episodeList.episodes)
         // Play needs an episode: fall back to the first episode of the
         // first season so the button works the moment the list arrives.
         episodeList.selectedEpisodeID = nextUnwatchedEpisodeID(in: episodeList.selectedSeason, from: episodeList.episodes)
@@ -7454,7 +6384,7 @@ struct AppleCatalogItemDetailView: View {
             guard !Task.isCancelled, preparationGeneration == generation else { return }
             episodeList.selectedSeason = savedEpisode(in: episodeList.episodes)?.season
                 ?? upNextEpisode(in: episodeList.episodes)?.season
-                ?? AppleStremioEpisodePolicy.initialSeason(in: episodeList.episodes)
+                ?? AppleMediaEpisodePolicy.initialSeason(in: episodeList.episodes)
             episodeList.selectedEpisodeID = nextUnwatchedEpisodeID(in: episodeList.selectedSeason, from: episodeList.episodes)
                 ?? ApplePlayGatingPolicy.defaultEpisodeID(episodes: episodeList.episodes)
             pageMetadata.isPreparing = false
@@ -7499,15 +6429,14 @@ struct AppleCatalogItemDetailView: View {
     }
 
     /// Resolve the item to its IMDB id, then (for series) load episodeList.episodes keyed
-    /// by that id so both metadata and streams resolve against a stream-add-on
-    /// friendly identifier.
+    /// by that id so both metadata and streams resolve against one canonical
+    /// identifier.
     private func prepare() async {
         let generation = UUID()
         preparationGeneration = generation
         pageMetadata.details = nil
         pageMetadata.detailsAnswered = false
         pageMetadata.detailsSettled = false
-        pageMetadata.previewAssets = nil
         pageMetadata.fallbackArtwork = nil
         episodeList.episodes = []
         episodeList.loadFinished = false
@@ -7538,7 +6467,7 @@ struct AppleCatalogItemDetailView: View {
                 guard !Task.isCancelled, preparationGeneration == generation else { return }
                 self.offlineState.downloadedEpisodeIDs = []
                 self.episodeList.selectedSeason = upNextEpisode(in: self.episodeList.episodes)?.season
-                    ?? AppleStremioEpisodePolicy.initialSeason(in: self.episodeList.episodes)
+                    ?? AppleMediaEpisodePolicy.initialSeason(in: self.episodeList.episodes)
                 self.episodeList.selectedEpisodeID = nextUnwatchedEpisodeID(in: self.episodeList.selectedSeason, from: self.episodeList.episodes)
                     ?? ApplePlayGatingPolicy.defaultEpisodeID(episodes: self.episodeList.episodes)
                 self.pageMetadata.isPreparing = false
@@ -7561,116 +6490,42 @@ struct AppleCatalogItemDetailView: View {
         }
 
         let isSeries = item.type == "series"
-        // An item that already carries a canonical `tt…` id needs no meta
-        // add-on round trip, so Play is usable before anything is awaited.
-        let canonicalID = ApplePlayGatingPolicy.canonicalMediaID(item.mediaID)
-        if let canonicalID {
-            pageMetadata.resolvedMediaID = canonicalID
-            pageMetadata.isPreparing = false
-        } else {
-            pageMetadata.isPreparing = true
-        }
-        if isSeries { episodeList.isLoading = true }
+        // The item's own canonical `tt…` id, else its catalog id, is the id
+        // every lookup uses, so Play is usable before anything is awaited. A
+        // series takes its episodes from the local files; the enriched
+        // details are drawn the moment they arrive.
+        let mediaID = ApplePlayGatingPolicy.canonicalMediaID(item.mediaID) ?? item.mediaID
+        pageMetadata.resolvedMediaID = mediaID
+        pageMetadata.isPreparing = false
         rating = ratingStore.rating(for: item.mediaID)
+        if isSeries { applyEpisodes([]) }
 
-        // Preview art, the canonical id, the episode list and the enriched
-        // details all load at once, and each is drawn the moment it arrives.
-        // The details used to be requested only after the episodeList.episodes and the
-        // preview art had both come back, so one slow add-on held the
-        // overview back too.
-        let client = metadataClient
-        let resolver = metadataResolver
-        let sources = playbackSources
-        let preferredSourceID = source.id
-        let type = item.type
-        let catalogID = item.mediaID
-        let itemName = item.name
-        let configuration = metadataConfiguration
-        // The episodeList.episodes and details requests go out before this task gets
-        // the main actor back: the page is still being built then, and
-        // waiting for it cost ~0.4-0.8 s on the Apple TV.
         let publishDetails: @MainActor @Sendable (AppleTMDBDetails) -> Void = { details in
             guard !Task.isCancelled, preparationGeneration == generation else { return }
             pageMetadata.details = details
             pageMetadata.detailsAnswered = true
             markMetadataArrived()
         }
-        func addLookups(to group: inout TaskGroup<AppleDetailPrepareOutcome>, mediaID: String) {
-            if isSeries {
-                group.addTask {
-                    do {
-                        return .episodes(try await client.episodes(
-                            sources: sources,
-                            preferredSourceID: preferredSourceID,
-                            mediaID: mediaID
-                        ))
-                    } catch is CancellationError {
-                        return .episodes(nil)
-                    } catch {
-                        return .episodes([])
-                    }
-                }
-            }
-            group.addTask {
-                #if DEBUG
-                // `-OpenStreamDebugDetailsDelay <s>`: the enriched details (and
-                // their trailers) land that late, as on a slow phone network.
-                let delay = UserDefaults.standard.double(forKey: "OpenStreamDebugDetailsDelay")
-                if delay > 0 { try? await Task.sleep(for: .seconds(delay)) }
-                #endif
-                let details = try? await resolver.resolve(
-                    sources: sources,
-                    preferredSourceID: preferredSourceID,
-                    type: type,
-                    mediaID: mediaID,
-                    configuration: configuration,
-                    fallbackName: itemName,
-                    onUpdate: { details in await publishDetails(details) }
-                )
-                return .details(details)
-            }
-        }
-        await withTaskGroup(of: AppleDetailPrepareOutcome.self) { group in
-            if let canonicalID {
-                addLookups(to: &group, mediaID: canonicalID)
-            } else {
-                group.addTask {
-                    .identity(await client.imdbIdentifier(
-                        sources: sources,
-                        preferredSourceID: preferredSourceID,
-                        type: type,
-                        id: catalogID
-                    ))
-                }
-            }
-            while let outcome = await group.next() {
-                guard !Task.isCancelled, preparationGeneration == generation else {
-                    group.cancelAll()
-                    break
-                }
-                switch outcome {
-                case .identity(let resolved):
-                    // Play and Download depend on the canonical id (and, for a
-                    // series, an episode), not on optional preview art or TMDB
-                    // enrichment. Make the actions usable as soon as that
-                    // identity is ready.
-                    let mediaID = resolved ?? catalogID
-                    pageMetadata.resolvedMediaID = mediaID
-                    pageMetadata.isPreparing = false
-                    addLookups(to: &group, mediaID: mediaID)
-                case .episodes(let fetched):
-                    guard let fetched else { continue }
-                    applyEpisodes(fetched)
-                case .details(let details):
-                    pageMetadata.detailsAnswered = true
-                    pageMetadata.detailsSettled = true
-                    pageMetadata.details = details
-                    if details != nil { markMetadataArrived() }
-                }
-            }
-        }
-        if isSeries, preparationGeneration == generation { episodeList.isLoading = false }
+        #if DEBUG
+        // `-OpenStreamDebugDetailsDelay <s>`: the enriched details (and
+        // their trailers) land that late, as on a slow phone network.
+        let delay = UserDefaults.standard.double(forKey: "OpenStreamDebugDetailsDelay")
+        if delay > 0 { try? await Task.sleep(for: .seconds(delay)) }
+        #endif
+        let details = try? await metadataResolver.resolve(
+            sources: playbackSources,
+            preferredSourceID: source.id,
+            type: item.type,
+            mediaID: mediaID,
+            configuration: metadataConfiguration,
+            fallbackName: item.name,
+            onUpdate: { details in await publishDetails(details) }
+        )
         guard !Task.isCancelled, preparationGeneration == generation else { return }
+        pageMetadata.detailsAnswered = true
+        pageMetadata.detailsSettled = true
+        pageMetadata.details = details
+        if details != nil { markMetadataArrived() }
     }
 
     /// Where else this title can be watched, filtered to the services the
@@ -7762,37 +6617,37 @@ struct AppleCatalogItemDetailView: View {
 
     /// The episode the show's saved position names — what Continue Watching
     /// and the home hero's Resume button promise — when it is in `loaded`.
-    private func savedEpisode(in loaded: [AppleStremioEpisode]) -> AppleStremioEpisode? {
-        AppleStremioEpisodePolicy.savedEpisode(progress: playbackStore.progress(for: progressRecordID), in: loaded)
+    private func savedEpisode(in loaded: [AppleMediaEpisode]) -> AppleMediaEpisode? {
+        AppleMediaEpisodePolicy.savedEpisode(progress: playbackStore.progress(for: progressRecordID), in: loaded)
     }
 
     private func nextUnwatchedEpisodeID(
         in season: Int?,
-        from loadedEpisodes: [AppleStremioEpisode]
+        from loadedEpisodes: [AppleMediaEpisode]
     ) -> String? {
         if let saved = savedEpisode(in: loadedEpisodes.filter { $0.season == season }) { return saved.id }
         if let resumed = library.resumeEpisode(for: item, group: localGroup,
             episodes: loadedEpisodes.filter { $0.season == season }) { return resumed.id }
         let completed = AppleLocalLibraryStore.completedEpisodeIDs(loadedEpisodes, group: localGroup,
             mediaID: pageMetadata.resolvedMediaID ?? item.mediaID, store: playbackStore)
-        return AppleStremioEpisodePolicy.defaultEpisode(in: season, from: loadedEpisodes,
+        return AppleMediaEpisodePolicy.defaultEpisode(in: season, from: loadedEpisodes,
             completedIDs: completed)?.id
             ?? AppleLocalLibraryStore.nextFilenameEpisode(in: loadedEpisodes, completedIDs: completed)?.id
     }
 
     /// The Apple TV app's Up Next across the whole show — the season the page
     /// opens on when nothing is part-watched.
-    private func upNextEpisode(in loaded: [AppleStremioEpisode]) -> AppleStremioEpisode? {
+    private func upNextEpisode(in loaded: [AppleMediaEpisode]) -> AppleMediaEpisode? {
         let completed = AppleLocalLibraryStore.completedEpisodeIDs(loaded, group: localGroup,
             mediaID: pageMetadata.resolvedMediaID ?? item.mediaID, store: playbackStore)
-        return AppleStremioEpisodePolicy.upNext(from: loaded, completedIDs: completed)
+        return AppleMediaEpisodePolicy.upNext(from: loaded, completedIDs: completed)
             ?? AppleLocalLibraryStore.nextFilenameEpisode(in: loaded, completedIDs: completed)
     }
 
     /// Mark as Watched / Mark as Unwatched on an episode (the Apple TV app's
     /// episode menu). Marking the episode Continue Watching names as watched
     /// also takes it off Continue Watching. Play then moves to the new Up Next.
-    private func setWatched(_ watched: Bool, episode: AppleStremioEpisode) {
+    private func setWatched(_ watched: Bool, episode: AppleMediaEpisode) {
         if watched {
             playbackStore.markWatched(mediaID: episode.id)
             if playbackStore.progress(for: progressRecordID)?.partID == episode.id {
@@ -7805,7 +6660,7 @@ struct AppleCatalogItemDetailView: View {
     }
 
     @ViewBuilder
-    private func watchedMenuButton(_ episode: AppleStremioEpisode, isWatched: Bool) -> some View {
+    private func watchedMenuButton(_ episode: AppleMediaEpisode, isWatched: Bool) -> some View {
         if isWatched {
             Button("Mark as Unwatched", systemImage: "minus.circle") { setWatched(false, episode: episode) }
                 .accessibilityIdentifier("detail.episode.markUnwatched")
@@ -9026,7 +7881,6 @@ private struct AppleTitlePagePrompts {
     /// running download with no download behind it (N73).
     var optionsPreview = false
     #endif
-    var streamPicker = false
     /// Apple TV's "Watch on…" page of services.
     var watchOnMenu = false
     /// "Open <Service> and search for <Title>" when nothing could be opened.
@@ -9047,15 +7901,8 @@ private struct AppleTitlePagePlaybackState {
     /// When Retry was pressed, so a failure that comes straight back still
     /// shows the loading state first (`ApplePlaybackFailureRecovery`).
     var retryStartedAt: ContinuousClock.Instant?
-    var presentation: AppleStremioPlayerPresentation?
-    var streamChoices: [AppleStremioHTTPPlaybackCandidate] = []
-    /// A resolution picked in the Quality sheet for the next Play; nil is Automatic.
-    var selectedQuality: AppleStreamQualityTier?
+    var presentation: AppleMediaPlayerPresentation?
     var selectedLocalFile: AppleLibraryItem?
-    var pickingStreams = false
-    /// The service the previous episode played from, preferred for the next
-    /// one (`AppleStremioCandidateRanking.playbackOrder`). Used once.
-    var preferredServiceKey: String?
     /// The previous episode's audio and subtitle choices. Used once.
     var trackCarryOver: AppleTrackCarryOver?
     /// Every stream of the last press failed before anything played, on the
@@ -9065,8 +7912,6 @@ private struct AppleTitlePagePlaybackState {
     /// The Native player's OpenStream fallback: the engine for the next press
     /// only. Used once.
     var engineOverride: ApplePlaybackEngineKind?
-    /// The streams the Native player tried before that fallback; they go last.
-    var fallbackTriedSources: Set<URL> = []
     /// "Start from Beginning": the next press plays from the top. Used once.
     var startsFromBeginning = false
     /// The press under way started from the top, so its OpenStream fallback
@@ -9087,11 +7932,9 @@ private struct AppleTitlePageMetadataState {
     /// Every provider answered: the resolver's final value is in.
     var detailsSettled = false
     var fallbackArtwork: AppleArtworkResolver.Artwork?
-    var previewAssets: AppleStremioPreviewAssets?
     var isPreparing = true
-    // The item's canonical IMDB id, resolved via a meta add-on. Catalog add-ons
-    // (RT, Streaming Catalogs) key items by non-IMDB ids that stream add-ons
-    // can't resolve; this is the id actually used for episode + stream lookups.
+    // The item's canonical IMDB id: the id actually used for episode and
+    // stream lookups.
     var resolvedMediaID: String?
     /// Services the viewer subscribes to that also carry this title. Empty
     /// unless they have opted in — see `AppleWatchProviderPolicy`.
@@ -9105,7 +7948,7 @@ private struct AppleTitlePageMetadataState {
 }
 
 private struct AppleTitlePageEpisodeState {
-    var episodes: [AppleStremioEpisode] = []
+    var episodes: [AppleMediaEpisode] = []
     var selectedSeason: Int?
     var selectedEpisodeID: String?
     var isLoading = false
@@ -9612,7 +8455,7 @@ struct AppleFormatBadge: View {
 }
 
 struct AppleMediaPlayerPresentationModifier: ViewModifier {
-    @Binding var presentation: AppleStremioPlayerPresentation?
+    @Binding var presentation: AppleMediaPlayerPresentation?
 
     func body(content: Content) -> some View {
         #if os(visionOS)
@@ -9628,7 +8471,7 @@ struct AppleMediaPlayerPresentationModifier: ViewModifier {
         content.modifier(AppleMacPlayerStagePresenter(presentation: $presentation))
         #else
         content.fullScreenCover(item: $presentation) {
-            AppleStremioPlayerView(presentation: $0)
+            AppleMediaPlayerView(presentation: $0)
                 #if os(tvOS)
                 // A player opened from a settings page (a share, a pasted
                 // URL) inherited the form's white tint, and its "Playback
@@ -9665,16 +8508,6 @@ extension AppleMediaServerLibraryStore {
         }
         return merged
     }
-}
-
-/// What each of a title page's opening requests came back with, so they can
-/// run side by side and be applied in whatever order they finish.
-private enum AppleDetailPrepareOutcome: Sendable {
-    /// The canonical id, or nil when no add-on could map the catalog id.
-    case identity(String?)
-    /// A series' episodes; nil when the request was cancelled.
-    case episodes([AppleStremioEpisode]?)
-    case details(AppleTMDBDetails?)
 }
 
 // MARK: - iPhone title page
@@ -9902,34 +8735,22 @@ extension AppleCatalogItemDetailView {
             contentRating: pageMetadata.details?.contentRating ?? item.contentRating)
     }
 
-    private var selectedEpisode: AppleStremioEpisode? {
+    private var selectedEpisode: AppleMediaEpisode? {
         guard let selectedEpisodeID = episodeList.selectedEpisodeID else { return nil }
         return episodeList.episodes.first { $0.id == selectedEpisodeID }
     }
 
-    /// The selected episode's runtime (or the title's), in seconds, so a
-    /// provider's error clip can be told from the title at playback.
-    private var expectedRuntime: Double? {
-        let minutes = item.type == "series"
-            ? selectedEpisode?.runtimeMinutes ?? pageMetadata.details?.runtimeMinutes
-            : pageMetadata.details?.runtimeMinutes
-        return minutes.map { Double($0) * 60 }
-    }
-
     /// Whether anything on this page can start: a media-server or library
-    /// title, files on a share matched to this title, a finished download, or
-    /// an enabled add-on that serves streams — and, for a series, an episode
-    /// list to play from.
+    /// title, files on a share matched to this title, or a finished download —
+    /// and, for a series, an episode list to play from.
     private var hasPlaybackRoute: Bool {
         if let reference = AppleXtreamReference.parse(item.mediaID) {
             return AppleXtreamLibraryStore.shared.source(reference)?.isEnabled == true
                 && (item.type != "series" || !episodeList.episodes.isEmpty)
         }
         return AppleTitlePagePolicy.hasPlaybackRoute(
-            item: item, sources: playbackSources,
-            hasLocalGroup: hasMatchingLocalGroup,
-            hasCompletedDownload: downloadCoordinator.state.isCompleted,
-            episodesUnavailable: episodeListPresentation == .unavailable
+            item: item, hasLocalGroup: hasMatchingLocalGroup,
+            hasCompletedDownload: downloadCoordinator.state.isCompleted
         )
     }
 
@@ -10073,9 +8894,6 @@ extension AppleCatalogItemDetailView {
         if offersStartFromBeginning {
             Button("Start from Beginning", systemImage: "arrow.counterclockwise", action: startFromBeginning)
                 .accessibilityIdentifier("detail.startOver")
-        }
-        Button("Quality", systemImage: "slider.horizontal.3") {
-            Task { await chooseStreams() }
         }
     }
 
@@ -10383,7 +9201,7 @@ extension AppleCatalogItemDetailView {
         }
     }
 
-    private static func progressFraction(_ saved: ApplePlaybackProgress?, for episode: AppleStremioEpisode) -> Double? {
+    private static func progressFraction(_ saved: ApplePlaybackProgress?, for episode: AppleMediaEpisode) -> Double? {
         guard let saved, saved.partID == episode.id, saved.resumePosition != nil, saved.duration > 0 else { return nil }
         return saved.position / saved.duration
     }
@@ -11105,28 +9923,4 @@ extension AppleCatalogItemDetailView {
 }
 #endif
 
-#if DEBUG
-/// Review builds only: `-OpenStreamDebugStreamFixture YES` gives each title
-/// page a stream add-on on 127.0.0.1:8765, so a simulator with only metadata
-/// sources can photograph a playable page (Play naming its episode). It lives
-/// in the page's own source list — never in the source store, a backup or
-/// iCloud.
-enum AppleTitlePageStreamFixture {
-    /// `-OpenStreamDebugOpenQuality YES` (with the fixture): the page opens
-    /// its Quality sheet once loaded, over the fixture's streams alone — no
-    /// saved add-on is asked for streams and nothing plays (N38 proof).
-    static var opensQuality: Bool {
-        UserDefaults.standard.bool(forKey: "OpenStreamDebugStreamFixture")
-            && UserDefaults.standard.bool(forKey: "OpenStreamDebugOpenQuality")
-    }
 
-    static var sources: [AppleSource] {
-        guard UserDefaults.standard.bool(forKey: "OpenStreamDebugStreamFixture"),
-              let url = URL(string: "http://127.0.0.1:8765/manifest.json") else { return [] }
-        return [AppleSource(id: UUID(uuidString: "5E1F1C1E-0000-4000-8000-000000000019") ?? UUID(),
-                            kind: .stremio, name: "Fixture Streams", url: url, resources: ["stream"])]
-    }
-}
-#endif
-
-typealias AppleStremioPlayerPresentationModifier = AppleMediaPlayerPresentationModifier

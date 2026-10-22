@@ -32,16 +32,14 @@ struct AppleTitlePageEntryTests {
                 == URL(string: backdrop))
     }
 
-    @Test func aLogoPosterFallsBackToAResolvedThenCinemetaBackdrop() throws {
+    @Test func aLogoPosterFallsBackToAResolvedBackdrop() {
         let resolved = AppleArtworkResolver.Artwork(posterURL: nil,
                                                     backgroundURL: URL(string: "https://fixture.example/resolved.jpg"))
         let noArt = item("fixture:2", poster: "https://fixture.example/logo.png")
         #expect(AppleCatalogArtworkPolicy.plateBackdrop(item: noArt, fallback: resolved, showing: noArt.posterURL)
                 == resolved.backgroundURL)
         let imdb = item("tt0098844", poster: "https://fixture.example/logo.png")
-        let cinemeta = try #require(AppleCatalogArtworkPolicy.plateBackdrop(item: imdb, showing: imdb.posterURL))
-        #expect(cinemeta.absoluteString.contains("/background/"))
-        #expect(cinemeta.absoluteString.contains("tt0098844"))
+        #expect(AppleCatalogArtworkPolicy.plateBackdrop(item: imdb, showing: imdb.posterURL) == nil)
     }
 
     @Test func theBackdropIsNeverTheImageAlreadyShown() {

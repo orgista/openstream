@@ -30,11 +30,7 @@ public enum AppleSharedLinkError: Error, Equatable, LocalizedError {
         case .netflixUnreadable: "Couldn't read that Netflix link"
         case .unreadable: "Couldn't read that link"
         case .unsupportedYouTube:
-            #if OPENSTREAM_ADDONS
-            "YouTube links need the YouTube add-on"
-            #else
             "YouTube links aren't supported."
-            #endif
         }
     }
 }

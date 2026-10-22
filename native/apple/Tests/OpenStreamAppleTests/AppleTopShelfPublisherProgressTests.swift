@@ -18,9 +18,9 @@ struct AppleTopShelfPublisherProgressTests {
         let store = ApplePlaybackStore(defaults: defaults)
         let publisher = AppleTopShelfPublisher(writer: .init(containerProvider: { root }))
         let url = AppleTopShelfSnapshotWriter.snapshotURL(in: root)
-        await publisher.publish(records: [], sections: [], sources: [], enabled: true, playbackStore: store)
+        await publisher.publish(records: [], sources: [], enabled: true, playbackStore: store)
         try FileManager.default.removeItem(at: url)
-        await publisher.publish(records: [], sections: [], sources: [], enabled: true, playbackStore: store)
+        await publisher.publish(records: [], sources: [], enabled: true, playbackStore: store)
         #expect(FileManager.default.fileExists(atPath: url.path))
     }
 
@@ -67,10 +67,10 @@ struct AppleTopShelfPublisherProgressTests {
         let reader = AppleTopShelfSnapshotReader(containerProvider: { root })
 
         // The missing directory makes the real writer fail; no mock bypasses its I/O.
-        await publisher.publish(records: [], sections: [], sources: [], enabled: true, playbackStore: store)
+        await publisher.publish(records: [], sources: [], enabled: true, playbackStore: store)
         #expect(reader.read() == nil)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        await publisher.publish(records: [], sections: [], sources: [], enabled: true, playbackStore: store)
+        await publisher.publish(records: [], sources: [], enabled: true, playbackStore: store)
         #expect(try #require(reader.read()).version == 1)
     }
 
@@ -88,10 +88,10 @@ struct AppleTopShelfPublisherProgressTests {
         let publisher = AppleTopShelfPublisher(writer: writer)
         let reader = AppleTopShelfSnapshotReader(containerProvider: { root })
 
-        await publisher.publish(records: [], sections: [], sources: [], enabled: true, playbackStore: store)
+        await publisher.publish(records: [], sources: [], enabled: true, playbackStore: store)
         #expect(reader.read() == nil)
         available.withLock { $0 = true }
-        await publisher.publish(records: [], sections: [], sources: [], enabled: true, playbackStore: store)
+        await publisher.publish(records: [], sources: [], enabled: true, playbackStore: store)
         #expect(try #require(reader.read()).version == 1)
     }
 
@@ -107,18 +107,16 @@ struct AppleTopShelfPublisherProgressTests {
             .appending(path: "openstream-topshelf-readable-\(UUID().uuidString)", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        let source = AppleSource(kind: .stremio, name: "Fixture",
-                                 url: URL(string: "https://fixture.example/manifest.json")!)
         let item = AppleCatalogItem(mediaID: "tt0000001", type: "movie", name: "Fixture Movie")
-        let section = AppleCatalogSection(source: source, catalog: AppleStremioCatalog(type: "movie", id: "top"),
-                                          items: [item])
+        var record = AppleMediaIngestion.catalogRecord(instanceID: UUID(), item: item)
+        record.progress = 0.3
         let writer = AppleTopShelfSnapshotWriter(containerProvider: { root })
         let reader = AppleTopShelfSnapshotReader(containerProvider: { root })
 
-        try await writer.write(records: [], sections: [section], enabled: true)
+        try await writer.write(records: [record], enabled: true)
         let snapshot = try #require(reader.read())
-        #expect(snapshot.topPicks.map(\.title) == ["Fixture Movie"])
-        #expect(AppleTopShelfContentBuilder.sections(for: snapshot).map(\.title) == ["Top Picks"])
+        #expect(snapshot.continueWatching.map(\.title) == ["Fixture Movie"])
+        #expect(AppleTopShelfContentBuilder.sections(for: snapshot).map(\.title) == ["Continue Watching"])
         try await writer.write(records: [], enabled: false)
         #expect(reader.read() == nil)
         // Already absent is a successful privacy opt-out too.
@@ -134,24 +132,23 @@ struct AppleTopShelfPublisherProgressTests {
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
 
-        let source = AppleSource(kind: .stremio, name: "Cinemeta",
-                                 url: URL(string: "https://fixture.example/manifest.json")!)
-        let item = AppleCatalogItem(mediaID: "tt0000001", type: "series", name: "Series")
-        let sections = [AppleCatalogSection(source: source, catalog: AppleStremioCatalog(type: "series", id: "top"),
-                                            items: [item])]
-        var record = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item)
-        record.progress = 0.2
+        let source = AppleSource(kind: .mediaServer, name: "Fixture Server",
+                                 url: URL(string: "https://fixture.example/server")!)
+        let record = AppleMediaRecord(
+            canonicalID: "tt0000001", kind: .series, title: "Series",
+            availability: [.init(instanceID: source.id, capability: .direct, itemReference: "series|fixture")],
+            progress: 0.2)
         let store = ApplePlaybackStore(defaults: defaults)
         let publisher = AppleTopShelfPublisher(writer: AppleTopShelfSnapshotWriter(containerProvider: { root }))
         let reader = AppleTopShelfSnapshotReader(containerProvider: { root })
 
         store.save(mediaID: record.id, position: 600, duration: 3000, partID: "tt0000001:1:1")
-        await publisher.publish(records: [record], sections: sections, sources: [source], enabled: true, playbackStore: store)
+        await publisher.publish(records: [record], sources: [source], enabled: true, playbackStore: store)
         let first = try #require(reader.read()?.continueWatching.first?.progress)
         #expect(abs(first - 0.2) < 0.001)
 
         store.save(mediaID: record.id, position: 1500, duration: 3000, partID: "tt0000001:1:1")
-        await publisher.publish(records: [record], sections: sections, sources: [source], enabled: true, playbackStore: store)
+        await publisher.publish(records: [record], sources: [source], enabled: true, playbackStore: store)
         let second = try #require(reader.read()?.continueWatching.first?.progress)
         #expect(abs(second - 0.5) < 0.001)
     }

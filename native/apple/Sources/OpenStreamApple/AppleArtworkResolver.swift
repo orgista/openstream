@@ -95,7 +95,7 @@ public actor AppleArtworkResolver {
         }
         let id = mediaID.trimmingCharacters(in: .whitespacesAndNewlines)
         let imdbID = String(id.split(separator: ":").first ?? "")
-        guard AppleStremioMetadataClient.isIMDBIdentifier(imdbID) else { return nil }
+        guard AppleMediaIdentifier.isIMDBIdentifier(imdbID) else { return nil }
         let normalizedType = type.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let series = ["series", "episode"].contains(normalizedType)
         let size = pixelWidth.map { purpose.size(pixelWidth: $0) }

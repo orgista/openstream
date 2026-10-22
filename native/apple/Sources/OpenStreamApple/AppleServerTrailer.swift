@@ -83,10 +83,10 @@ public struct AppleServerTrailerQuery: Hashable, Sendable {
         self.tmdbID = tmdbID
     }
 
-    /// A catalog title's ids: IMDb from a Stremio id (`tt…`, an episode's
+    /// A catalog title's ids: IMDb from a `tt…` id (an episode's
     /// series), TMDB from a `tmdb:` id.
     public init(item: AppleCatalogItem) {
-        let imdb = AppleStremioMetadataClient.canonicalMediaID(item.mediaID)?
+        let imdb = AppleMediaIdentifier.canonicalMediaID(item.mediaID)?
             .split(separator: ":").first.map(String.init)
         let parts = item.mediaID.split(separator: ":")
         let tmdb = parts.count >= 2 && parts[0] == "tmdb" && parts[1].allSatisfy(\.isNumber) ? String(parts[1]) : nil

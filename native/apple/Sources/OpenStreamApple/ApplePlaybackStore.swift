@@ -253,17 +253,17 @@ public final class ApplePlaybackStore {
         return activity
     }
 
-    func availableEpisodes() async -> [String: [AppleStremioEpisode]] {
+    func availableEpisodes() async -> [String: [AppleMediaEpisode]] {
         await Self.decodeEpisodes(blobs.data(forKey: episodesKey))
     }
 
-    @concurrent nonisolated private static func decodeEpisodes(_ data: Data?) async -> [String: [AppleStremioEpisode]] {
-        data.flatMap { try? JSONDecoder().decode([String: [AppleStremioEpisode]].self, from: $0) } ?? [:]
+    @concurrent nonisolated private static func decodeEpisodes(_ data: Data?) async -> [String: [AppleMediaEpisode]] {
+        data.flatMap { try? JSONDecoder().decode([String: [AppleMediaEpisode]].self, from: $0) } ?? [:]
     }
 
-    @concurrent nonisolated private static func updatedEpisodes(_ data: Data?, episodes: [AppleStremioEpisode], key: String, activity: [String: ApplePlaybackProgress]) async -> Data? {
+    @concurrent nonisolated private static func updatedEpisodes(_ data: Data?, episodes: [AppleMediaEpisode], key: String, activity: [String: ApplePlaybackProgress]) async -> Data? {
         var values = await decodeEpisodes(data)
-        values[key] = episodes.map { AppleStremioEpisode(id: $0.id, title: "", season: $0.season,
+        values[key] = episodes.map { AppleMediaEpisode(id: $0.id, title: "", season: $0.season,
             episode: $0.episode, releaseInfo: $0.releaseInfo.map { String($0.prefix(64)) }) }
         // Availability is rebuildable metadata, not playback history. Keep the
         // current title plus the 199 most recently active shows. Preserve full ISO
@@ -278,7 +278,7 @@ public final class ApplePlaybackStore {
         return try? JSONEncoder().encode(values)
     }
 
-    func recordEpisodes(_ episodes: [AppleStremioEpisode], mediaID: String) async {
+    func recordEpisodes(_ episodes: [AppleMediaEpisode], mediaID: String) async {
         guard let key = ApplePlaybackIdentity.storageKey(for: mediaID) else { return }
         // Retry if another title arrived while encoding off the main actor.
         while !Task.isCancelled {
@@ -498,7 +498,7 @@ public final class ApplePlaybackStore {
     }
 
     public func save(request: ApplePlaybackRequest, position: Double, duration: Double) {
-        let partID = request.hints.progressPartID ?? AppleDetailResume.partID(type: request.hints.addonMediaType, mediaID: request.hints.addonMediaID)
+        let partID = request.hints.progressPartID ?? AppleDetailResume.partID(type: request.hints.titleMediaType, mediaID: request.hints.titleMediaID)
         if let version = request.hints.versionID {
             saveVersion(itemID: request.mediaID, versionID: version,
                 position: request.hints.versionOffset + position,
@@ -1057,7 +1057,7 @@ enum AppleWatchedHistoryFixture {
 
     static func isSeeded(mediaID: String, storageKey: String) -> Bool {
         guard isEnabled, !unwatched.contains(storageKey),
-              let identity = AppleStremioMetadataClient.episodeIdentity(mediaID) else { return false }
+              let identity = AppleMediaIdentifier.episodeIdentity(mediaID) else { return false }
         return seeds.contains("\(identity.season):\(identity.episode)")
     }
 }

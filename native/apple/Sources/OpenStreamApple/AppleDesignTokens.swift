@@ -150,8 +150,8 @@ public struct AppleSettingsContentModifier: ViewModifier {
         #elseif os(tvOS)
         // 560 pt is a phone column. Centred on a 1920 pt television it left the
         // page title stranded at the safe inset while the rows floated in the
-        // middle, and it wrapped ordinary values mid-word ("opensubtitles-
-        // v3.strem.io", "Sep 13, 2026 at 10:49 PM"). The form column is the one
+        // middle, and it wrapped ordinary values mid-word (a long host name,
+        // "Sep 13, 2026 at 10:49 PM"). The form column is the one
         // the tvOS settings metrics already define, left-aligned under the
         // title like the Add Live TV form (owner review 2026-09-14).
         content

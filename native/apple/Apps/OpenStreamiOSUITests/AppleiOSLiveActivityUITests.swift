@@ -68,10 +68,10 @@ final class AppleiOSLiveActivityUITests: OpenStreamUITestCase {
         let started = busy.exists
         let failure = status.exists ? status.label : nil
         print("LIVEACTIVITY download started=\(started) failure=\(failure ?? "-") label=\(started ? busy.label : "-")")
-        // A simulator whose only add-on is a metadata catalog has nothing to
-        // download from; the app says so, and that is not this test's failure.
+        // A simulator with no downloadable source has nothing to download
+        // from; the app says so, and that is not this test's failure.
         if !started, failure?.hasPrefix("No downloadable source") == true {
-            throw XCTSkip("No stream add-on on this simulator, so there is nothing to download: \(failure ?? "")")
+            throw XCTSkip("No downloadable source on this simulator: \(failure ?? "")")
         }
         XCTAssertTrue(started, "tapping ↓ never put the row into a downloading state\(failure.map { " — it failed: \($0)" } ?? "")")
 

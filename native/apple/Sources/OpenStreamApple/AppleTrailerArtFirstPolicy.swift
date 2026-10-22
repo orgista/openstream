@@ -18,7 +18,7 @@ public enum AppleTrailerArtFirstPolicy {
 
     /// The trailer the title page's hero shows. Once one has started it is
     /// held by its key, not by its place in the list: the list is the
-    /// enriched details' trailers followed by the add-on's, and it changes
+    /// enriched details' trailers followed by the source's, and it changes
     /// under a playing trailer as the details land (a few to dozens of keys,
     /// prepended) or are cleared for a reload. Held by index, the key at that
     /// place changed and the playing trailer was torn down for another one

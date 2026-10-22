@@ -81,7 +81,7 @@ import Testing
     }
 
     /// On the sim the "£" came from the MKV's own text track, decoded by the
-    /// engine, not from an add-on file: its cues get the same repair.
+    /// engine, not from a sidecar file: its cues get the same repair.
     @MainActor
     @Test func embeddedTextCuesGetTheMusicNoteToo() {
         #expect(AetherPlaybackEngine.mapCueBody(.text("£ BECAUSE I FINALLY\nHEARD THEM SAY £"))

@@ -136,7 +136,7 @@ struct AppleMediaPlayerView: View {
     /// This cover was rebuilt around the player in the Picture in Picture
     /// window: the stream keeps playing, so the first load is skipped.
     @State private var resumesFromPictureInPicture: Bool
-    private let presentation: AppleStremioPlayerPresentation
+    private let presentation: AppleMediaPlayerPresentation
     #endif
 
     private let request: ApplePlaybackRequest
@@ -148,7 +148,7 @@ struct AppleMediaPlayerView: View {
     private let presentationID: UUID
     private let onUnplayable: (@MainActor (ApplePlaybackUnplayable) -> Void)?
 
-    init(presentation: AppleStremioPlayerPresentation) {
+    init(presentation: AppleMediaPlayerPresentation) {
         presentationID = presentation.id
         onUnplayable = presentation.onUnplayable
         nextEpisode = presentation.nextEpisode
@@ -488,12 +488,8 @@ struct AppleMediaPlayerView: View {
             }
             coordinator.nextAutomaticSource = {
                 try await loadOtherSources()
-                // Another service's best source before more of one that is down.
-                let untried = otherSources.filter {
-                    !triedSources.contains($0.id) && !ApplePlaybackFailureHistory.shared.contains($0.id)
-                }
-                for option in coordinator.serviceHealth.healthyFirst(untried, key: \.serviceKey)
-                where !triedSources.contains(option.id) {
+                for option in otherSources
+                where !triedSources.contains(option.id) && !ApplePlaybackFailureHistory.shared.contains(option.id) {
                     triedSources.insert(option.id)
                     do {
                         let next = try await option.prepare(nil)
@@ -738,7 +734,7 @@ struct AppleMediaPlayerView: View {
                 showsOtherSources = true
             }]
         if drawsStockPlayerCues {
-            // One captions control for embedded and add-on tracks. The app's
+            // One captions control for embedded and sidecar tracks. The app's
             // menu drives selection; AVKit draws native embedded tracks and
             // the shared cue layer draws sidecars and Aether cues.
             let entries = stockSubtitles.menuEntries
@@ -788,7 +784,7 @@ struct AppleMediaPlayerView: View {
     }
 
     /// Automatic and one row per resolution this device can play; the
-    /// backend picks the candidate (`AppleStremioCandidateRanking.playbackOrder`).
+    /// backend picks the candidate (`AppleMediaCandidateRanking.playbackOrder`).
     private var otherSourcesSheet: some View {
         NavigationStack {
             List {
@@ -851,7 +847,7 @@ struct AppleMediaPlayerView: View {
     private func startNextEpisodeFromStockRoute(manual: Bool = false) -> Bool {
         let autoPlay = manual
             || UserDefaults.standard.object(forKey: AppleSettingsStore.autoPlayNextEpisodeKey) as? Bool ?? true
-        guard let nextEpisode, !stockRouteHandedOff, !coordinator.isPlaceholderPlayback,
+        guard let nextEpisode, !stockRouteHandedOff,
               AppleNextEpisodePolicy.handsOffAtEnd(hasNext: true, isLive: request.isLive,
                                                    isDismissed: false, isEnabled: nextEpisode.isPartBoundary || autoPlay) else { return false }
         guard nextEpisode.isPartBoundary || manual || coordinator.autoPlayChain.canAdvance() else { return false }
@@ -1005,6 +1001,3 @@ private struct AppleTVStockNextEpisodeAction: View {
 }
 #endif
 
-typealias AppleStremioPlayerPresentation = AppleMediaPlayerPresentation
-
-typealias AppleStremioPlayerView = AppleMediaPlayerView

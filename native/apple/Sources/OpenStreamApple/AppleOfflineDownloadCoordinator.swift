@@ -197,11 +197,6 @@ final class AppleOfflineDownloadCoordinator {
             } catch is CancellationError {
                 guard self.operationID == activeID else { return }
                 self.cancel()
-            } catch AppleStremioPlaybackResolutionError.noStreams {
-                // No add-on offered a stream at all (a metadata-only setup):
-                // say so, rather than the vaguer "could not prepare".
-                guard self.operationID == activeID else { return }
-                await self.fail(.noDownloadSource, operationID: activeID)
             } catch {
                 guard self.operationID == activeID else { return }
                 await self.fail(.preparationFailed, operationID: activeID)

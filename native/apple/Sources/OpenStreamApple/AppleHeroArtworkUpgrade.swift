@@ -3,8 +3,8 @@ import Foundation
 /// Upgrades a hero's art to a textless backdrop *after* the hero is already on
 /// screen.
 ///
-/// A hero's background normally arrives from a Stremio meta add-on, whose
-/// `background` is whatever TMDB ranked first — usually the frame with the
+/// A hero's background normally arrives with the title's metadata, whose
+/// backdrop is whatever TMDB ranked first — usually the frame with the
 /// film's title painted onto it. Only TMDB knows which frames are textless, so
 /// finding out costs a round trip. That round trip is never waited for: the
 /// hero draws the art it already has, and swaps to the textless one if and
@@ -33,7 +33,7 @@ actor AppleHeroArtworkUpgrade {
     }
 
     /// This is our own conclusion, not a provider payload, so it is namespaced
-    /// away from the add-on responses that share the cache directory. The
+    /// away from the metadata responses that share the cache directory. The
     /// version suffix retires every stored answer if the choice rule changes.
     private static let cacheSource = "openstream://hero-artwork"
     private static let cacheType = "portrait-v2"
@@ -56,7 +56,7 @@ actor AppleHeroArtworkUpgrade {
     static func upgradeableIMDBID(for item: AppleCatalogItem) -> String? {
         let root = item.mediaID.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
             .first.map(String.init) ?? ""
-        guard AppleStremioMetadataClient.isIMDBIdentifier(root) else { return nil }
+        guard AppleMediaIdentifier.isIMDBIdentifier(root) else { return nil }
         return root
     }
 

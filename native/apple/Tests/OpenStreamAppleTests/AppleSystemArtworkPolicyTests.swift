@@ -7,8 +7,7 @@ import Testing
 ///
 /// The shelf published Continue Watching tiles with no artwork because the
 /// policy trusted two hosts and the owner's in-progress titles were served by
-/// neither. Top Picks looked fine only because Cinemeta serves metahub, which
-/// is exactly what made it look like the shelf "sometimes" worked.
+/// neither, which is what made it look like the shelf "sometimes" worked.
 @Suite("Artwork allowed on system surfaces")
 struct AppleSystemArtworkPolicyTests {
     private func url(_ value: String) -> URL { URL(string: value)! }
@@ -21,11 +20,9 @@ struct AppleSystemArtworkPolicyTests {
             url("https://api.ratingposterdb.com/t0-free-rpdb/imdb/poster-default/tt13210838.jpg")) != nil)
     }
 
-    @Test func theOriginalTwoHostsStillPass() {
+    @Test func theOriginalTMDBHostStillPasses() {
         #expect(AppleSystemArtworkPolicy.publicURL(
             url("https://image.tmdb.org/t/p/w500/abc.jpg")) != nil)
-        #expect(AppleSystemArtworkPolicy.publicURL(
-            url("https://images.metahub.space/poster/medium/tt1/img")) != nil)
     }
 
     /// Kept from the original policy: a token in a poster URL must not be

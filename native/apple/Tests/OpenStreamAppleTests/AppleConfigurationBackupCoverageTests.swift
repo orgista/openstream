@@ -19,9 +19,6 @@ struct AppleConfigurationBackupCoverageTests {
 
     @Test func sourcesRoundTripNonDefaultFields() throws {
         var original = source(name: "Fixture Channel")
-        original.manifestID = "fixture-manifest"
-        original.version = "1.2.3"
-        original.resources = ["catalog", "stream"]
         original.iptvType = .xtream
         original.discoveredItemCount = 42
         original.capabilities = ["live"]
@@ -32,7 +29,7 @@ struct AppleConfigurationBackupCoverageTests {
         let restored = try roundTrip(snapshot)
         #expect(restored == snapshot)
         let restoredSource = try #require(restored.sources.first)
-        #expect(restoredSource.manifestID == "fixture-manifest")
+        #expect(restoredSource.iptvType == .xtream)
         #expect(restoredSource.networkDisplayHost == "fixture-host.local")
         #expect(restoredSource.serverKind == .plex)
         #expect(restoredSource.discoveredItemCount == 42)

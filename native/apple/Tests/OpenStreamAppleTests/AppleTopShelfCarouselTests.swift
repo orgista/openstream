@@ -71,34 +71,34 @@ struct AppleTopShelfCarouselTests {
             .appending(path: "openstream-topshelf-carousel-\(UUID().uuidString)", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        let source = AppleSource(kind: .stremio, name: "Cinemeta",
-                                 url: URL(string: "https://fixture.example/manifest.json")!)
         let backdrop = URL(string: "https://image.tmdb.org/t/p/original/matilda.jpg")!
         let film = AppleCatalogItem(mediaID: "tt0117008", type: "movie", name: "Matilda",
                                     posterURL: URL(string: "https://image.tmdb.org/t/p/w500/matilda.jpg"),
                                     backgroundURL: backdrop, summary: "A gifted girl.", releaseInfo: "1996",
                                     genres: ["Comedy", "Family"], runtimeMinutes: 98)
-        let sections = [AppleCatalogSection(source: source, catalog: AppleStremioCatalog(type: "movie", id: "top"),
-                                            items: [film])]
-        var record = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: film)
+        var record = AppleMediaIngestion.catalogRecord(instanceID: UUID(), item: film)
         record.progress = 0.3
+        let hero = AppleTopShelfHero(
+            item: AppleTopShelfSnapshotWriter.catalogItem(id: record.id, title: record.title, kind: record.kind.rawValue, item: film),
+            backdropURL: backdrop, wordmarkURL: nil)
 
         let writer = AppleTopShelfSnapshotWriter(containerProvider: { root })
-        try await writer.write(records: [record], sections: sections, enabled: true)
+        try await writer.write(records: [record], heroes: [hero], enabled: true)
         let written = try #require(AppleTopShelfSnapshotReader(containerProvider: { root }).read())
 
-        let topPick = try #require(written.topPicks.first)
-        #expect(topPick.genre == "Comedy")
-        #expect(topPick.year == 1996)
-        #expect(topPick.durationSeconds == 5_880)
-        #expect(topPick.summary == "A gifted girl.")
+        let page = try #require(written.heroes.first)
+        #expect(page.genre == "Comedy")
+        #expect(page.year == 1996)
+        #expect(page.durationSeconds == 5_880)
+        #expect(page.summary == "A gifted girl.")
         let continued = try #require(written.continueWatching.first)
-        #expect(continued.genre == "Comedy")
+        #expect(continued.year == 1996)
+        #expect(continued.summary == "A gifted girl.")
         #expect(continued.landscapeArtworkURL == backdrop)
-        #expect(continued.durationSeconds == 5_880)
 
         let pages = AppleTopShelfContentBuilder.carouselItems(for: written)
         #expect(pages.map(\.contextTitle) == ["Continue Watching"])
+        #expect(pages.first?.item.genre == "Comedy")
         #expect(pages.first?.imageURL == backdrop)
     }
 }

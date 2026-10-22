@@ -67,7 +67,7 @@ struct AetherLoadOptionsTests {
     @Test(arguments: [[], ["en"], ["es", "en"]])
     func captionsOffHandsTheDemuxerNoLanguages(languages: [String]) throws {
         let request = ApplePlaybackRequest(url: try #require(URL(string: "https://fixture.example/movie.mkv")),
-                                           mediaID: "movie", sourceKind: .stremio)
+                                           mediaID: "movie", sourceKind: .files)
         let options = AetherPlaybackEngine.loadOptions(
             for: request, headers: [:], preferredSubtitleLanguages: languages, captionsPreference: .off)
         #expect(options.preferredSubtitleLanguages.isEmpty)

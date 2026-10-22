@@ -2,11 +2,6 @@
   "version": 1,
   "sources": [
     {
-      "kind": "stremio",
-      "name": "Stub Add-on",
-      "manifestURL": "https://fixture.example/manifest.json"
-    },
-    {
       "kind": "m3u",
       "name": "Stub IPTV",
       "playlistURL": "https://fixture.example/iptv/channels.m3u",

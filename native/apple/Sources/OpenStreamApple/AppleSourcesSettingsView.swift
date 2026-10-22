@@ -128,12 +128,6 @@ struct AppleSourcesSettingsView: View {
                     AppleTVNavigationLabel("Instance", systemImage: "plus.circle")
                 }
                 .appleTVReadableFocus()
-#if OPENSTREAM_ADDONS
-                NavigationLink(value: AppleSourceRoute.addManifest) {
-                    AppleTVNavigationLabel("Add Catalog", systemImage: "square.stack.3d.up")
-                }
-                .appleTVReadableFocus()
-#endif
                 NavigationLink(value: AppleSourceRoute.webManagement) {
                     AppleTVNavigationLabel("Web Management", systemImage: "network")
                 }
@@ -176,7 +170,7 @@ struct AppleSourcesSettingsView: View {
                 } header: {
                     // Scoped to the header on purpose: `.textCase` on the Section
                     // uppercases its *rows* too, which turned every source name
-                    // into "TORRENTIO TB".
+                    // into capitals.
                     Text("Your Sources")
                         #if os(tvOS)
                         .textCase(.uppercase)
@@ -219,10 +213,6 @@ struct AppleSourcesSettingsView: View {
                 )
             case .addInstance:
                 AppleAddInstanceView()
-            #if OPENSTREAM_ADDONS
-            case .addManifest:
-                AppleAddManifestSourceView(sourceStore: sourceStore)
-            #endif
             case .addLiveTV:
                 AppleAddLiveTVSourceView(sourceStore: sourceStore)
             case .addMediaServer:
@@ -263,9 +253,7 @@ struct AppleSourcesSettingsView: View {
         }
         .task {
             guard UserDefaults.standard.string(forKey: "OpenStreamVisionScreen") == "source-detail" else { return }
-            debugDetailSourceID = sourceStore.sources.first {
-                AppleSubtitleLanguages.declaresSubtitles(resources: $0.resources)
-            }?.id ?? sourceStore.sources.first?.id
+            debugDetailSourceID = sourceStore.sources.first?.id
         }
         #endif
         #if !os(tvOS)
@@ -305,9 +293,6 @@ struct AppleSourcesSettingsView: View {
 enum AppleSourceRoute: Hashable {
     case addFiles
     case addInstance
-    #if OPENSTREAM_ADDONS
-    case addManifest
-    #endif
     case addLiveTV
     case addMediaServer
     case addNetworkShare
@@ -340,7 +325,7 @@ private struct AppleAddFilesView: View {
     let webManagement: any AppleWebManagementServing
     @State private var directURL = ""
     @State private var showingDirectURL = false
-    @State private var playback: AppleStremioPlayerPresentation?
+    @State private var playback: AppleMediaPlayerPresentation?
     @State private var playbackError: String?
     @State private var discovered: [AppleSMBServer] = []
     @State private var isDiscovering = false
@@ -421,7 +406,7 @@ private struct AppleAddFilesView: View {
                         }
                         Task { @MainActor in
                             try? await Task.sleep(for: .milliseconds(250))
-                            playback = AppleStremioPlayerPresentation(
+                            playback = AppleMediaPlayerPresentation(
                                 request: ApplePlaybackRequest(url: url,
                                     mediaID: ApplePlaybackIdentity.digest(for: url.absoluteString),
                                     title: url.lastPathComponent, sourceKind: .files), settings: settings)
@@ -450,7 +435,7 @@ private struct AppleAddFilesView: View {
                    let start = AppleDiscPlaybackStart(rawValue: rawStart) {
                     request.hints.disc = AppleDiscPlaybackChoice(start: start)
                 }
-                playback = AppleStremioPlayerPresentation(request: request, settings: settings)
+                playback = AppleMediaPlayerPresentation(request: request, settings: settings)
             }
         }
         #endif
@@ -482,7 +467,7 @@ private struct AppleAddFilesView: View {
         // Same presentation as the title page on every platform: a sheet on
         // tvOS 18 is an inset rounded card on a light ground, which is what the
         // owner saw when playing a file from a share (FEEDBACK Y1).
-        .modifier(AppleStremioPlayerPresentationModifier(presentation: $playback))
+        .modifier(AppleMediaPlayerPresentationModifier(presentation: $playback))
         .alert("Invalid Video URL", isPresented: Binding(get: { playbackError != nil }, set: { if !$0 { playbackError = nil } })) {
             Button("OK", role: .cancel) { playbackError = nil }
         } message: { Text(playbackError ?? "") }
@@ -513,7 +498,7 @@ private struct AppleAddFilesView: View {
 /// A settings value that may be long and have nowhere to wrap.
 ///
 /// `LabeledContent(_:value:)` wraps its value, and a value with no spaces —
-/// `opensubtitles-v3.strem.io`, a share path, a validation summary — breaks
+/// a long host name, a share path, a validation summary — breaks
 /// **mid-word** when it runs out of room, which is what the owner reported on
 /// 2026-09-14. Widening the form column hid it; it did not remove it, because
 /// any value long enough still wraps.
@@ -541,17 +526,6 @@ private struct AppleTruncatingValue: View {
 private struct AppleSourceRow: View {
     let source: AppleSource
 
-    /// Add-on logos that are wide wordmarks (OpenSubtitles ships one) shrink
-    /// to an unreadable sliver inside the 44-point square, so those rows keep
-    /// the kind glyph instead. Anything wider than this ratio counts.
-    static let wordmarkAspectRatio: CGFloat = 2.2
-
-    @State private var logoIsWordmark = false
-    /// Set once a fetched logo genuinely fails (bad URL, 404, timeout), so
-    /// that row stops retrying it every redraw and shows the same deliberate
-    /// fallback as a manifest with no logo at all.
-    @State private var logoFailed = false
-
     var body: some View {
         HStack(spacing: 12) {
             sourceIcon
@@ -568,10 +542,6 @@ private struct AppleSourceRow: View {
             Text(source.isEnabled ? "On" : "Off")
                 .foregroundStyle(.secondary)
         }
-        .onChange(of: source.logoURL) { _, _ in
-            logoIsWordmark = false
-            logoFailed = false
-        }
     }
 
     @ViewBuilder
@@ -580,46 +550,14 @@ private struct AppleSourceRow: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(.secondary.opacity(0.15))
 
-            if source.isAddon, let logoURL = source.logoURL.flatMap(AppleAddonLogoURLPolicy.displayURL(for:)),
-               !logoIsWordmark, !logoFailed {
-                AppleRemoteImage(
-                    url: logoURL,
-                    contentMode: .fit,
-                    placeholderSystemImage: source.kind.systemImage,
-                    onLoad: { image in
-                        logoIsWordmark = CGFloat(image.width) > CGFloat(image.height) * Self.wordmarkAspectRatio
-                    },
-                    onFailure: { logoFailed = true }
-                )
+            Image(systemName: source.kind.systemImage)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.secondary)
                 .padding(6)
-            } else {
-                sourceFallbackIcon
-            }
         }
         .frame(width: 44, height: 44)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .accessibilityHidden(true)
-    }
-
-    /// Every add-on without a usable logo — Cinemeta's manifest publishes
-    /// none, OpenSubtitles v3's is a wordmark too wide to read at this size —
-    /// otherwise fell back to the exact same glyph as a source with no
-    /// manifest at all, which read as broken rather than "no icon." An
-    /// add-on keeps its own mark, its initial, instead; only the truly
-    /// iconless kinds (IPTV, a home server, Library) use the shared glyph.
-    private var sourceFallbackIcon: some View {
-        Group {
-            if source.isAddon, let initial = source.name.trimmingCharacters(in: .whitespaces).first {
-                Text(String(initial).uppercased())
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(.secondary)
-            } else {
-                Image(systemName: source.kind.systemImage)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(6)
     }
 }
 
@@ -627,9 +565,6 @@ private extension AppleSourceKind {
     var systemImage: String {
         switch self {
         case .library: "books.vertical"
-        #if OPENSTREAM_ADDONS
-        case .stremio: "square.stack.3d.up"
-        #endif
         case .youtube: "play.rectangle"
         case .liveTV: "dot.radiowaves.left.and.right"
         case .nas: "externaldrive.connected.to.line.below"
@@ -721,36 +656,6 @@ private struct AppleSourceDetailView: View {
                         AppleNetworkShareEditRows(source: source, sourceStore: sourceStore)
                     }
 
-                    if AppleSubtitleLanguages.declaresSubtitles(resources: source.resources) {
-                        Section {
-                            NavigationLink {
-                                AppleSubtitleLanguagesView(settings: settings)
-                            } label: {
-                                AppleTVNavigationLabel("Subtitles", systemImage: "captions.bubble")
-                            }
-                            .appleTVReadableFocus()
-                        }
-                    }
-
-                    let catalogs = AppleCatalogDiscoveryPolicy.browsableCatalogs(for: source)
-#if OPENSTREAM_ADDONS
-                    if source.isAddon, catalogs.count > 1 {
-                        Section("Catalogs") {
-                            let shown = Set(AppleCatalogDiscoveryPolicy.catalogs(for: source)
-                                .map(AppleCatalogDiscoveryPolicy.choiceKey))
-                            let titles = catalogTitles(catalogs)
-                            ForEach(Array(zip(catalogs, titles)), id: \.1.key) { catalog, title in
-                                Toggle(title.text, isOn: Binding(
-                                    get: { shown.contains(AppleCatalogDiscoveryPolicy.choiceKey(catalog)) },
-                                    set: { sourceStore.setCatalog(catalog, shown: $0, id: sourceID) }
-                                ))
-                                .accessibilityIdentifier(
-                                    "source.detail.catalog.\(AppleCatalogDiscoveryPolicy.choiceKey(catalog))")
-                            }
-                        }
-                    }
-#endif
-
                     Section {
                         Button("Delete Source", role: .destructive) {
                             confirmDelete = true
@@ -777,22 +682,8 @@ private struct AppleSourceDetailView: View {
         }
     }
 
-    /// Each catalog's row title; a name used by more than one catalog reads
-    /// "Popular Movies" / "Popular Shows", as on Discover.
-    private func catalogTitles(_ catalogs: [AppleStremioCatalog]) -> [(key: String, text: String)] {
-        let titles = catalogs.map(AppleCatalogShelfPolicy.title(for:))
-        let counts = Dictionary(titles.map { ($0.lowercased(), 1) }, uniquingKeysWith: +)
-        return zip(catalogs, titles).map { catalog, title in
-            (AppleCatalogDiscoveryPolicy.choiceKey(catalog),
-             (counts[title.lowercased()] ?? 0) > 1 ? AppleCatalogShelfPolicy.typedTitle(title, type: catalog.type) : title)
-        }
-    }
-
     private func locationLabel(_ source: AppleSource) -> String {
         switch source.kind {
-        #if OPENSTREAM_ADDONS
-        case .stremio: "Manifest Host"
-        #endif
         case .library: "Folder"
         case .liveTV: "Server"
         default: "Location"
@@ -816,180 +707,6 @@ private struct AppleSourceDetailView: View {
     }
 }
 
- #if OPENSTREAM_ADDONS
-@MainActor
-private struct AppleAddManifestSourceView: View {
-    @Environment(\.dismiss) private var dismiss
-    @State private var manifestURL = ""
-    @State private var isAdding = false
-    @State private var errorMessage: String?
-    /// Set when the add-on must be configured on its own site first.
-    @State private var configureURL: URL?
-    /// The add-on answered "configure me first": a state, not a failure.
-    @State private var needsConfiguration = false
-
-    let sourceStore: AppleSourceStore
-
-    var body: some View {
-        #if os(tvOS)
-        tvOSBody
-        #else
-        standardBody
-        #endif
-    }
-
-    private var manifestField: some View {
-        TextField(
-            "Manifest URL",
-            text: $manifestURL,
-            prompt: appleSecondaryFieldPrompt("Manifest URL")
-        )
-            .appleTVFieldOutline()
-            #if os(iOS) || os(tvOS) || os(visionOS)
-            .textInputAutocapitalization(.never)
-            #endif
-            .autocorrectionDisabled()
-            .tint(.primary)
-    }
-
-    private var hasManifestURL: Bool {
-        !manifestURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    #if os(tvOS)
-    @FocusState private var manifestFieldFocused: Bool
-
-    private var tvOSBody: some View {
-        let metrics = AppleTVSettingsMetrics.standard
-        return ScrollView {
-            VStack(alignment: .leading, spacing: metrics.groupSpacing) {
-                AppleTVFormField("Manifest URL") {
-                    manifestField
-                        .focused($manifestFieldFocused)
-                        .accessibilityIdentifier("sources.catalog.manifest")
-                }
-                .frame(maxWidth: metrics.formColumnWidth, alignment: .leading)
-                .focusSection()
-
-                HStack(spacing: metrics.pillSpacing) {
-                    Button {
-                        addManifest()
-                    } label: {
-                        if isAdding { ProgressView() } else { Text("Add Catalog") }
-                    }
-                    .buttonStyle(AppleTVPillStyle(isSelected: true, minimumSize: metrics.pillSize, fontSize: metrics.pillFontSize))
-                    .disabled(isAdding)
-                    .accessibilityIdentifier("sources.catalog.add")
-                }
-                .focusSection()
-
-                if let errorMessage {
-                    if needsConfiguration {
-                        // Plain secondary text: no browser on the Apple TV,
-                        // so no link either.
-                        Text(errorMessage)
-                            .font(.body)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: metrics.formColumnWidth, alignment: .leading)
-                            .accessibilityIdentifier("sources.form.message")
-                    } else {
-                        AppleTVFormMessage(text: errorMessage, isError: true)
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.bottom, AppleTVChromeMetrics.verticalSafeInset)
-        }
-        .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
-        .defaultFocus($manifestFieldFocused, true)
-        .appleSettingsPageTitle("Add Catalog")
-    }
-    #else
-    private var standardBody: some View {
-        Form {
-            Section("Manifest URL") {
-                manifestField
-                    #if os(macOS)
-                    // A macOS form draws a text field's own title as a leading
-                    // label, so this row said "Manifest URL" twice — once as
-                    // the section header, once beside the field (macOS sweep,
-                    // 2026-09-21). iOS and visionOS never show that title (the
-                    // field carries a `prompt`), which is why it went unseen.
-                    // The header keeps the name and the field takes the row.
-                    .labelsHidden()
-                    #endif
-            }
-
-            if let errorMessage {
-                Section {
-                    // "Configure first" is a state, not a failure: plain text.
-                    Text(errorMessage)
-                        .foregroundStyle(needsConfiguration ? AnyShapeStyle(.primary) : AnyShapeStyle(.red))
-                    if let configureURL {
-                        Link("Open Configuration", destination: configureURL)
-                            .accessibilityIdentifier("sources.catalog.configure")
-                    }
-                }
-            }
-
-            AppleFormActionSection {
-                Button {
-                    addManifest()
-                } label: {
-                    if isAdding {
-                        ProgressView()
-                            #if os(macOS)
-                            .controlSize(.small)
-                            #endif
-                    } else {
-                        Text("Add Catalog")
-                    }
-                }
-                .disabled(isAdding || !hasManifestURL)
-                .appleMacFormPrimaryAction()
-                #if os(macOS)
-                .keyboardShortcut(.defaultAction)
-                #endif
-                .appleTVReadableFocus()
-            }
-        }
-        .appleSettingsPage("Add Catalog")
-    }
-    #endif
-
-    private func addManifest() {
-        guard hasManifestURL else {
-            errorMessage = "Enter the add-on's manifest URL."
-            return
-        }
-        isAdding = true
-        errorMessage = nil
-        configureURL = nil
-        needsConfiguration = false
-
-        Task { @MainActor in
-            defer { isAdding = false }
-            do {
-                // Subtitle languages are picked from the add-on's own detail
-                // page, so adding a catalog just returns to Sources.
-                _ = try await sourceStore.addStremio(manifestValue: manifestURL)
-                dismiss()
-            } catch AppleManifestClientError.manifestNeedsSetup(let url) {
-                errorMessage = AppleManifestClientError.manifestNeedsSetup(configureURL: url).errorDescription
-                configureURL = url
-                needsConfiguration = true
-            } catch AppleManifestClientError.manifestNeedsConfiguration {
-                needsConfiguration = true
-                errorMessage = AppleManifestClientError.manifestNeedsConfiguration.errorDescription
-                configureURL = (try? AppleManifestURLPolicy.normalize(manifestURL))
-                    .flatMap(AppleManifestURLPolicy.configureURL(forManifest:))
-            } catch {
-                errorMessage = error.localizedDescription
-            }
-        }
-    }
-}
-#endif
 
 private enum AppleInstanceConnectionAction: Equatable {
     case test(UUID)

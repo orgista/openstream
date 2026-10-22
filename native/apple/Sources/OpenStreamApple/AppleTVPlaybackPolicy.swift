@@ -135,7 +135,7 @@ public enum AppleTVPlaybackPresentationPolicy {
         isTV: Bool = isTVPlatform
     ) -> ApplePlaybackEngineKind {
         guard isTV, preferred == .openStream else { return preferred }
-        // An add-on that flags the stream as not web-ready expects a demuxer.
+        // A stream flagged as not web-ready expects a demuxer.
         guard !signature.notWebReady, signature.isNativeContainer else { return .openStream }
         switch expectedRoute(for: signature) {
         case .avPlayer, .audioOnly: return .native

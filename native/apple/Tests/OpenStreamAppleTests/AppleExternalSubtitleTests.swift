@@ -2,22 +2,6 @@ import Foundation
 import Testing
 @testable import OpenStreamApple
 
-private func subtitleSource(
-    host: String,
-    name: String,
-    resources: [String] = ["stream", "subtitles"],
-    enabled: Bool = true
-) -> AppleSource {
-    AppleSource(
-        kind: .stremio,
-        name: name,
-        url: URL(string: "https://\(host)/manifest.json")!,
-        isEnabled: enabled,
-        manifestID: host,
-        resources: resources
-    )
-}
-
 // MARK: - Parser
 
 @Test func subRipParserKeepsMultiLineCuesAndStripsMarkup() {
@@ -99,77 +83,6 @@ private func subtitleSource(
     #expect(cues[0].text == "Packed")
 }
 
-// MARK: - Service
-
-@Test func externalSubtitleServiceMergesAddOnsAndKeepsOneTrackPerLanguage() async {
-    let client = AppleStremioPlaybackClient { request in
-        let path = request.url?.absoluteString ?? ""
-        let body: String
-        if path.contains("first.example") {
-            body = #"""
-            {"subtitles":[
-              {"id":"a","url":"https://subs.example/a.srt","lang":"eng"},
-              {"id":"b","url":"https://subs.example/b.srt","lang":"fra"}
-            ]}
-            """#
-        } else if path.contains("second.example") {
-            body = #"""
-            {"subtitles":[
-              {"id":"c","url":"https://subs.example/c.srt","lang":"eng"},
-              {"id":"d","url":"https://subs.example/d.srt","lang":"spa"}
-            ]}
-            """#
-        } else {
-            body = #"{"subtitles":[]}"#
-        }
-        return (
-            Data(body.utf8),
-            HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-        )
-    }
-    let service = AppleExternalSubtitleService(client: client, timeout: .seconds(2))
-    let query = try! #require(AppleExternalSubtitleQuery(type: "series", mediaID: "tt765", season: 2, episode: 6))
-    #expect(query.mediaID == "tt765:2:6")
-
-    let tracks = await service.tracks(
-        for: query,
-        sources: [
-            subtitleSource(host: "first.example", name: "First"),
-            subtitleSource(host: "second.example", name: "Second"),
-            // No `subtitles` resource, so it is never asked.
-            subtitleSource(host: "streams.example", name: "Streams", resources: ["stream"]),
-            subtitleSource(host: "off.example", name: "Off", enabled: false),
-        ],
-        // Named outright: an empty list now means the device's language only.
-        preferredLanguages: ["eng", "fra", "spa"]
-    )
-
-    #expect(tracks.map(\.languageCode) == ["eng", "fra", "spa"])
-    #expect(tracks[0].displayName == "English (First)")
-    #expect(tracks[2].displayName.hasSuffix("(Second)"))
-    #expect(tracks[0].url.absoluteString == "https://subs.example/a.srt")
-}
-
-@Test func externalSubtitleServiceFailsOpenWhenAnAddOnIsBroken() async {
-    let client = AppleStremioPlaybackClient { request in
-        let path = request.url?.absoluteString ?? ""
-        if path.contains("broken.example") { throw URLError(.cannotConnectToHost) }
-        let body = #"{"subtitles":[{"id":"a","url":"https://subs.example/a.vtt","lang":"eng"}]}"#
-        return (
-            Data(body.utf8),
-            HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-        )
-    }
-    let service = AppleExternalSubtitleService(client: client, timeout: .seconds(2))
-    let query = try! #require(AppleExternalSubtitleQuery(type: "movie", mediaID: "tt111"))
-    let tracks = await service.tracks(
-        for: query,
-        sources: [subtitleSource(host: "broken.example", name: "Broken"), subtitleSource(host: "ok.example", name: "OK")]
-    )
-    #expect(tracks.count == 1)
-    #expect(tracks[0].displayName == "English (OK)")
-}
-
 // MARK: - Engine
 
 @MainActor
@@ -180,7 +93,7 @@ private func subtitleSource(
         return Data("""
         1
         00:00:02,000 --> 00:00:05,000
-        From the add-on
+        From the sidecar
         """.utf8)
     }
     engine.applyEmbeddedSubtitleTracks([
@@ -189,7 +102,7 @@ private func subtitleSource(
     ])
     engine.addExternalSubtitleTracks([
         AppleExternalSubtitleTrack(
-            id: "addon:english",
+            id: "sidecar:english",
             languageCode: "eng",
             sourceName: "Example",
             url: URL(string: "https://subs.example/english.srt")!
@@ -207,12 +120,12 @@ private func subtitleSource(
         Data("""
         1
         00:00:02,000 --> 00:00:05,000
-        From the add-on
+        From the sidecar
         """.utf8)
     }
     engine.addExternalSubtitleTracks([
         AppleExternalSubtitleTrack(
-            id: "addon:english",
+            id: "sidecar:english",
             languageCode: "eng",
             sourceName: "Example",
             url: URL(string: "https://subs.example/english.srt")!
@@ -225,74 +138,19 @@ private func subtitleSource(
     let load = try #require(engine.pendingExternalSubtitleLoad)
     await load.value
     #expect(engine.subtitleCues.count == 1)
-    #expect(engine.subtitleCues.first?.text == "From the add-on")
+    #expect(engine.subtitleCues.first?.text == "From the sidecar")
     #expect(engine.subtitleCues.first?.startTime == 2)
 
-    // Switching back to "Off" drops the add-on cues.
+    // Switching back to "Off" drops the sidecar cues.
     engine.selectSubtitleTrack(id: nil)
     #expect(engine.subtitleCues.isEmpty)
 }
 
-// MARK: - Coordinator hook
-
-@MainActor
-@Test(.timeLimit(.minutes(1)))
-func playbackCoordinatorHandsFetchedSubtitlesToTheEngineWithoutDelayingTheLoad() async {
-    let engine = FakePlaybackEngine()
-    engine.loadHandler = { _ in engine.phase = .playing }
-    let coordinator = ApplePlaybackCoordinator(engine: engine)
-    coordinator.externalSubtitleFetcher = { query in
-        #expect(query.mediaID == "tt765:2:6")
-        return [
-            AppleExternalSubtitleTrack(
-                id: "addon:english",
-                languageCode: "eng",
-                sourceName: "Example",
-                url: URL(string: "https://subs.example/english.srt")!
-            ),
-        ]
-    }
-    let request = ApplePlaybackRequest(
-        url: URL(string: "https://media.example/movie.mkv")!,
-        mediaID: "record-id",
-        sourceKind: .stremio,
-        hints: .init(addonMediaID: "tt765:2:6", addonMediaType: "series")
-    )
-    await coordinator.begin(request)
-    while engine.externalSubtitleTracks.isEmpty, !Task.isCancelled {
-        try? await Task.sleep(for: .milliseconds(10))
-    }
-    #expect(engine.externalSubtitleTracks.map(\.languageCode) == ["eng"])
-    #expect(coordinator.phase == .playing)
-    coordinator.stop()
-}
-
-@MainActor
-@Test func playbackCoordinatorSkipsSubtitleFetchWithoutAnAddOnIdentity() async {
-    let engine = FakePlaybackEngine()
-    engine.loadHandler = { _ in engine.phase = .playing }
-    let coordinator = ApplePlaybackCoordinator(engine: engine)
-    coordinator.externalSubtitleFetcher = { _ in
-        Issue.record("A request without an add-on identity must not query add-ons")
-        return []
-    }
-    await coordinator.begin(
-        ApplePlaybackRequest(
-            url: URL(string: "file:///movies/local.mkv")!,
-            mediaID: "record-id",
-            sourceKind: .files
-        )
-    )
-    try? await Task.sleep(for: .milliseconds(50))
-    #expect(engine.externalSubtitleTracks.isEmpty)
-    coordinator.stop()
-}
-
-// MARK: - Add-on language and native cue regression coverage
+// MARK: - External track language and native cue regression coverage
 
 @MainActor
 @Test(arguments: [("eng", "en" as String?), ("en-US", "en"), ("", nil), ("und", nil)])
-func addOnTracksUseEmbeddedLanguageNormalization(code: String, expected: String?) throws {
+func externalTracksUseEmbeddedLanguageNormalization(code: String, expected: String?) throws {
     let track = AppleExternalSubtitleTrack(
         id: "fixture", languageCode: code, displayName: "Fixture subtitles",
         url: URL(fileURLWithPath: "/unused.srt"))
@@ -308,7 +166,7 @@ func addOnTracksUseEmbeddedLanguageNormalization(code: String, expected: String?
 
 @MainActor
 @Test(arguments: [AppleCaptionsPreference.always, .english, .deviceLanguage])
-func preferredLanguageAutoSelectsAnAddOnTrack(preference: AppleCaptionsPreference) async throws {
+func preferredLanguageAutoSelectsAnExternalTrack(preference: AppleCaptionsPreference) async throws {
     let native = NativePlaybackEngine()
     let aether = try AetherPlaybackEngine()
     native.externalSubtitleDataLoader = { _ in Data("1\n00:00:00,000 --> 00:01:00,000\nFixture cue\n".utf8) }
@@ -336,7 +194,7 @@ func preferredLanguageAutoSelectsAnAddOnTrack(preference: AppleCaptionsPreferenc
 }
 
 @MainActor
-@Test func languageAutoSelectionDoesNotFallBackToAnUnmatchedAddOn() throws {
+@Test func languageAutoSelectionDoesNotFallBackToAnUnmatchedExternalTrack() throws {
     let native = NativePlaybackEngine()
     let aether = try AetherPlaybackEngine()
     for engine: any ApplePlaybackEngine in [native, aether] {
@@ -350,9 +208,21 @@ func preferredLanguageAutoSelectsAnAddOnTrack(preference: AppleCaptionsPreferenc
     }
 }
 
-private var nativeSubtitleFixture: AppleExternalSubtitleTrack {
-    let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        .deletingLastPathComponent().appending(path: "Fixtures/addon-subtitles.srt")
+/// A local sidecar `.srt` written for one test; the caller removes its folder.
+private func makeSidecarSubtitleFixture() throws -> AppleExternalSubtitleTrack {
+    let folder = FileManager.default.temporaryDirectory.appending(path: "sidecar-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    let url = folder.appending(path: "fixture.en.srt")
+    try Data("""
+    1
+    00:00:00,000 --> 00:00:03,000
+    <i>From the sidecar</i>
+
+    2
+    00:00:04,000 --> 00:00:06,000
+    Second line
+
+    """.utf8).write(to: url)
     return AppleExternalSubtitleTrack(
         id: "local-srt", languageCode: "eng", displayName: "English fixture", url: url)
 }
@@ -365,10 +235,12 @@ private func readSubtitleFixture(_ url: URL) async throws -> Data {
 
 @MainActor
 @Test func nativeEnginePublishesParsedLocalSRTCuesThroughTheAppMenu() async throws {
+    let fixture = try makeSidecarSubtitleFixture()
+    defer { try? FileManager.default.removeItem(at: fixture.url.deletingLastPathComponent()) }
     let engine = NativePlaybackEngine()
     defer { engine.stop() }
     engine.externalSubtitleDataLoader = readSubtitleFixture
-    engine.addExternalSubtitleTracks([nativeSubtitleFixture, nativeSubtitleFixture])
+    engine.addExternalSubtitleTracks([fixture, fixture])
     #expect(engine.subtitleTracks.count == 1)
     let track = try #require(engine.subtitleTracks.first)
     let entries = AppleSubtitleCueLayerPolicy.menuEntries(
@@ -380,11 +252,11 @@ private func readSubtitleFixture(_ url: URL) async throws -> Data {
     let load = try #require(engine.externalSubtitleLoad)
     await load.value
     #expect(engine.activeSubtitleTrackID == track.id)
-    #expect(engine.subtitleCues.map(\.text) == ["From the add-on", "Second line"])
+    #expect(engine.subtitleCues.map(\.text) == ["From the sidecar", "Second line"])
     #expect(engine.subtitleCues.map(\.startTime) == [0, 4])
     #expect(engine.subtitleCues.map(\.endTime) == [3, 6])
     menu.refresh(from: engine)
-    #expect(menu.cues.map(\.text) == ["From the add-on"])
+    #expect(menu.cues.map(\.text) == ["From the sidecar"])
     #expect(AppleSubtitleCueLayerPolicy.activeCues(in: engine.subtitleCues, at: 3).isEmpty)
     #expect(AppleSubtitleCueLayerPolicy.activeCues(in: engine.subtitleCues, at: 5).first?.text == "Second line")
     menu.select(nil, on: engine)
@@ -394,9 +266,11 @@ private func readSubtitleFixture(_ url: URL) async throws -> Data {
 
 @MainActor
 @Test func nativeStopCancelsPendingSidecarAndClearsTracks() async throws {
+    let fixture = try makeSidecarSubtitleFixture()
+    defer { try? FileManager.default.removeItem(at: fixture.url.deletingLastPathComponent()) }
     let engine = NativePlaybackEngine()
     engine.externalSubtitleDataLoader = readSubtitleFixture
-    engine.addExternalSubtitleTracks([nativeSubtitleFixture])
+    engine.addExternalSubtitleTracks([fixture])
     engine.selectSubtitleTrack(id: try #require(engine.subtitleTracks.first?.id))
     let load = try #require(engine.externalSubtitleLoad)
     engine.stop()
@@ -405,21 +279,6 @@ private func readSubtitleFixture(_ url: URL) async throws -> Data {
     #expect(engine.subtitleTracks.isEmpty)
     #expect(engine.activeSubtitleTrackID == nil)
     #expect(engine.externalSubtitleLoad == nil)
-}
-
-@MainActor
-@Test func addOnWithMissingStremioLanguageBecomesANilLanguageTrack() throws {
-    let data = Data(#"{"subtitles":[{"id":"missing-lang","url":"https://fixture.example/subtitles.srt"}]}"#.utf8)
-    let parsed = try #require(AppleStremioPlaybackClient.parseSubtitles(data).first)
-    let track = AppleExternalSubtitleTrack(
-        id: parsed.id, languageCode: parsed.language, sourceName: "Fixture", url: parsed.url)
-    let native = NativePlaybackEngine()
-    let aether = try AetherPlaybackEngine()
-    for engine: any ApplePlaybackEngine in [native, aether] {
-        engine.addExternalSubtitleTracks([track])
-        #expect(try #require(engine.subtitleTracks.first).language == nil)
-        engine.stop()
-    }
 }
 
 private actor SubtitleDownloadGate {

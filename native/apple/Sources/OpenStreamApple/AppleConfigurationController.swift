@@ -323,8 +323,10 @@ final class AppleConfigurationController {
             // Sources only this device has, or deletions iCloud has not seen,
             // are a local edit made after this copy: stamp them later than it,
             // or every device that applied it reads the next send as not newer.
+            // A copy that still carried retired sources is written again without them.
             let contributesSources = sources.sourceTombstones != snapshot.sourceTombstones
-                || !Set(localSourceIDs).subtracting(Self.sourceIDs(in: snapshot)).isEmpty
+                || !Set(sources.sources.map(\.id)).subtracting(snapshot.sources.map(\.id)).isEmpty
+                || snapshot.retiredSourceCount > 0
             defaults.set(contributesSources && AppleConfigurationSyncPolicy.publishesChanges()
                 ? AppleConfigurationSyncPolicy.editStamp(after: snapshot.savedAt) : snapshot.savedAt,
                 forKey: Self.savedAtKey)
@@ -345,14 +347,6 @@ final class AppleConfigurationController {
     func setResult(_ value: String) { result = value }
 
     private var localSavedAt: Date? { defaults.object(forKey: Self.savedAtKey) as? Date }
-
-    private var localSourceIDs: [UUID] {
-        sources.sources.map(\.id) + sources.preservedConfigurationSources.compactMap { $0.sourceID.flatMap(UUID.init(uuidString:)) }
-    }
-
-    private static func sourceIDs(in snapshot: AppleConfigurationSnapshot) -> Set<UUID> {
-        Set(snapshot.sources.map(\.id) + snapshot.preservedSourcePayloads.compactMap { $0.sourceID.flatMap(UUID.init(uuidString:)) })
-    }
 
     /// A restored source waits signed out for credentials iCloud Keychain has
     /// not delivered yet. Becoming active and iCloud's own changes look again
@@ -448,7 +442,7 @@ final class AppleConfigurationController {
             values[key] = try PropertyListSerialization.data(fromPropertyList: [address], format: .binary, options: 0)
         }
         let playback = ApplePlaybackStore(defaults: defaults)
-        var snapshot = AppleConfigurationSnapshot(
+        return AppleConfigurationSnapshot(
             savedAt: savedAt ?? (defaults.object(forKey: Self.savedAtKey) as? Date ?? .now),
             sources: sources.sources, sourceTombstones: sources.sourceTombstones, settings: values,
             playbackProgress: playback.configurationProgress(),
@@ -459,8 +453,6 @@ final class AppleConfigurationController {
             continueWatchingRemovals: playback.configurationContinueWatchingRemovals(),
             playbackTerminals: playback.configurationPlaybackTerminals(),
             playbackActivity: playback.configurationPlaybackActivity())
-        snapshot.preservedSourcePayloads = sources.preservedConfigurationSources
-        return snapshot
     }
 
     private func contentFingerprint() throws -> Data {
@@ -509,12 +501,6 @@ final class AppleConfigurationController {
             let signedOut = try sources.restoreConfigurationSources(snapshot.sources, secrets: secrets)
             if signedOut > 0 { appleTraceFailure("configuration apply: \(signedOut) sources kept signed out") }
         }
-        try traced("other sources") {
-            try sources.restorePreservedConfigurationSources(snapshot.preservedSourcePayloads, secrets: secrets, merge: true)
-        }
-        #if OPENSTREAM_ADDONS
-        sources.refreshRestoredManifests(ids: snapshot.sources.map(\.id))
-        #endif
         try traced("settings") {
             try settings.restoreConfiguration(snapshot.settings.merging(values) { _, incoming in incoming })
         }

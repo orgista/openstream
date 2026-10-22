@@ -9,7 +9,7 @@ import Testing
 @Suite struct ApplePlaybackEngineFallbackTests {
     private func stream(_ name: String, notWebReady: Bool = false, live: Bool = false) -> ApplePlaybackRequest {
         ApplePlaybackRequest(url: URL(string: "https://fixture.example/\(name)")!, isLive: live,
-            mediaID: "tt0000001", sourceKind: .stremio,
+            mediaID: "tt0000001", sourceKind: .catalog,
             hints: .init(notWebReady: notWebReady, filename: name))
     }
 

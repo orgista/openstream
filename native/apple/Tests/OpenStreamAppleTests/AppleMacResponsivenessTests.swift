@@ -30,54 +30,6 @@ struct AppleMacResponsivenessTests {
         #expect(empty.fillTickInterval(width: 22, displayScale: 0) == 12.0 / 44.0)
     }
 
-    @Test("A title-indexed lookup matches exactly as the per-call one does",
-          arguments: [
-              ("The Perfect Family", "movie", nil), ("perfect family", "movie", nil), ("Perfect Family", "series", nil),
-              ("Amélie", "movie", nil), ("AMELIE!", "movie", nil), ("The Office", "series", "The Office (US)"),
-              ("Office", "series", nil), ("A Quiet Place", "movie", nil), ("Quiet Place", "movie", nil), ("Missing", "movie", nil),
-              ("perfect family", "MOVIE", nil), ("Office", "Series", "The Office"),
-          ] as [(String, String, String?)])
-    func indexedTitleMatchingIsUnchanged(title: String, type: String, seasonTitle: String?) {
-        let titles = [("tt1", "movie", "The Perfect Family"), ("tt2", "movie", "Perfect Family"), ("tt3", "movie", "Amélie"),
-                      ("tt4", "series", "The Office"), ("tt5", "series", "Office"), ("tt6", "movie", "A Quiet Place"),
-                      ("tt7", "movie", "The Quiet Place"), ("tt8", "movie", "Perfect Family"), ("tt9", "series", "The Office")]
-        let source = Self.source
-        let plain = Self.lookup(titles, source: source, indexesTitles: false)
-        let indexed = Self.lookup(titles, source: source, indexesTitles: true)
-        for ignoringArticle in [false, true] {
-            let expected = plain.match(title: title, type: type, seasonTitle: seasonTitle, ignoringLeadingArticle: ignoringArticle)
-            let actual = indexed.match(title: title, type: type, seasonTitle: seasonTitle, ignoringLeadingArticle: ignoringArticle)
-            #expect(actual == expected)
-        }
-        // The fixture exercises both outcomes, not only misses.
-        if title == "The Perfect Family" { #expect(plain.match(title: title, type: type)?.item.mediaID == "tt1") }
-    }
-
-    @Test func discoverBuildsItsLookupWithTheTitleIndex() async {
-        let catalog = AppleStremioCatalog(type: "movie", id: "top")
-        let source = AppleSource(kind: .stremio, name: "Fixture", url: URL(string: "https://fixture.example/manifest.json")!,
-                                 resources: ["catalog"], catalogs: [catalog])
-        let section = AppleCatalogSection(source: source, catalog: catalog,
-                                          items: [AppleCatalogItem(mediaID: "tt1", type: "movie", name: "The Perfect Family")])
-        let lookup = await AppleCatalogSearchLookup.buildOffMain(sections: [section], sources: [source])
-        #expect(lookup.match(title: "Perfect Family", type: "movie", ignoringLeadingArticle: true)?.item.mediaID == "tt1")
-    }
-
-    private static var source: AppleSource {
-        AppleSource(kind: .stremio, name: "Fixture", url: URL(string: "https://fixture.example/manifest.json")!,
-                    resources: ["catalog"], catalogs: [AppleStremioCatalog(type: "movie", id: "top"),
-                                                       AppleStremioCatalog(type: "series", id: "top")])
-    }
-
-    private static func lookup(_ titles: [(String, String, String)], source: AppleSource,
-                               indexesTitles: Bool) -> AppleCatalogSearchLookup {
-        let sections = ["movie", "series"].map { type in
-            AppleCatalogSection(source: source, catalog: AppleStremioCatalog(type: type, id: "top"),
-                                items: titles.filter { $0.1 == type }.map { AppleCatalogItem(mediaID: $0.0, type: $0.1, name: $0.2) })
-        }
-        return AppleCatalogSearchLookup(sections: sections, sources: [source], indexesTitles: indexesTitles)
-    }
-
     @Test func rememberedStorageKeysMatchFreshlyHashedOnes() throws {
         let fresh = "sha256:" + ApplePlaybackIdentity.digest(for: "tt0903747:1:2")
         #expect(ApplePlaybackIdentity.storageKey(for: "tt0903747:1:2") == fresh)

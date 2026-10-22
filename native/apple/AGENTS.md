@@ -123,20 +123,15 @@ skill; the server runs on Dev-Mini (`ssh -T dev-mini ~/Developer/bin/rea-mcp.sh`
   location, and what OpenStream should do).
 
 ## 5. Architecture traps (each one cost an hour)
-- **Add-on distribution boundary:** `OPENSTREAM_ADDONS` is defined for Debug in the app project and
-  SwiftPM module/tests. App Store Release builds leave it undefined (owner 2026-10-02: TestFlight
-  builds for internal testers KEEP add-ons — archive them with the override below; never submit that build to App Review). Manifest,
-  catalog, meta, stream and add-on subtitle transports and their add/edit UI are compiled out.
-  Saved unsupported source payloads are ignored and retained in storage and backups.
-  For internal TestFlight, sideload or the Mac Developer-ID download, append the single xcodebuild
-  setting `SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) OPENSTREAM_ADDONS'` (equivalently,
-  `SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) OPENSTREAM_ADDONS` in a local xcconfig).
-  For the developer sweep or SwiftPM Release, use `-Xswiftc -DOPENSTREAM_ADDONS`.
-  Never pass either override to an App Store submission archive. Run
-  `bash scripts/check-no-addons-in-release.sh` before shipping (SHIP-CHECKLIST.md §4).
-  **Gate for any change that touches code under `#if OPENSTREAM_ADDONS` or its `#else`:** build
-  `-configuration Release CODE_SIGNING_ALLOWED=NO` for iOS, tvOS, visionOS and macOS. Debug, SwiftPM and E2E all
-  define the flag, so they cannot see a no-add-ons break (two shipped unseen in 947fdc1/e4409ca, fixed 6e92441).
+- **OpenStream has no add-ons (owner 2026-10-22).** It plays media the user owns: local files and disc images,
+  network shares, Plex/Jellyfin/Emby servers and the user's own IPTV/M3U/Xtream playlists. Never add code that
+  loads third-party catalogs, metadata or streams (Stremio-style manifests, torrent/debrid/magnet handling,
+  catalog providers), and never bring back a compilation condition for it; the old code lives only on the private
+  branch `archive/addons-2026-10-22`. A source of a kind the app does not know (the old add-on sources) is deleted
+  with its Keychain entries on load, iCloud sync, backup restore and setup transfer (`AppleRetiredSource`).
+  No user-visible or shipped text says add-on, Stremio, torrent, debrid or catalog provider:
+  `bash scripts/check-no-addons-in-release.sh --build` (or with built `.app`/`.xcarchive` paths) must pass for
+  every platform and configuration before shipping (SHIP-CHECKLIST.md §4).
 
 - The app targets consume `Sources/OpenStreamApple` through the local SwiftPM package; new files
   are picked up automatically — but `#if os(tvOS)` files never compile in the SPM gate (macOS),
@@ -147,8 +142,6 @@ skill; the server runs on Dev-Mini (`ssh -T dev-mini ~/Developer/bin/rea-mcp.sh`
 - A lazy `List` hides off-screen rows from XCUITest — scroll before asserting.
 - SwiftUI Form pickers are tapped through their VALUE button in UI tests, not the label.
 - Match episode-row controls by identifier (`detail.episode.download`), not label — labels change.
-- Awaiting `addStremio(manifestValue:)` with its default `client:` from inside `AppleSourceStore`
-  crashes the task allocator; pass `client: manifestClient`.
 - `simctl get_app_container` can return a stale container after a UI-test install; find the live
   one by mtime. The interaction trace is `<container>/Library/Caches/openstream-trace.log`.
 - `#if DEBUG … #else …` — the `#else` branch only compiles in Release archives; reference-check it.
@@ -234,7 +227,7 @@ check your diff against that skill's review list before you report.
 | the web portal / landing page look, any new visual direction | `frontend-design` | one bold element, quiet everything else; stock Apple stays stock |
 | posters, press images, social art | `canvas-design` (refs: 83) | brand: black, white, accent #FF3366, no gradients |
 | App Store name/subtitle/keywords/description, listing audit | `aso` first; `vibe-aso` for keyword research + 50-locale metadata (its setup wants an ASC API key — use the existing `asc` login, NEVER paste a key) | French testers → fr-FR first |
-| positioning, "why OpenStream vs Stremio/Infuse", messaging | `product-marketing` → then `copywriting` | write the context doc once, reuse it |
+| positioning, "why OpenStream vs Infuse/Plex", messaging | `product-marketing` → then `copywriting` | write the context doc once, reuse it |
 | TestFlight "What to Test", Reddit/TraceEnabled group posts, release notes | `launch` + `copywriting` + `social` | short, plain, no hype |
 | pricing/tiers questions | `pricing` | owner decides; skill drafts |
 | marketing plan / channel choice / measuring it | `marketing-plan`, `analytics` | drafts for the owner |

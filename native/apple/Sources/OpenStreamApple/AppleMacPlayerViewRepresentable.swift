@@ -1,8 +1,8 @@
 /// Whether the app's captions menu is shown beside the stock player on the
 /// Mac and iPhone — one captions control wherever AVKit's can do the job.
 ///
-/// AVKit lists the item's legible renditions and nothing else. Add-on
-/// subtitle files (sidecars, ids from 1 000 000) never become one, and
+/// AVKit lists the item's legible renditions and nothing else. Sidecar
+/// subtitle files (ids from 1 000 000) never become one, and
 /// neither do bitmap tracks (PGS, DVB, VobSub) or CEA-708, which the engine
 /// draws itself. The default engine's loopback streams declare no renditions
 /// on these platforms (`AetherPlaybackEngine.declaresNativeSubtitleRenditions`),

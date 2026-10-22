@@ -10,7 +10,7 @@ import Testing
 @Test func playGatingCanonicalMediaIDTrimsSurroundingWhitespaceBeforeValidating() {
     #expect(ApplePlayGatingPolicy.canonicalMediaID("  tt1234567  ") == "tt1234567")
     #expect(ApplePlayGatingPolicy.canonicalMediaID("   ") == nil)
-    #expect(ApplePlayGatingPolicy.requiresIdentifierResolution(mediaID: "   "))
+    #expect(ApplePlayGatingPolicy.isPreparingOnAppear(mediaID: "   "))
 }
 
 @Test func playGatingCanonicalMediaIDRejectsAnIdentifierShorterThanTheImdbFormat() {
@@ -27,7 +27,7 @@ import Testing
 
 @Test func playGatingCanonicalMediaIDRejectsATwoPartIdentifier() {
     #expect(ApplePlayGatingPolicy.canonicalMediaID("tt1234567:1") == nil)
-    #expect(ApplePlayGatingPolicy.requiresIdentifierResolution(mediaID: "tt1234567:1"))
+    #expect(ApplePlayGatingPolicy.isPreparingOnAppear(mediaID: "tt1234567:1"))
 }
 
 @Test func playGatingCanonicalMediaIDEnforcesTheEpisodeNumberBoundaries() {
@@ -38,26 +38,26 @@ import Testing
 
 @Test func playGatingDefaultEpisodeIDSkipsSeasonZeroSpecialsWhenALaterSeasonExists() {
     let episodes = [
-        AppleStremioEpisode(id: "tt1234567:0:1", title: "Special", season: 0, episode: 1),
-        AppleStremioEpisode(id: "tt1234567:2:2", title: "Second of season two", season: 2, episode: 2),
-        AppleStremioEpisode(id: "tt1234567:2:1", title: "First of season two", season: 2, episode: 1),
+        AppleMediaEpisode(id: "tt1234567:0:1", title: "Special", season: 0, episode: 1),
+        AppleMediaEpisode(id: "tt1234567:2:2", title: "Second of season two", season: 2, episode: 2),
+        AppleMediaEpisode(id: "tt1234567:2:1", title: "First of season two", season: 2, episode: 1),
     ]
     #expect(ApplePlayGatingPolicy.defaultEpisodeID(episodes: episodes) == "tt1234567:2:1")
 }
 
 @Test func playGatingDefaultEpisodeIDFallsBackToSeasonZeroWhenItIsTheOnlySeasonAvailable() {
     let episodes = [
-        AppleStremioEpisode(id: "tt1234567:0:2", title: "Special two", season: 0, episode: 2),
-        AppleStremioEpisode(id: "tt1234567:0:1", title: "Special one", season: 0, episode: 1),
+        AppleMediaEpisode(id: "tt1234567:0:2", title: "Special two", season: 0, episode: 2),
+        AppleMediaEpisode(id: "tt1234567:0:1", title: "Special one", season: 0, episode: 1),
     ]
     #expect(ApplePlayGatingPolicy.defaultEpisodeID(episodes: episodes) == "tt1234567:0:1")
 }
 
 @Test func playGatingDefaultEpisodeIDReturnsNilWhenNoEpisodeCarriesBothASeasonAndAnEpisodeNumber() {
     let episodes = [
-        AppleStremioEpisode(id: "tt1234567:1:1", title: "Missing season", season: nil, episode: 1),
-        AppleStremioEpisode(id: "tt1234567:1:2", title: "Missing episode", season: 1, episode: nil),
-        AppleStremioEpisode(id: "", title: "Empty id", season: 1, episode: 1),
+        AppleMediaEpisode(id: "tt1234567:1:1", title: "Missing season", season: nil, episode: 1),
+        AppleMediaEpisode(id: "tt1234567:1:2", title: "Missing episode", season: 1, episode: nil),
+        AppleMediaEpisode(id: "", title: "Empty id", season: 1, episode: 1),
     ]
     #expect(ApplePlayGatingPolicy.defaultEpisodeID(episodes: episodes) == nil)
 }

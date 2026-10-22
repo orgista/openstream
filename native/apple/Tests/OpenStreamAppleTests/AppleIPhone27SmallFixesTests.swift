@@ -58,7 +58,7 @@ import Testing
                 == "The server is busy.")
     }
 
-    @Test func searchShowsTheSameAddonNameAsTheRows() {
-        #expect(AppleCatalogShelfPolicy.displaySourceName("AIOMetadata  | ElfHosted") == "AIOMetadata")
+    @Test func searchShowsTheSameSourceNameAsTheRows() {
+        #expect(AppleCatalogShelfPolicy.displaySourceName("Living  Room | Fixture Host") == "Living Room")
     }
 }

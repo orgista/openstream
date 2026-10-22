@@ -9,7 +9,6 @@ import SwiftUI
 struct AppleDiscoverRowsSettingsView: View {
     let settings: AppleSettingsStore
     let sourceStore: AppleSourceStore
-    let catalogStore: AppleCatalogStore?
     #if os(tvOS)
     /// The row the remote is carrying, if any.
     @State private var carriedRowID: String?
@@ -22,20 +21,13 @@ struct AppleDiscoverRowsSettingsView: View {
     }
 
     /// Every row Discover can draw right now, in the viewer's order.
-    static func rows(settings: AppleSettingsStore, sourceStore: AppleSourceStore,
-                     catalogStore: AppleCatalogStore?) -> [Row] {
+    static func rows(settings: AppleSettingsStore, sourceStore: AppleSourceStore) -> [Row] {
         let enabled = sourceStore.sources.filter(\.isEnabled)
         var ids = [AppleDiscoverRowOrder.continueWatching, AppleDiscoverRowOrder.library]
         if enabled.contains(where: { $0.kind == .mediaServer }) { ids.append(AppleDiscoverRowOrder.mediaServers) }
         ids.append(AppleDiscoverRowOrder.topPicks)
         if settings.top10ListsEnabled { ids += [AppleDiscoverRowOrder.top10Movies, AppleDiscoverRowOrder.top10Shows] }
-        var defaultRows = ids.compactMap { id in AppleDiscoverRowOrder.title(forBuiltIn: id).map { Row(id: id, title: $0) } }
-        let sections = AppleCatalogShelfPolicy.visibleSections(catalogStore?.sections ?? [],
-                                                               activeSourceIDs: Set(enabled.map(\.id)))
-        defaultRows += sections.map { section in
-            Row(id: AppleDiscoverRowOrder.catalogID(section.id),
-                title: section.shelfTitle ?? AppleCatalogShelfPolicy.title(for: section.catalog))
-        }
+        let defaultRows = ids.compactMap { id in AppleDiscoverRowOrder.title(forBuiltIn: id).map { Row(id: id, title: $0) } }
         let byID = Dictionary(defaultRows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return AppleDiscoverRowOrder.resolve(available: defaultRows.map(\.id), custom: settings.discoverRowOrder)
             .compactMap { byID[$0] }
@@ -47,7 +39,7 @@ struct AppleDiscoverRowsSettingsView: View {
     }
 
     private var rows: [Row] {
-        Self.rows(settings: settings, sourceStore: sourceStore, catalogStore: catalogStore)
+        Self.rows(settings: settings, sourceStore: sourceStore)
     }
 
     var body: some View {
@@ -62,20 +54,6 @@ struct AppleDiscoverRowsSettingsView: View {
         .onExitCommand(perform: carriedRowID == nil ? nil : { carriedRowID = nil })
         #endif
         .appleSettingsPage("Discover Rows")
-        .task(id: catalogConfigurationIdentity(sourceStore.sources)) {
-            // Catalogue shelves are read from the cache by Discover; opening
-            // Settings first (or with Discover hidden) listed only the
-            // built-in rows. Never while a refresh runs: loading the cache
-            // cancels it, and the refresh publishes the shelves itself.
-            guard let catalogStore else { return }
-            appleTrace("discoverRows.catalogs sections=\(catalogStore.sections.count) loading=\(catalogStore.isLoading) sources=\(sourceStore.sources.count)")
-            guard !catalogStore.isLoading,
-                  AppleDiscoverRowsCatalogPolicy.needsCachedLoad(sections: catalogStore.sections,
-                                                                 sources: sourceStore.sources)
-            else { return }
-            await catalogStore.loadCachedSections(sources: sourceStore.sources)
-            appleTrace("discoverRows.catalogs loaded=\(catalogStore.sections.count)")
-        }
     }
 
     @ViewBuilder
@@ -223,17 +201,3 @@ struct AppleTVFocusReadableText: View {
     }
 }
 #endif
-
-/// When Discover Rows should read the catalogue shelves from the cache: none
-/// are loaded, or the loaded ones no longer match the sources (a source was
-/// added, removed or reconfigured since Discover last loaded them).
-enum AppleDiscoverRowsCatalogPolicy {
-    static func needsCachedLoad(sections: [AppleCatalogSection], sources: [AppleSource]) -> Bool {
-        if sections.isEmpty { return true }
-        let configured = Dictionary(sources.map { ($0.id, AppleCatalogDiscoveryPolicy.sourceConfigurationID(for: $0)) },
-                                    uniquingKeysWith: { first, _ in first })
-        if sections.contains(where: { configured[$0.sourceID] != $0.sourceConfigurationID }) { return true }
-        let loaded = Set(sections.map(\.sourceID))
-        return sources.contains { !AppleCatalogDiscoveryPolicy.catalogs(for: $0).isEmpty && !loaded.contains($0.id) }
-    }
-}

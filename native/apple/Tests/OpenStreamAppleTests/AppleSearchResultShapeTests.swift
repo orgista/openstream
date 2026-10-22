@@ -11,13 +11,7 @@ import Testing
 @Suite(.serialized)
 struct AppleSearchResultShapeTests {
     private func store() -> AppleCatalogSearchStore {
-        AppleCatalogSearchStore(
-            client: AppleStremioCatalogClient(loader: { _ in throw CancellationError() }),
-            debounce: .milliseconds(1),
-            deadline: .milliseconds(30),
-            maximumResults: 50,
-            maximumConcurrentRequests: 1
-        )
+        AppleCatalogSearchStore(debounce: .milliseconds(1), maximumResults: 50)
     }
 
     private func record(
@@ -43,12 +37,12 @@ struct AppleSearchResultShapeTests {
     @Test func everyEpisodeFileOfAShowCollapsesToOneRow() async {
         let subject = store()
         let files = (1 ... 8).map { record(.video, "Jury Duty", year: 2023, reference: "s1e\($0)") }
-        await subject.search(query: "jury duty", sources: [], baseSections: []) { _ in files }
+        await subject.search(query: "jury duty") { _ in files }
         #expect(subject.results.count == 1)
         #expect(subject.results.first?.title == "Jury Duty")
     }
 
-    /// An add-on that returns episodes has them dropped outright.
+    /// A source that returns episodes has them dropped outright.
     @Test func episodeRecordsAreNotResults() async {
         let subject = store()
         let mixed = [
@@ -56,7 +50,7 @@ struct AppleSearchResultShapeTests {
             record(.episode, "Jury Duty", year: 2023, reference: "ep1"),
             record(.episode, "Jury Duty", year: 2023, reference: "ep2"),
         ]
-        await subject.search(query: "jury duty", sources: [], baseSections: []) { _ in mixed }
+        await subject.search(query: "jury duty") { _ in mixed }
         #expect(subject.results.count == 1)
         #expect(subject.results.allSatisfy { $0.kind != .episode })
     }
@@ -71,7 +65,7 @@ struct AppleSearchResultShapeTests {
             summary: "A man thinks he is a juror.",
             artwork: URL(string: "https://example.com/art.jpg")
         )
-        await subject.search(query: "jury duty", sources: [], baseSections: []) { _ in [local, catalog] }
+        await subject.search(query: "jury duty") { _ in [local, catalog] }
         #expect(subject.results.count == 1)
         let merged = subject.results.first
         #expect(merged?.summary != nil)
@@ -83,14 +77,14 @@ struct AppleSearchResultShapeTests {
     @Test func twoFilmsOfTheSameNameStaySeparate() async {
         let subject = store()
         let films = [record(.movie, "Dune", year: 1984), record(.movie, "Dune", year: 2021)]
-        await subject.search(query: "dune", sources: [], baseSections: []) { _ in films }
+        await subject.search(query: "dune") { _ in films }
         #expect(subject.results.count == 2)
     }
 
     /// The field offers "movies, shows, and channels" — live channels stay.
     @Test func channelsAreStillResults() async {
         let subject = store()
-        await subject.search(query: "news", sources: [], baseSections: []) { _ in
+        await subject.search(query: "news") { _ in
             [self.record(.channel, "News Channel")]
         }
         #expect(subject.results.count == 1)
@@ -98,18 +92,18 @@ struct AppleSearchResultShapeTests {
     }
 
     /// Apple TV regression 2026-10-01: the exact title sat under near
-    /// matches left over from the half-typed query until the add-ons answered.
+    /// matches left over from the half-typed query until the search answered.
     @Test func rowsReRankForTheTypedQueryBeforeTheSearchAnswers() async {
         let subject = store()
         let typed = [record(.movie, "Saturday Night Life", year: 2006),
                      record(.series, "Saturday Night Lights", year: 2026),
                      record(.series, "Saturday Night Live", year: 1975)]
-        await subject.search(query: "saturday night li", sources: [], baseSections: []) { _ in typed }
+        await subject.search(query: "saturday night li") { _ in typed }
         #expect(subject.results.first?.title == "Saturday Night Life")
 
         let (gate, release) = AsyncStream<Void>.makeStream()
         let pending = Task { @MainActor in
-            await subject.search(query: "saturday night live", sources: [], baseSections: []) { _ in
+            await subject.search(query: "saturday night live") { _ in
                 for await _ in gate { break }
                 return typed
             }

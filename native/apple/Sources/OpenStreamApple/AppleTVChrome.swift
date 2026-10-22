@@ -32,8 +32,8 @@ enum AppleTVChromeMetrics {
 }
 
 /// Title 3 header drawn inside a pushed tvOS page, above its rows, so a title
-/// can never sit on top of the first row (owner bug U1: "Cinemeta",
-/// "Subtitle Languages", "Add Network Share").
+/// can never sit on top of the first row (owner bug U1: "Subtitle Languages",
+/// "Add Network Share").
 struct TVPageHeader: View {
     let title: String
 

@@ -236,23 +236,6 @@ func fallbackMediaRecordKeysKeepTheirPersistedNormalization(canonicalID: String?
     #expect(result.progress == 0.42)
 }
 
-@Test func catalogRefreshKeepsOpenedSearchTitlesAndFavoritesUntilSourceRemoval() async throws {
-    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-    defer { try? FileManager.default.removeItem(at: root) }
-    let repository = AppleMediaIndexRepository(fileURL: root.appendingPathComponent("index.json"))
-    let source = UUID()
-    let searched = AppleMediaRecord(canonicalID: "tt12345678", kind: .movie, title: "Search-only title",
-        availability: [.init(instanceID: source, capability: .resolvable, itemReference: "movie|tt12345678")])
-    try await repository.upsert(searched)
-    try await repository.setFavorite(true, recordID: searched.id)
-    try await repository.replaceCatalog(instanceID: source, with: [])
-    let saved = try #require(await repository.records().first)
-    #expect(saved.id == searched.id)
-    #expect(saved.isFavorite)
-    try await repository.retainAvailability(for: [])
-    #expect(await repository.records().isEmpty)
-}
-
 @Test func mediaIndexQuarantinesCorruptDataBeforeWritingAgain() async throws {
     let root = FileManager.default.temporaryDirectory
         .appending(path: "openstream-index-corrupt-\(UUID().uuidString)", directoryHint: .isDirectory)
@@ -435,43 +418,6 @@ func fallbackMediaRecordKeysKeepTheirPersistedNormalization(canonicalID: String?
     #expect(decoded.topPicks.isEmpty)
 }
 
-@Test func topShelfSnapshotWriterBuildsTopPicksFromTheFirstNonEmptyCatalogShelf() async throws {
-    let root = FileManager.default.temporaryDirectory
-        .appending(path: "openstream-topshelf-picks-test-\(UUID().uuidString)", directoryHint: .isDirectory)
-    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-    defer { try? FileManager.default.removeItem(at: root) }
-
-    let source = AppleSource(
-        kind: .stremio,
-        name: "Cinemeta",
-        url: URL(string: "https://example.com/manifest.json")!
-    )
-    let emptyCatalog = AppleStremioCatalog(type: "movie", id: "empty")
-    let popularCatalog = AppleStremioCatalog(type: "movie", id: "top")
-    let items = (0 ..< 15).map { index in
-        AppleCatalogItem(
-            mediaID: "tt\(String(format: "%07d", index))",
-            type: "movie",
-            name: "Popular \(index)",
-            posterURL: URL(string: "https://image.tmdb.org/t/p/w500/\(index).jpg")
-        )
-    }
-    let sections = [
-        AppleCatalogSection(source: source, catalog: emptyCatalog, items: []),
-        AppleCatalogSection(source: source, catalog: popularCatalog, items: items),
-    ]
-
-    let writer = AppleTopShelfSnapshotWriter(containerProvider: { root })
-    try await writer.write(records: [], sections: sections, enabled: true)
-
-    let data = try Data(contentsOf: root.appending(path: AppleTopShelfSnapshotWriter.filename))
-    let snapshot = try JSONDecoder().decode(AppleTopShelfSnapshot.self, from: data)
-    #expect(snapshot.topPicks.count == 10)
-    #expect(snapshot.topPicks.allSatisfy { $0.displayURL.host == "media" && $0.id.count == 64 })
-    let text = String(decoding: data, as: UTF8.self)
-    #expect(!text.contains("tt0000000"))
-}
-
 @Test func topShelfContentBuilderOrdersContinueWatchingBeforeTopPicksAndNilsWhenEmpty() {
     func makeItem(_ id: String) -> AppleTopShelfSnapshot.Item {
         .init(
@@ -504,11 +450,11 @@ func fallbackMediaRecordKeysKeepTheirPersistedNormalization(canonicalID: String?
     ) == nil)
     // Was asserted as rejected when the policy was a two-host allowlist. That
     // allowlist is what emptied the owner's Continue Watching shelf on
-    // 2026-09-16: add-ons serve posters from their own CDNs. A public https
+    // 2026-09-16: sources serve posters from their own CDNs. A public https
     // host with no credentials and no query is now allowed; see
     // AppleSystemArtworkPolicyTests.
     #expect(AppleSystemArtworkPolicy.publicURL(
-        URL(string: "https://addon.example/private-token/poster.jpg")!
+        URL(string: "https://cdn.example/private-token/poster.jpg")!
     ) != nil)
     #expect(AppleSystemArtworkPolicy.publicURL(
         URL(string: "https://nas.local/poster.jpg")!
@@ -642,40 +588,6 @@ private final class RecordLookupChangeFlag {
     try await store.replace(instanceID: instance, with: [renamed])
     #expect(store.revision != revision)
     #expect(store.records.map(\.title) == ["A Movie (Director's Cut)"])
-}
-
-/// Discover indexes every add-on in one write; the result must be what one
-/// write per add-on gave, retained favourites and overlapping titles included.
-@Test func indexingSeveralCatalogsAtOnceMatchesOneAtATime() async throws {
-    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-    defer { try? FileManager.default.removeItem(at: root) }
-    let first = UUID(), second = UUID()
-    let verified = Date(timeIntervalSince1970: 1_000)
-    func record(_ id: String, _ title: String, _ source: UUID) -> AppleMediaRecord {
-        AppleMediaRecord(canonicalID: id, kind: .movie, title: title,
-            availability: [.init(instanceID: source, capability: .resolvable, itemReference: "movie|\(id)")],
-            lastVerified: verified)
-    }
-    let favourite = record("tt0000009", "Kept favourite", first)
-    let catalogs: [(instanceID: UUID, records: [AppleMediaRecord])] = [
-        (first, [record("tt0000001", "Shared", first), record("tt0000002", "Only first", first)]),
-        (second, [record("tt0000001", "Shared", second), record("tt0000003", "Only second", second)]),
-    ]
-    func seeded(_ name: String) async throws -> AppleMediaIndexRepository {
-        let repository = AppleMediaIndexRepository(fileURL: root.appendingPathComponent(name))
-        try await repository.upsert(favourite)
-        try await repository.setFavorite(true, recordID: favourite.id)
-        return repository
-    }
-    let oneByOne = try await seeded("one.json")
-    for catalog in catalogs { try await oneByOne.replaceCatalog(instanceID: catalog.instanceID, with: catalog.records) }
-    let batched = try await seeded("batch.json")
-    try await batched.replaceCatalogs(catalogs)
-
-    #expect(await batched.records() == oneByOne.records())
-    #expect(await batched.records().count == 4)
-    #expect(await batched.lastSuccessfulScan(for: second) != nil)
-    #expect(await AppleMediaIndexRepository(fileURL: root.appendingPathComponent("batch.json")).records() == batched.records())
 }
 
 @MainActor @Test(arguments: [true, false])

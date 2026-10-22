@@ -86,13 +86,13 @@ struct AppleXtreamLibraryTests {
 
     @MainActor @Test func seriesSelectionResumeWatchedAndNextEpisode() throws {
         let reference = AppleXtreamReference(sourceID: sourceID, kind: .series, providerID: "201")
-        let episodes = [AppleStremioEpisode(id: reference.mediaID + ":1:1", title: "Pilot", season: 1, episode: 1),
-                        AppleStremioEpisode(id: reference.mediaID + ":2:1", title: "Next", season: 2, episode: 1)]
-        #expect(AppleStremioEpisodeSelection(seriesMediaID: reference.mediaID, episode: episodes[0])?.mediaID == episodes[0].id)
-        #expect(AppleStremioEpisodeSelection(seriesMediaID: reference.mediaID, episode: episodes[1]) != nil)
-        #expect(AppleStremioEpisodeSelection(seriesMediaID: reference.mediaID,
-            episode: AppleStremioEpisode(id: reference.mediaID + ":1:1", title: "Bad", season: 2, episode: 1)) == nil)
-        #expect(AppleStremioEpisodePolicy.following(episodes[0], in: episodes) == episodes[1])
+        let episodes = [AppleMediaEpisode(id: reference.mediaID + ":1:1", title: "Pilot", season: 1, episode: 1),
+                        AppleMediaEpisode(id: reference.mediaID + ":2:1", title: "Next", season: 2, episode: 1)]
+        #expect(AppleMediaEpisodeSelection(seriesMediaID: reference.mediaID, episode: episodes[0])?.mediaID == episodes[0].id)
+        #expect(AppleMediaEpisodeSelection(seriesMediaID: reference.mediaID, episode: episodes[1]) != nil)
+        #expect(AppleMediaEpisodeSelection(seriesMediaID: reference.mediaID,
+            episode: AppleMediaEpisode(id: reference.mediaID + ":1:1", title: "Bad", season: 2, episode: 1)) == nil)
+        #expect(AppleMediaEpisodePolicy.following(episodes[0], in: episodes) == episodes[1])
         let suite = "xtream-progress-" + UUID().uuidString
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -102,7 +102,7 @@ struct AppleXtreamLibraryTests {
         #expect(AppleDetailResume.position(mediaID: reference.mediaID, partID: episodes[1].id, store: store) == nil)
         store.save(mediaID: reference.mediaID, position: 299, duration: 300, partID: episodes[0].id)
         #expect(store.isWatched(mediaID: episodes[0].id))
-        #expect(AppleStremioEpisodePolicy.upNext(from: episodes, completedIDs: [episodes[0].id]) == episodes[1])
+        #expect(AppleMediaEpisodePolicy.upNext(from: episodes, completedIDs: [episodes[0].id]) == episodes[1])
     }
 
     @Test func detailSortsEpisodesAndReadsMovieContainerAndTMDB() async throws {
@@ -211,7 +211,7 @@ struct AppleXtreamLibraryTests {
         #expect(!request.isLive)
         #expect(request.resumePosition == 30)
         #expect(request.hints.progressPartID == episode.id)
-        #expect(request.hints.addonMediaID == nil)
+        #expect(request.hints.titleMediaID == nil)
         #expect(try await library.request(reference: ref, episodeID: episode.id, mediaID: identity, fromBeginning: true).resumePosition == nil)
         sourceStore.setEnabled(false, id: source.id)
         await library.reload(sourceStore: sourceStore)

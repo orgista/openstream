@@ -26,7 +26,6 @@ struct AppleDevSourcesPolicyTests {
     @Test func schemaV1DecodesEveryKindAndTheServiceKeys() throws {
         let file = try decode("""
         {"version": 1, "sources": [
-          {"kind": "stremio", "name": "Cinemeta", "manifestURL": "https://addon.fixture.example/manifest.json"},
           {"kind": "xtream", "name": "Box", "serverURL": "http://iptv.fixture.example:8080",
            "username": "fixture-user", "password": "fixture-password", "epgURL": ""},
           {"kind": "m3u", "name": "List", "playlistURL": "https://iptv.fixture.example/list.m3u",
@@ -46,7 +45,6 @@ struct AppleDevSourcesPolicyTests {
         #expect(file.problems.isEmpty)
         #expect(file.ignoredKinds.isEmpty)
         #expect(file.sources == [
-            .stremio(name: "Cinemeta", manifestURL: "https://addon.fixture.example/manifest.json"),
             .xtream(name: "Box", serverURL: "http://iptv.fixture.example:8080", username: "fixture-user",
                     password: "fixture-password", epgURL: nil),
             .m3u(name: "List", playlistURL: "https://iptv.fixture.example/list.m3u",
@@ -67,12 +65,12 @@ struct AppleDevSourcesPolicyTests {
     @Test func unknownKindsAreIgnoredAndTheRestStillImports() throws {
         let file = try decode("""
         {"version": 1, "sources": [
-          {"kind": "torrent", "name": "Later"},
-          {"kind": "stremio", "manifestURL": "https://addon.fixture.example/manifest.json"}
+          {"kind": "ftp", "name": "Later"},
+          {"kind": "m3u", "playlistURL": "https://iptv.fixture.example/list.m3u"}
         ]}
         """)
 
-        #expect(file.ignoredKinds == ["torrent"])
+        #expect(file.ignoredKinds == ["ftp"])
         #expect(file.sources.count == 1)
         #expect(file.problems.isEmpty)
         #expect(file.settings == AppleDevSettings())
@@ -113,24 +111,20 @@ struct AppleDevSourcesPolicyTests {
     }
 
     @Test func aSourceWithTheSameKindAndAddressIsAlreadyAdded() throws {
-        let addon = try #require(URL(string: "https://addon.fixture.example/manifest.json"))
         let share = try AppleSMBEndpointPolicy.makeURL(host: "192.0.2.10", port: 445, share: "Media")
         let saved = [
-            AppleSource(kind: .stremio, name: "Cinemeta", url: addon),
             AppleSource(kind: .nas, name: "NAS", url: share),
             AppleSource(kind: .liveTV, name: "List", url: try #require(URL(string: "https://iptv.fixture.example/list.m3u")),
                         iptvType: .m3u),
         ]
 
         #expect(AppleDevSourcesPolicy.alreadyAdded(
-            .stremio(name: "", manifestURL: "https://addon.fixture.example/manifest.json"), in: saved))
-        #expect(!AppleDevSourcesPolicy.alreadyAdded(
-            .stremio(name: "", manifestURL: "https://other.fixture.example/manifest.json"), in: saved))
-        #expect(AppleDevSourcesPolicy.alreadyAdded(
             .smb(name: "Renamed", host: "192.0.2.10", port: 445, share: "Media", path: "",
                  username: "", password: "", domain: ""), in: saved))
         #expect(AppleDevSourcesPolicy.alreadyAdded(
             .m3u(name: "", playlistURL: "https://iptv.fixture.example/list.m3u", epgURL: nil), in: saved))
+        #expect(!AppleDevSourcesPolicy.alreadyAdded(
+            .m3u(name: "", playlistURL: "https://other.fixture.example/list.m3u", epgURL: nil), in: saved))
         // Same address, different kind: a playlist is not an Xtream login.
         #expect(!AppleDevSourcesPolicy.alreadyAdded(
             .xtream(name: "", serverURL: "https://iptv.fixture.example/list.m3u", username: "u",
@@ -165,8 +159,8 @@ struct AppleDevSourcesPolicyTests {
         #expect(!line.contains("fixture-user"))
         #expect(!line.contains("iptv.fixture.example"))
         #expect(AppleDevSourcesPolicy.traceLine(
-            for: .stremio(name: "", manifestURL: "https://addon.fixture.example/secret-config/manifest.json"),
-            outcome: .added) == "dev sources: stremio addon.fixture.example: added")
+            for: .folder(name: "", path: "/tmp/fixture"),
+            outcome: .added) == "dev sources: folder (unnamed): added")
         #expect(AppleDevSourcesPolicy.summaryLine(added: 2, exists: 1, failed: 0, skipped: 3)
             == "dev sources: done (2 added, 1 exists, 0 failed, 3 skipped)")
     }

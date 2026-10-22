@@ -13,7 +13,7 @@ import SwiftUI
 /// runs once the player is on screen: `stock:` does what AVKit's CC menu does
 /// (`select(_:in:)` on the item), `app:` what the app's own menu does
 /// (through the host, as `AppleMacPlayerViewRepresentable` calls it),
-/// `sidecar` adds `-OpenStreamCaptionsProbeSidecar <file.srt>` as an add-on
+/// `sidecar` adds `-OpenStreamCaptionsProbeSidecar <file.srt>` as a sidecar
 /// track and picks it. After each step it writes `<n>-<step>.png` (the window,
 /// as `AppleMacWindowShot` renders it) and a line with what each renderer
 /// holds: the item's selected legible option, the engine's active track and
@@ -35,7 +35,7 @@ enum AppleDebugMacCaptionsProbe {
     /// window.
     struct Presenter: ViewModifier {
         let settings: AppleSettingsStore
-        @State private var presentation: AppleStremioPlayerPresentation?
+        @State private var presentation: AppleMediaPlayerPresentation?
 
         func body(content: Content) -> some View {
             content
@@ -46,40 +46,12 @@ enum AppleDebugMacCaptionsProbe {
                           let raw = defaults.string(forKey: "OpenStreamVisionPlaybackURL"),
                           let url = URL(string: raw), url.isFileURL || url.host == "127.0.0.1" else { return }
                     try? await Task.sleep(for: .seconds(2))
-                    var next = AppleStremioPlayerPresentation(
+                    presentation = AppleMediaPlayerPresentation(
                         request: ApplePlaybackRequest(url: url, mediaID: "captions-probe",
                                                       title: url.lastPathComponent, sourceKind: .files),
                         settings: settings)
-                    next.sourceOptionsLoader = { [settings] in AppleDebugMacCaptionsProbe.fixtureOptions(playing: url, settings: settings) }
-                    presentation = next
                 }
         }
-    }
-
-    /// The ranking table's sample names as the Quality sheet's candidates.
-    /// Every one plays the probe's own file.
-    static func fixtureOptions(playing url: URL, settings: AppleSettingsStore) -> ApplePlaybackSourceOptions {
-        let names = ["Film.2023.2160p.DV.HDR10.HEVC.DDP5.1.mkv", "Film.2023.2160p.HDR.HEVC.EAC3.mp4",
-                     "Film.2023.1080p.WEB.H264.AAC.mp4", "Film.2023.1080p.WEB.H265.EAC3.mkv",
-                     "Film.2023.720p.x264.AAC.mkv", "Film.2023.480p.XviD.MP3.avi"]
-        let streams = names.map {
-            AppleStremioHTTPPlaybackCandidate(title: $0, sourceURL: url.appending(queryItems: [.init(name: "n", value: $0)]),
-                                              filename: $0)
-        }
-        func option(_ candidate: AppleStremioHTTPPlaybackCandidate) -> ApplePlaybackSourceOption {
-            ApplePlaybackSourceOption(id: candidate.sourceURL, tier: AppleStremioCandidateRanking.traits(of: candidate).tier) { resume in
-                AppleStremioPlayerPresentation(request: ApplePlaybackRequest(url: url, resumePosition: resume,
-                    mediaID: "captions-probe", title: candidate.title, sourceKind: .files), settings: settings)
-            }
-        }
-        let device = AppleStreamDeviceCapabilities.current
-        let tiers = AppleStremioCandidateRanking.qualityTiers(streams, device: device)
-        return ApplePlaybackSourceOptions(
-            tiers: tiers,
-            automatic: AppleStremioCandidateRanking.playbackOrder(streams, choice: .automatic, device: device).map(option),
-            byTier: Dictionary(uniqueKeysWithValues: tiers.map { tier in
-                (tier, AppleStremioCandidateRanking.playbackOrder(streams, choice: .tier(tier), device: device).map(option))
-            }))
     }
 
     static func runIfRequested(host: ApplePlayerHost, coordinator: ApplePlaybackCoordinator,

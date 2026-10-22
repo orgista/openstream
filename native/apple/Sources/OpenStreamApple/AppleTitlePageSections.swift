@@ -416,7 +416,7 @@ struct AppleTitlePageRatePicker<Label: View>: View {
 /// synopsis clamped at a word. Tapping it plays the episode; `accessory` (the
 /// download control) sits at the end of the eyebrow line.
 struct AppleTitlePageEpisodeCard<Accessory: View>: View {
-    let episode: AppleStremioEpisode
+    let episode: AppleMediaEpisode
     let eyebrow: String
     let isWatched: Bool
     let isSelected: Bool

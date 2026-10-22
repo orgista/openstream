@@ -3,9 +3,6 @@ import Observation
 
 public enum AppleSourceKind: String, Codable, CaseIterable, Sendable {
     case library
-    #if OPENSTREAM_ADDONS
-    case stremio
-    #endif
     case youtube
     case liveTV
     case nas
@@ -14,9 +11,6 @@ public enum AppleSourceKind: String, Codable, CaseIterable, Sendable {
     public var title: String {
         switch self {
         case .library: "Library"
-        #if OPENSTREAM_ADDONS
-        case .stremio: "Add-on"
-        #endif
         case .youtube: "YouTube"
         case .liveTV: "Live TV"
         case .nas: "Network share"
@@ -100,15 +94,6 @@ public struct AppleSource: Identifiable, Codable, Equatable, Sendable {
     public var isEnabled: Bool
     public var needsSignIn: Bool = false
     public let addedAt: Date
-    public var manifestID: String?
-    public var version: String?
-    public var resources: [String]
-    public var catalogs: [AppleStremioCatalog]
-    /// The viewer's own choices on Settings › Sources › <add-on> › Catalogs,
-    /// keyed `type:id`: true shows a catalog Discover would leave out, false
-    /// hides one it would show. Empty means the default first catalogs.
-    public var catalogChoices: [String: Bool]
-    public var logoURL: URL?
     public var iptvType: AppleIPTVSourceType?
     public var epgURL: URL?
     public var credentialReference: String?
@@ -147,11 +132,6 @@ public struct AppleSource: Identifiable, Codable, Equatable, Sendable {
         url: URL,
         isEnabled: Bool = true,
         addedAt: Date = .now,
-        manifestID: String? = nil,
-        version: String? = nil,
-        resources: [String] = [],
-        catalogs: [AppleStremioCatalog] = [],
-        logoURL: URL? = nil,
         iptvType: AppleIPTVSourceType? = nil,
         epgURL: URL? = nil,
         credentialReference: String? = nil,
@@ -166,8 +146,7 @@ public struct AppleSource: Identifiable, Codable, Equatable, Sendable {
         discoveredItemCount: Int? = nil,
         capabilities: [String] = [],
         networkDisplayHost: String? = nil,
-        serverKind: AppleMediaServerKind? = nil,
-        catalogChoices: [String: Bool] = [:]
+        serverKind: AppleMediaServerKind? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -175,12 +154,6 @@ public struct AppleSource: Identifiable, Codable, Equatable, Sendable {
         self.url = url
         self.isEnabled = isEnabled
         self.addedAt = addedAt
-        self.manifestID = manifestID
-        self.version = version
-        self.resources = resources
-        self.catalogs = catalogs
-        self.catalogChoices = catalogChoices
-        self.logoURL = logoURL
         self.iptvType = iptvType
         self.epgURL = epgURL
         self.credentialReference = credentialReference
@@ -200,30 +173,13 @@ public struct AppleSource: Identifiable, Codable, Equatable, Sendable {
         legacyPassword = nil
     }
 
-    public var isAddon: Bool {
-        #if OPENSTREAM_ADDONS
-        kind == .stremio
-        #else
-        false
-        #endif
-    }
-
-    public var transportURL: URL {
-        #if OPENSTREAM_ADDONS
-        guard isAddon else { return url }
-        return AppleManifestURLPolicy.addonBaseURL(forManifest: url)
-        #else
-        return url
-        #endif
-    }
-
     private enum CodingKeys: String, CodingKey {
         case needsSignIn
-        case id, kind, name, url, isEnabled, addedAt, manifestID, version, resources, catalogs, isManagedImports
-        case logoURL, iptvType, epgURL, credentialReference, transportReference, username, password, bookmarkData
+        case id, kind, name, url, isEnabled, addedAt, isManagedImports
+        case iptvType, epgURL, credentialReference, transportReference, username, password, bookmarkData
         case configurationRevision, lastValidatedAt, validationSummary
         case lastValidationFailureAt, validationFailureSummary, discoveredItemCount, capabilities, networkDisplayHost
-        case serverKind, catalogChoices
+        case serverKind
     }
 
     public init(from decoder: Decoder) throws {
@@ -235,12 +191,6 @@ public struct AppleSource: Identifiable, Codable, Equatable, Sendable {
         isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
         needsSignIn = try container.decodeIfPresent(Bool.self, forKey: .needsSignIn) ?? false
         addedAt = try container.decodeIfPresent(Date.self, forKey: .addedAt) ?? .distantPast
-        manifestID = try container.decodeIfPresent(String.self, forKey: .manifestID)
-        version = try container.decodeIfPresent(String.self, forKey: .version)
-        resources = try container.decodeIfPresent([String].self, forKey: .resources) ?? []
-        catalogs = try container.decodeIfPresent([AppleStremioCatalog].self, forKey: .catalogs) ?? []
-        catalogChoices = (try? container.decodeIfPresent([String: Bool].self, forKey: .catalogChoices)) ?? [:]
-        logoURL = try container.decodeIfPresent(URL.self, forKey: .logoURL)
         iptvType = try container.decodeIfPresent(AppleIPTVSourceType.self, forKey: .iptvType)
         epgURL = try container.decodeIfPresent(URL.self, forKey: .epgURL)
         credentialReference = try container.decodeIfPresent(String.self, forKey: .credentialReference)
@@ -280,12 +230,6 @@ public struct AppleSource: Identifiable, Codable, Equatable, Sendable {
         try container.encode(isEnabled, forKey: .isEnabled)
         if needsSignIn { try container.encode(true, forKey: .needsSignIn) }
         try container.encode(addedAt, forKey: .addedAt)
-        try container.encodeIfPresent(manifestID, forKey: .manifestID)
-        try container.encodeIfPresent(version, forKey: .version)
-        try container.encode(resources, forKey: .resources)
-        try container.encode(catalogs, forKey: .catalogs)
-        if !catalogChoices.isEmpty { try container.encode(catalogChoices, forKey: .catalogChoices) }
-        try container.encodeIfPresent(logoURL, forKey: .logoURL)
         try container.encodeIfPresent(iptvType, forKey: .iptvType)
         try container.encodeIfPresent(epgURL, forKey: .epgURL)
         try container.encodeIfPresent(credentialReference, forKey: .credentialReference)
@@ -341,423 +285,43 @@ public struct AppleSource: Identifiable, Codable, Equatable, Sendable {
     }
 }
 
-#if OPENSTREAM_ADDONS
-public enum AppleManifestURLPolicy {
-    public enum Error: Swift.Error, Equatable, LocalizedError, Sendable {
-        case empty
-        case missingScheme
-        case insecureHTTP
-        case unsupportedScheme(String)
-        case invalidURL
-        case missingHost
-        case credentialsNotAllowed
-        case queryNotAllowed
-        case fragmentNotAllowed
-        case wrongJSONDocument(String)
+/// A saved source of a kind this app no longer has (builds before 2026-10-22
+/// could add one). It is deleted with its Keychain entries wherever
+/// it turns up (this device's list, an iCloud copy, a backup, a transfer) and
+/// never kept or passed on.
+struct AppleRetiredSource: Equatable, Sendable {
+    let id: UUID
+    let keychainReferences: [String]
 
-        public var errorDescription: String? {
-            switch self {
-            case .empty:
-                "Enter a manifest URL."
-            case .missingScheme:
-                "Add https:// to the beginning."
-            case .insecureHTTP:
-                "Use the add-on's HTTPS manifest URL."
-            case .unsupportedScheme(let scheme):
-                "\(scheme) URLs are not supported."
-            case .invalidURL:
-                "This URL is not valid."
-            case .missingHost:
-                "This URL is missing a host."
-            case .credentialsNotAllowed:
-                "URLs containing a username or password are not supported."
-            case .queryNotAllowed:
-                "URL query options are not supported."
-            case .fragmentNotAllowed:
-                "URL fragments are not supported."
-            case .wrongJSONDocument(let filename):
-                "\(filename) is not a manifest.json file."
-            }
-        }
+    /// `fields` is one source as stored: retired when it names an id and a
+    /// kind that `AppleSourceKind` does not have.
+    init?(fields: [String: Any]) {
+        guard let kind = fields["kind"] as? String, AppleSourceKind(rawValue: kind) == nil,
+              let id = (fields["id"] as? String).flatMap(UUID.init(uuidString:)) else { return nil }
+        self.id = id
+        let reference = id.uuidString.lowercased()
+        keychainReferences = [fields["credentialReference"] as? String, fields["transportReference"] as? String,
+                              reference, "transport.\(reference)", "guide.\(reference)"].compactMap { $0 }
     }
 
-    public static func normalize(_ value: String) throws -> URL {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { throw Error.empty }
-        guard let schemeSeparator = trimmed.range(of: "://"), schemeSeparator.lowerBound != trimmed.startIndex else {
-            throw Error.missingScheme
-        }
-        // A configured add-on's address may be pasted with its JSON segment
-        // still in raw braces; encode only what the parser cannot accept.
-        guard var components = URLComponents(string: trimmed)
-            ?? URLComponents(string: trimmed, encodingInvalidCharacters: true) else {
-            throw Error.invalidURL
-        }
-
-        // Add-on directories hand out install links under their own scheme.
-        // They address the same HTTPS manifest, so accept them as pasted.
-        var scheme = components.scheme?.lowercased()
-        if scheme == "stremio" || scheme == "openstream" {
-            scheme = "https"
-        }
-        if scheme == "http" {
-            guard let host = components.host, isLoopbackHost(host) else {
-                throw Error.insecureHTTP
-            }
-        }
-        guard scheme == "https" || scheme == "http" else {
-            throw Error.unsupportedScheme(scheme ?? "Unknown")
-        }
-        guard let host = components.host, !host.isEmpty else { throw Error.missingHost }
-        guard components.user == nil, components.password == nil else { throw Error.credentialsNotAllowed }
-        guard components.query == nil else { throw Error.queryNotAllowed }
-        guard components.fragment == nil else { throw Error.fragmentNotAllowed }
-
-        let filename = components.path.split(separator: "/").last.map(String.init)
-        if let filename,
-           filename.lowercased().hasSuffix(".json"),
-           filename.lowercased() != "manifest.json" {
-            throw Error.wrongJSONDocument(filename)
-        }
-
-        components.scheme = scheme
-        components.host = host.lowercased()
-        if components.port == 443 { components.port = nil }
-        if filename?.lowercased() != "manifest.json" {
-            // Work on the encoded path so a configured add-on's JSON or base64
-            // segment stays byte-for-byte what the owner pasted.
-            let basePath = components.percentEncodedPath
-                .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-            components.percentEncodedPath = basePath.isEmpty
-                ? "/manifest.json"
-                : "/\(basePath)/manifest.json"
-        }
-
-        guard let normalized = components.url else { throw Error.invalidURL }
-        return normalized
-    }
-
-    /// The add-on's base address: the manifest URL with only the trailing
-    /// `manifest.json` removed (the slash before it stays). Works on the
-    /// percent-encoded path so a configured add-on's JSON or base64 segment
-    /// is never decoded or re-encoded on the way to its catalog endpoints.
-    public static func addonBaseURL(forManifest url: URL) -> URL {
-        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
-        let path = components.percentEncodedPath
-        let suffix = "manifest.json"
-        guard path.lowercased().hasSuffix("/\(suffix)") else { return url }
-        components.percentEncodedPath = String(path.dropLast(suffix.count))
-        return components.url ?? url
-    }
-
-    /// An add-on's configure page: its base address plus `configure`.
-    public static func configureURL(forManifest url: URL) -> URL? {
-        guard var components = URLComponents(url: addonBaseURL(forManifest: url),
-                                             resolvingAgainstBaseURL: false) else { return nil }
-        var path = components.percentEncodedPath
-        if !path.hasSuffix("/") { path += "/" }
-        components.percentEncodedPath = path + "configure"
-        return components.url
-    }
-
-    public static func isLoopbackHost(_ host: String) -> Bool {
-        let normalized = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
-        return normalized == "localhost" || normalized == "::1" || normalized == "127.0.0.1"
-    }
-
-    public static func allowsLocalHTTP(_ url: URL) -> Bool {
-        url.scheme?.lowercased() == "http"
-            && url.host.map(isLoopbackHost) == true
+    /// The shelf cache those sources filled (`Caches/OpenStream/catalogs-v2.json`).
+    static func removeLeftoverFiles(fileManager: FileManager = .default) {
+        guard let caches = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first else { return }
+        try? fileManager.removeItem(at: caches.appending(path: "OpenStream", directoryHint: .isDirectory)
+            .appending(path: "catalogs-v2.json"))
     }
 }
 
-#endif
-public struct AppleMediaCatalog: Codable, Equatable, Sendable {
-    public let type: String
-    public let id: String
-    public let name: String?
-    public let requiresInput: Bool
-    public let supportsSearch: Bool
-    /// The catalog declares the `skip` extra, so further pages can be asked
-    /// for (`AppleCatalogPaging`). One that does not is a single page.
-    public let supportsSkip: Bool
-
-    public init(
-        type: String,
-        id: String,
-        name: String? = nil,
-        requiresInput: Bool = false,
-        supportsSearch: Bool = false,
-        supportsSkip: Bool = false
-    ) {
-        self.type = String(type.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().prefix(40))
-        self.id = String(id.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))
-        self.name = name?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .nonEmptyAppleSourceString
-            .map { String($0.prefix(100)) }
-        self.requiresInput = requiresInput
-        self.supportsSearch = supportsSearch
-        self.supportsSkip = supportsSkip
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case type, id, name, extra, extraRequired, extraSupported, requiresInput, supportsSearch, supportsSkip
-    }
-
-    private struct Extra: Decodable {
-        let name: String?
-        let isRequired: Bool
-
-        private enum CodingKeys: String, CodingKey { case name, isRequired }
-
-        init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            name = try? container.decode(String.self, forKey: .name)
-            isRequired = (try? container.decode(Bool.self, forKey: .isRequired)) ?? false
-        }
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        let type = try container.decode(String.self, forKey: .type)
-        let id = try container.decode(String.self, forKey: .id)
-        let extras = (try? container.decode(
-            AppleManifestLossyList<Extra>.self,
-            forKey: .extra
-        ))?.values ?? []
-        // Older add-ons describe their inputs with the short-hand
-        // `extraRequired`/`extraSupported` name lists instead of `extra`.
-        let required = (try? container.decode([String].self, forKey: .extraRequired)) ?? []
-        let supported = (try? container.decode([String].self, forKey: .extraSupported)) ?? []
-        func names(_ values: [String]) -> [String] {
-            values.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
-        }
-        self.init(
-            type: type,
-            id: id,
-            name: try? container.decode(String.self, forKey: .name),
-            requiresInput: ((try? container.decode(Bool.self, forKey: .requiresInput)) ?? false)
-                || extras.contains(where: \.isRequired)
-                || !names(required).isEmpty,
-            supportsSearch: ((try? container.decode(Bool.self, forKey: .supportsSearch)) ?? false)
-                || extras.contains { $0.name?.trimmingCharacters(in: .whitespacesAndNewlines)
-                    .lowercased() == "search" }
-                || names(required + supported).contains("search"),
-            supportsSkip: ((try? container.decode(Bool.self, forKey: .supportsSkip)) ?? false)
-                || extras.contains { $0.name?.trimmingCharacters(in: .whitespacesAndNewlines)
-                    .lowercased() == "skip" }
-                || names(required + supported).contains("skip")
-        )
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(type, forKey: .type)
-        try container.encode(id, forKey: .id)
-        try container.encodeIfPresent(name, forKey: .name)
-        try container.encode(requiresInput, forKey: .requiresInput)
-        try container.encode(supportsSearch, forKey: .supportsSearch)
-        if supportsSkip { try container.encode(supportsSkip, forKey: .supportsSkip) }
-    }
-}
-
-#if OPENSTREAM_ADDONS
-public struct AppleMediaManifest: Decodable, Equatable, Sendable {
-    /// Every catalog is stored so Settings can offer each one (ArabCinemeta
-    /// lists 62); Discover still draws only the first few unless the viewer
-    /// turns others on (`AppleCatalogDiscoveryPolicy`).
-    public static let maximumCatalogs = 100
-
-    public let id: String
-    public let name: String
-    public let version: String?
-    public let logoURL: URL?
-    public let resources: [String]
-    public let catalogs: [AppleStremioCatalog]
-    /// `behaviorHints.configurationRequired`: the add-on refuses to serve
-    /// anything until the owner configures it on its own site.
-    public let requiresConfiguration: Bool
-    /// `behaviorHints.configurable`: the add-on has a configure page at
-    /// `<base>/configure`.
-    public let isConfigurable: Bool
-
-    /// Whether anything in the app can use this add-on: streams, metadata,
-    /// subtitles, or at least one catalog. Unconfigured AIO Metadata hosts
-    /// answer with no resources at all (add-on sweep 2026-09-30).
-    public var servesUsableContent: Bool {
-        if resources.contains(where: { ["stream", "meta", "subtitles"].contains($0) }) { return true }
-        return resources.contains("catalog") && !catalogs.isEmpty
-    }
-
-    public init(
-        id: String,
-        name: String,
-        version: String? = nil,
-        logoURL: URL? = nil,
-        resources: [String] = [],
-        catalogs: [AppleStremioCatalog] = [],
-        requiresConfiguration: Bool = false,
-        isConfigurable: Bool = false
-    ) {
-        self.requiresConfiguration = requiresConfiguration
-        self.isConfigurable = isConfigurable
-        self.id = String(id.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))
-        self.name = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(100))
-        self.version = version?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .nonEmptyAppleSourceString
-            .map { String($0.prefix(40)) }
-        self.logoURL = Self.sanitizeLogoURL(logoURL)
-        self.resources = Self.sanitizeResources(resources)
-        self.catalogs = Self.sanitizeCatalogs(catalogs)
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case id, name, version, logo, icon, resources, catalogs, types, behaviorHints
-    }
-
-    private struct BehaviorHints: Decodable {
-        let configurationRequired: Bool
-        let configurable: Bool
-
-        private enum CodingKeys: String, CodingKey { case configurationRequired, configurable }
-
-        init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            configurationRequired = (try? container.decode(Bool.self, forKey: .configurationRequired)) ?? false
-            configurable = (try? container.decode(Bool.self, forKey: .configurable)) ?? false
-        }
-    }
-
-    private enum ManifestResource: Decodable {
-        case name(String)
-
-        private enum CodingKeys: String, CodingKey { case name }
-
-        init(from decoder: Decoder) throws {
-            if let value = try? decoder.singleValueContainer().decode(String.self) {
-                self = .name(value)
-                return
-            }
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            self = .name(try container.decode(String.self, forKey: .name))
-        }
-
-        var value: String {
-            switch self { case .name(let value): value }
-        }
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        // Decode leniently so the client can name the field an add-on omitted
-        // rather than reporting one generic failure for every shape problem.
-        let id = (try? container.decode(String.self, forKey: .id)) ?? ""
-        let name = (try? container.decode(String.self, forKey: .name)) ?? ""
-        let version = try? container.decode(String.self, forKey: .version)
-        let logo = (try? container.decode(URL.self, forKey: .icon))
-            ?? (try? container.decode(URL.self, forKey: .logo))
-
-        let decodedResources = (try? container.decode(
-            AppleManifestLossyList<ManifestResource>.self,
-            forKey: .resources
-        ))?.values.map(\.value) ?? []
-        let decodedCatalogs = (try? container.decode(
-            AppleManifestLossyList<AppleStremioCatalog>.self,
-            forKey: .catalogs
-        ))?.values ?? []
-        let hints = try? container.decode(BehaviorHints.self, forKey: .behaviorHints)
-        self.init(
-            id: id,
-            name: name,
-            version: version,
-            logoURL: logo,
-            resources: decodedResources,
-            catalogs: decodedCatalogs,
-            requiresConfiguration: hints?.configurationRequired ?? false,
-            isConfigurable: hints?.configurable ?? false
-        )
-    }
-
-    private static func sanitizeLogoURL(_ value: URL?) -> URL? {
-        guard let value,
-              let components = URLComponents(url: value, resolvingAgainstBaseURL: false),
-              let scheme = components.scheme?.lowercased(),
-              scheme == "https" || scheme == "http",
-              components.host?.isEmpty == false,
-              components.user == nil,
-              components.password == nil else { return nil }
-        return components.url
-    }
-
-    private static func sanitizeResources(_ resources: [String]) -> [String] {
-        var seen = Set<String>()
-        var result: [String] = []
-        for value in resources {
-            let cleaned = String(value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().prefix(64))
-            guard !cleaned.isEmpty, seen.insert(cleaned).inserted else { continue }
-            result.append(cleaned)
-            if result.count == 32 { break }
-        }
-        return result
-    }
-
-    /// Every catalog type is kept (tv, anime, channel and custom types are
-    /// Discover shelves too). Past the cap, movie and series catalogs win the
-    /// places, so an add-on's title shelves never give way to other types.
-    private static func sanitizeCatalogs(_ catalogs: [AppleStremioCatalog]) -> [AppleStremioCatalog] {
-        var seen = Set<String>()
-        var valid: [AppleStremioCatalog] = []
-        for value in catalogs {
-            let catalog = AppleStremioCatalog(
-                type: value.type,
-                id: value.id,
-                name: value.name,
-                requiresInput: value.requiresInput,
-                supportsSearch: value.supportsSearch,
-                // Dropped here before, so no add-on — new or old — ever
-                // stored `skip` and catalog paging never ran.
-                supportsSkip: value.supportsSkip
-            )
-            let key = "\(catalog.type):\(catalog.id)"
-            guard AppleCatalogDiscoveryPolicy.isShelfType(catalog.type),
-                  !catalog.id.isEmpty,
-                  seen.insert(key).inserted else {
-                continue
-            }
-            valid.append(catalog)
-        }
-        guard valid.count > maximumCatalogs else { return valid }
-        let titleCount = valid.filter { AppleCatalogDiscoveryPolicy.isTitleType($0.type) }.count
-        var otherPlaces = max(maximumCatalogs - titleCount, 0)
-        var titlePlaces = maximumCatalogs
-        return valid.filter { catalog in
-            if AppleCatalogDiscoveryPolicy.isTitleType(catalog.type) {
-                guard titlePlaces > 0 else { return false }
-                titlePlaces -= 1
-                return true
-            }
-            guard otherPlaces > 0 else { return false }
-            otherPlaces -= 1
-            return true
-        }
-    }
-}
-
-
-
-#endif
 private struct AppleSourceLossyList {
     let values: [AppleSource]
-    let unknownPayloads: [Data]
+    let retired: [AppleRetiredSource]
 
     init(data: Data) throws {
         guard let members = try JSONSerialization.jsonObject(with: data) as? [Any] else {
             throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "Expected a source array"))
         }
         var result: [AppleSource] = []
-        var unknown: [Data] = []
+        var retired: [AppleRetiredSource] = []
         for member in members.prefix(1_024) {
             guard JSONSerialization.isValidJSONObject(member),
                   let payload = try? JSONSerialization.data(withJSONObject: member) else {
@@ -765,181 +329,15 @@ private struct AppleSourceLossyList {
             }
             if let value = try? JSONDecoder().decode(AppleSource.self, from: payload) {
                 result.append(value)
-            } else {
-                unknown.append(payload)
+            } else if let fields = member as? [String: Any], let source = AppleRetiredSource(fields: fields) {
+                retired.append(source)
             }
         }
         values = result
-        unknownPayloads = unknown
+        self.retired = retired
     }
 }
 
-#if OPENSTREAM_ADDONS
-public enum AppleManifestClientError: Swift.Error, Equatable, LocalizedError, Sendable {
-    case nonHTTPResponse
-    case insecureRedirect
-    case requestFailed(Int)
-    case responseTooLarge
-    case invalidManifest
-    case manifestNotJSON
-    case manifestNotObject
-    case manifestMissingField(String)
-    /// A required field is present but has the wrong JSON shape
-    /// (field name, expected shape such as "text" or "a list").
-    case manifestFieldWrongType(String, String)
-    case manifestNeedsConfiguration
-    /// The add-on answers but serves nothing until it is set up; the
-    /// address is its configure page when it declares one.
-    case manifestNeedsSetup(configureURL: URL?)
-
-    public var errorDescription: String? {
-        switch self {
-        case .nonHTTPResponse: "The add-on returned an invalid response."
-        case .insecureRedirect: "The add-on redirected to an insecure address."
-        case .requestFailed(let status): "The manifest request failed with HTTP \(status)."
-        case .responseTooLarge: "The manifest is too large."
-        case .invalidManifest: "The response is not a valid add-on manifest."
-        case .manifestNotJSON: "The address returned a page instead of a manifest."
-        case .manifestNotObject: "The manifest is not a JSON object."
-        case .manifestMissingField(let field): "The manifest has no \"\(field)\"."
-        case .manifestFieldWrongType(let field, let expected):
-            "The manifest's \"\(field)\" is not \(expected)."
-        case .manifestNeedsConfiguration, .manifestNeedsSetup:
-            "Configure this add-on first."
-        }
-    }
-}
-
-public struct AppleManifestClient: Sendable {
-    public typealias Loader = @Sendable (URL) async throws -> (Data, URLResponse)
-    public typealias Sleeper = @Sendable (Duration) async throws -> Void
-
-    private let loader: Loader
-    private let sleeper: Sleeper
-
-    public init(
-        loader: @escaping Loader = AppleManifestClient.liveLoader,
-        sleeper: @escaping Sleeper = AppleManifestClient.liveSleeper
-    ) {
-        self.loader = loader
-        self.sleeper = sleeper
-    }
-
-    public func load(_ value: String) async throws -> (URL, AppleStremioManifest) {
-        let url = try AppleManifestURLPolicy.normalize(value)
-        var lastTransportError: (any Swift.Error)?
-
-        for attempt in 0 ..< 4 {
-            let data: Data
-            let response: URLResponse
-            do {
-                (data, response) = try await loader(url)
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch AppleManifestClientError.responseTooLarge {
-                throw AppleManifestClientError.responseTooLarge
-            } catch {
-                lastTransportError = error
-                guard attempt < 3 else { throw error }
-                try await sleeper(backoff(for: attempt))
-                continue
-            }
-
-            guard let http = response as? HTTPURLResponse else { throw AppleManifestClientError.nonHTTPResponse }
-            guard let responseURL = http.url,
-                  responseURL.scheme?.lowercased() == "https"
-                    || AppleManifestURLPolicy.allowsLocalHTTP(responseURL) else {
-                throw AppleManifestClientError.insecureRedirect
-            }
-            if isRetryable(http.statusCode), attempt < 3 {
-                try await sleeper(backoff(for: attempt))
-                continue
-            }
-            guard (200 ... 299).contains(http.statusCode) else {
-                throw AppleManifestClientError.requestFailed(http.statusCode)
-            }
-            return try decodedManifest(data, from: url)
-        }
-
-        if let lastTransportError { throw lastTransportError }
-        throw AppleManifestClientError.invalidManifest
-    }
-
-    private func decodedManifest(_ data: Data, from url: URL) throws -> (URL, AppleStremioManifest) {
-        guard data.count <= 2_000_000 else { throw AppleManifestClientError.responseTooLarge }
-        // Name the shape problem before the lenient decoder smooths it over:
-        // an HTML page, a JSON list, or a field of the wrong kind each get
-        // their own reason instead of one generic failure.
-        guard let document = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) else {
-            throw AppleManifestClientError.manifestNotJSON
-        }
-        guard let object = document as? [String: Any] else {
-            throw AppleManifestClientError.manifestNotObject
-        }
-        try Self.checkFieldShapes(object)
-        guard let manifest = try? JSONDecoder().decode(AppleStremioManifest.self, from: data) else {
-            throw AppleManifestClientError.invalidManifest
-        }
-        guard !manifest.id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw AppleManifestClientError.manifestMissingField("id")
-        }
-        guard !manifest.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw AppleManifestClientError.manifestMissingField("name")
-        }
-        guard !manifest.requiresConfiguration else {
-            throw AppleManifestClientError.manifestNeedsConfiguration
-        }
-        guard manifest.servesUsableContent else {
-            throw AppleManifestClientError.manifestNeedsSetup(
-                configureURL: manifest.isConfigurable ? AppleManifestURLPolicy.configureURL(forManifest: url) : nil
-            )
-        }
-        return (url, manifest)
-    }
-
-    private static func checkFieldShapes(_ object: [String: Any]) throws {
-        for field in ["id", "name"] {
-            if let value = object[field], !(value is NSNull), !(value is String) {
-                throw AppleManifestClientError.manifestFieldWrongType(field, "text")
-            }
-        }
-        for field in ["resources", "catalogs"] {
-            if let value = object[field], !(value is NSNull), !(value is [Any]) {
-                throw AppleManifestClientError.manifestFieldWrongType(field, "a list")
-            }
-        }
-    }
-
-    private func isRetryable(_ status: Int) -> Bool {
-        status == 408 || status == 429 || (500 ... 599).contains(status)
-    }
-
-    private func backoff(for attempt: Int) -> Duration {
-        switch attempt {
-        case 0: .milliseconds(250)
-        case 1: .milliseconds(500)
-        default: .seconds(1)
-        }
-    }
-
-    public static func liveLoader(_ url: URL) async throws -> (Data, URLResponse) {
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 15
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("OpenStream/1.0 Apple", forHTTPHeaderField: "User-Agent")
-        do {
-            return try await AppleBoundedHTTPDataLoader.load(request, maximumBytes: 2_000_000)
-        } catch AppleBoundedHTTPError.responseTooLarge {
-            throw AppleManifestClientError.responseTooLarge
-        }
-    }
-
-    public static func liveSleeper(_ duration: Duration) async throws {
-        try await Task.sleep(for: duration)
-    }
-}
-
-#endif
 @MainActor
 @Observable
 public final class AppleSourceStore {
@@ -951,45 +349,33 @@ public final class AppleSourceStore {
     private let storageKey: String
     private let keychain: any AppleCredentialStoring
     private let managedImportsDirectory: URL
-    #if OPENSTREAM_ADDONS
-    private let manifestClient: AppleManifestClient
-    private let logoBackfillDelay: Duration
-    @ObservationIgnored private var restoredManifestRefresh: Task<Void, Never>?
-    #endif
     private var protectsStoredBlobWhenEmpty: Bool
-    private var preservedUnknownSourcePayloads: [Data]
     private var pendingCredentialCleanupReferences: [String]
 
-#if OPENSTREAM_ADDONS
     public init(
         defaults: UserDefaults = .standard,
         storageKey: String = "openstream.sources.v1",
         keychain: any AppleCredentialStoring = AppleKeychainStore(service: "com.orgista.openstream.instances"),
-        documentsDirectory: URL? = nil,
-        manifestClient: AppleManifestClient = AppleManifestClient(),
-        logoBackfillDelay: Duration = .seconds(2)
+        documentsDirectory: URL? = nil
     ) {
         self.defaults = defaults
         self.storageKey = storageKey
         sourceTombstones = defaults.data(forKey: storageKey + ".tombstones")
             .flatMap { try? JSONDecoder().decode([UUID: Date].self, from: $0) } ?? [:]
         self.keychain = keychain
-        #if OPENSTREAM_ADDONS
-        self.manifestClient = manifestClient
-        self.logoBackfillDelay = logoBackfillDelay
-        #endif
         managedImportsDirectory = (documentsDirectory ?? AppleStorageLocation.documents)
             .appendingPathComponent("Imports", isDirectory: true).standardizedFileURL
         credentialError = nil
-        preservedUnknownSourcePayloads = []
         pendingCredentialCleanupReferences = defaults.stringArray(
             forKey: storageKey + ".pending-keychain-removals"
         ) ?? []
+        var retired: [AppleRetiredSource] = []
         if let data = defaults.data(forKey: storageKey) {
             if let decoded = try? AppleSourceLossyList(data: data) {
                 sources = decoded.values.sorted { $0.addedAt < $1.addedAt }
-                preservedUnknownSourcePayloads = decoded.unknownPayloads
-                protectsStoredBlobWhenEmpty = decoded.values.isEmpty && !Self.isEmptyStoredList(data)
+                retired = decoded.retired
+                protectsStoredBlobWhenEmpty = decoded.values.isEmpty && decoded.retired.isEmpty
+                    && !Self.isEmptyStoredList(data)
             } else {
                 sources = []
                 protectsStoredBlobWhenEmpty = !Self.isEmptyStoredList(data)
@@ -999,355 +385,17 @@ public final class AppleSourceStore {
             protectsStoredBlobWhenEmpty = false
         }
         if !sourceTombstones.isEmpty { mergeSourceTombstones([:]) }
+        if !retired.isEmpty {
+            deleteRetiredSources(retired)
+            AppleRetiredSource.removeLeftoverFiles()
+        }
         retryPendingCredentialCleanup()
         hydrateProtectedTransportURLs()
         hydrateGuideAddresses()
         migrateLegacyIPTVCredentials()
         relocateManagedImports()
-        #if OPENSTREAM_ADDONS
-        scheduleLogoBackfill()
-        #endif
-    }
-#else
-    public init(
-        defaults: UserDefaults = .standard,
-        storageKey: String = "openstream.sources.v1",
-        keychain: any AppleCredentialStoring = AppleKeychainStore(service: "com.orgista.openstream.instances"),
-        documentsDirectory: URL? = nil,
-        logoBackfillDelay: Duration = .seconds(2)
-    ) {
-        self.defaults = defaults
-        self.storageKey = storageKey
-        sourceTombstones = defaults.data(forKey: storageKey + ".tombstones")
-            .flatMap { try? JSONDecoder().decode([UUID: Date].self, from: $0) } ?? [:]
-        self.keychain = keychain
-        #if OPENSTREAM_ADDONS
-        self.manifestClient = manifestClient
-        self.logoBackfillDelay = logoBackfillDelay
-        #endif
-        managedImportsDirectory = (documentsDirectory ?? AppleStorageLocation.documents)
-            .appendingPathComponent("Imports", isDirectory: true).standardizedFileURL
-        credentialError = nil
-        preservedUnknownSourcePayloads = []
-        pendingCredentialCleanupReferences = defaults.stringArray(
-            forKey: storageKey + ".pending-keychain-removals"
-        ) ?? []
-        if let data = defaults.data(forKey: storageKey) {
-            if let decoded = try? AppleSourceLossyList(data: data) {
-                sources = decoded.values.sorted { $0.addedAt < $1.addedAt }
-                preservedUnknownSourcePayloads = decoded.unknownPayloads
-                protectsStoredBlobWhenEmpty = decoded.values.isEmpty && !Self.isEmptyStoredList(data)
-            } else {
-                sources = []
-                protectsStoredBlobWhenEmpty = !Self.isEmptyStoredList(data)
-            }
-        } else {
-            sources = []
-            protectsStoredBlobWhenEmpty = false
-        }
-        if !sourceTombstones.isEmpty { mergeSourceTombstones([:]) }
-        retryPendingCredentialCleanup()
-        hydrateProtectedTransportURLs()
-        hydrateGuideAddresses()
-        migrateLegacyIPTVCredentials()
-        relocateManagedImports()
-        #if OPENSTREAM_ADDONS
-        scheduleLogoBackfill()
-        #endif
-    }
-#endif
-
-#if OPENSTREAM_ADDONS
-    @discardableResult
-    public func addStremio(manifestURL: URL, name: String) throws -> AppleSource {
-        let normalizedURL = try AppleManifestURLPolicy.normalize(manifestURL.absoluteString)
-        let cleanName = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(100))
-        let displayName = cleanName.isEmpty ? (normalizedURL.host ?? "Add-on") : cleanName
-
-        if let index = sources.firstIndex(where: { $0.isAddon && $0.url == normalizedURL }) {
-            sources[index].name = displayName
-            sources[index].isEnabled = true
-            sources[index].configurationRevision = nextConfigurationRevision(sources[index].configurationRevision)
-            persist()
-            return sources[index]
-        }
-
-        let source = try securedTransportSource(
-            AppleSource(kind: .stremio, name: displayName, url: normalizedURL)
-        )
-        sources.append(source)
-        persist()
-        return source
     }
 
-    @discardableResult
-    public func addStremio(manifestURL: URL, manifest: AppleStremioManifest) throws -> AppleSource {
-        let normalizedURL = try AppleManifestURLPolicy.normalize(manifestURL.absoluteString)
-        let cleanID = String(manifest.id.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))
-        let cleanName = String(manifest.name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(100))
-        let cleanVersion = manifest.version?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .nonEmptyAppleSourceString
-            .map { String($0.prefix(40)) }
-        let cleanManifest = AppleStremioManifest(
-            id: cleanID,
-            name: cleanName,
-            version: cleanVersion,
-            logoURL: manifest.logoURL,
-            resources: manifest.resources,
-            catalogs: manifest.catalogs
-        )
-        guard !cleanID.isEmpty else { throw AppleManifestClientError.manifestMissingField("id") }
-        guard !cleanName.isEmpty else { throw AppleManifestClientError.manifestMissingField("name") }
-
-        if let index = sources.firstIndex(where: { $0.isAddon && $0.manifestID == cleanID }) {
-            let existing = sources[index]
-            sources[index] = try securedTransportSource(AppleSource(
-                id: existing.id,
-                kind: .stremio,
-                name: cleanName,
-                url: normalizedURL,
-                isEnabled: true,
-                addedAt: existing.addedAt,
-                manifestID: cleanID,
-                version: cleanVersion,
-                resources: cleanManifest.resources,
-                catalogs: cleanManifest.catalogs,
-                logoURL: cleanManifest.logoURL,
-                transportReference: existing.transportReference,
-                configurationRevision: nextConfigurationRevision(existing.configurationRevision),
-                lastValidatedAt: .now,
-                validationSummary: "Manifest validated",
-                lastValidationFailureAt: existing.lastValidationFailureAt,
-                validationFailureSummary: existing.validationFailureSummary,
-                capabilities: cleanManifest.resources.map { $0.capitalized },
-                catalogChoices: existing.catalogChoices
-            ))
-            persist()
-            return sources[index]
-        }
-
-        let source = try securedTransportSource(AppleSource(
-            kind: .stremio,
-            name: cleanName,
-            url: normalizedURL,
-            manifestID: cleanID,
-            version: cleanVersion,
-            resources: cleanManifest.resources,
-            catalogs: cleanManifest.catalogs,
-            logoURL: cleanManifest.logoURL,
-            lastValidatedAt: .now,
-            validationSummary: "Manifest validated",
-            capabilities: cleanManifest.resources.map { $0.capitalized }
-        ))
-        sources.append(source)
-        persist()
-        return source
-    }
-
-    @discardableResult
-    public func addStremio(
-        manifestValue: String,
-        client: AppleManifestClient = AppleManifestClient()
-    ) async throws -> AppleSource {
-        let (url, manifest) = try await client.load(manifestValue)
-        try Task.checkCancellation()
-        return try addStremio(manifestURL: url, manifest: manifest)
-    }
-
-    /// Re-derives the manifest-owned fields of an add-on source (logo,
-    /// version, resources, capabilities, and the name when it came from a
-    /// manifest) from a freshly fetched manifest. The logo passes through the
-    /// same sanitizer as on add, so a plain `http://` logo that an older
-    /// build dropped is stored now. A manifest without a logo keeps whatever
-    /// logo is already saved. Returns `true` when something changed and was
-    /// persisted; applying the same manifest twice is a no-op.
-    @discardableResult
-    public func applyManifest(_ manifest: AppleStremioManifest, to id: AppleSource.ID) -> Bool {
-        guard let index = sources.firstIndex(where: { $0.id == id }),
-              sources[index].kind == .stremio else { return false }
-        let clean = AppleStremioManifest(
-            id: manifest.id,
-            name: manifest.name,
-            version: manifest.version,
-            logoURL: manifest.logoURL,
-            resources: manifest.resources,
-            catalogs: manifest.catalogs
-        )
-        guard !clean.id.isEmpty, !clean.name.isEmpty else { return false }
-        var updated = sources[index]
-        if let storedID = updated.manifestID {
-            // Another add-on answering at the saved address must not take
-            // over this entry's identity; an owner-named entry (no manifest
-            // id) keeps its name.
-            guard storedID == clean.id else { return false }
-            updated.name = clean.name
-        }
-        updated.version = clean.version
-        if let logoURL = clean.logoURL { updated.logoURL = logoURL }
-        updated.resources = clean.resources
-        updated.capabilities = boundedCapabilities(clean.resources.map { $0.capitalized })
-        // The catalogs' flags (`skip` above all) as the add-on declares them
-        // now; the stored set and order stay (`AppleManifestRefreshPolicy`).
-        updated.catalogs = AppleManifestRefreshPolicy.refreshedCatalogs(stored: updated.catalogs, manifest: clean.catalogs)
-        guard updated != sources[index] else { return false }
-        sources[index] = updated
-        persist()
-        return true
-    }
-
-    /// Fetches the add-on's manifest again and applies it. Fail-open: a
-    /// transport or shape failure leaves the source exactly as it was.
-    /// Catalogs a DEBUG build starts with (the owner's dev-sources add-ons);
-    /// empty in every Release build (see `AppleTestCatalogSeedPolicy`). Seeded
-    /// once per install; a tester who deletes one never sees it come back.
-    public static var testCatalogManifests: [String] {
-        #if DEBUG
-        AppleTestCatalogSeedPolicy.manifests(
-            isDebugBuild: AppleTestCatalogSeedPolicy.isDebugBuild,
-            devSourceManifests: AppleTestCatalogSeedPolicy.debugManifests)
-        #else
-        []
-        #endif
-    }
-
-    /// Tests hand a fixture list to one store instead of a dev-sources file.
-    @ObservationIgnored public var testCatalogManifestsOverride: [String]?
-
-    private var activeTestCatalogManifests: [String] {
-        testCatalogManifestsOverride ?? Self.testCatalogManifests
-    }
-
-    public static var seedsTestCatalogs: Bool {
-        AppleTestCatalogSeedPolicy.seedsTestCatalogs(isDebugBuild: AppleTestCatalogSeedPolicy.isDebugBuild)
-    }
-
-    /// Adds each test catalog the first time it succeeds; a manifest that
-    /// fails to load (offline) is retried on the next launch.
-    ///
-    /// Passes the store's own `manifestClient` explicitly. Letting
-    /// `addStremio(manifestValue:)` build its default `AppleManifestClient()`
-    /// from inside this async method crashed the 2026-09-17 gate with "freed
-    /// pointer was not the last allocation" (signal 6, deterministic) — and
-    /// bypassed the stub client in tests. Bisected in `AppleTestCatalogSeedTests`.
-    public func seedTestCatalogsIfNeeded(force: Bool = false) async {
-        guard force || Self.seedsTestCatalogs else { return }
-        let pending = pendingTestCatalogs()
-        var index = 0
-        while index < pending.count {
-            let value = pending[index]
-            index += 1
-            if await seedTestCatalog(value) { markTestCatalogSeeded(value) }
-        }
-    }
-
-    private var testCatalogSeedKey: String { storageKey + ".seeded-test-catalogs.v1" }
-
-    /// A device set up from the owner's dev-sources file gets exactly that
-    /// file (`scripts/seed-sim.sh`): the test catalogs count as seeded, so
-    /// AIOMetadata is not added beside it now or on a later launch.
-    public func markTestCatalogsSeeded() {
-        for value in activeTestCatalogManifests { markTestCatalogSeeded(value) }
-    }
-
-    private func seededTestCatalogs() -> [String] {
-        defaults.stringArray(forKey: testCatalogSeedKey) ?? []
-    }
-
-    private func pendingTestCatalogs() -> [String] {
-        let done = seededTestCatalogs()
-        return activeTestCatalogManifests.filter { !done.contains($0) }
-    }
-
-    private func markTestCatalogSeeded(_ value: String) {
-        var done = seededTestCatalogs()
-        guard !done.contains(value) else { return }
-        done.append(value)
-        defaults.set(done, forKey: testCatalogSeedKey)
-    }
-
-    private func seedTestCatalog(_ value: String) async -> Bool {
-        do {
-            // The store's own client — the default argument builds a fresh live
-            // client, which also bypassed the stub in tests.
-            _ = try await addStremio(manifestValue: value, client: manifestClient)
-            return true
-        } catch {
-            return false
-        }
-    }
-
-    /// After a restore: fetch each restored add-on's manifest again in the
-    /// background so its logo, name, version and catalogs are current. At most
-    /// 40, one at a time; a newer restore cancels the older pass.
-    func refreshRestoredManifests(ids: [AppleSource.ID]) {
-        restoredManifestRefresh?.cancel()
-        let wanted = Set(ids)
-        let pending = sources.filter { wanted.contains($0.id) && $0.isAddon && !$0.needsSignIn }
-            .prefix(40).map(\.id)
-        guard !pending.isEmpty else { return }
-        restoredManifestRefresh = Task { [weak self, delay = logoBackfillDelay] in
-            do { try await Task.sleep(for: delay) } catch { return }
-            for id in pending {
-                guard let self, !Task.isCancelled else { return }
-                await self.refreshManifest(id: id)
-            }
-        }
-    }
-
-    private var manifestRefreshKey: String { storageKey + ".manifest-refresh.v1" }
-    /// Tests await these instead of polling for their effects.
-    @ObservationIgnored private(set) var dailyManifestRefresh: Task<Void, Never>?
-    @ObservationIgnored private(set) var logoBackfill: Task<Void, Never>?
-
-    /// At launch: fetch each add-on's manifest again in the background, at
-    /// most once per add-on per day, so add-ons saved before catalog paging
-    /// pick up the `skip` flag without being added again. One at a time,
-    /// after a short delay; nothing is shown. The attempt is recorded whether
-    /// or not the add-on answered, so one that is down is not asked again
-    /// until tomorrow.
-    func scheduleDailyManifestRefresh(now: Date = Date()) {
-        guard dailyManifestRefresh == nil else { return }
-        let stored = defaults.dictionary(forKey: manifestRefreshKey) as? [String: Double] ?? [:]
-        let pending = AppleManifestRefreshPolicy.due(sources: sources, lastAttempt: stored, now: now)
-        guard !pending.isEmpty else { return }
-        dailyManifestRefresh = Task { [weak self, delay = logoBackfillDelay] in
-            do { try await Task.sleep(for: delay * 3) } catch { return }
-            for id in pending {
-                guard let self, !Task.isCancelled else { return }
-                let changed = await self.refreshManifest(id: id)
-                var attempts = self.defaults.dictionary(forKey: self.manifestRefreshKey) as? [String: Double] ?? [:]
-                attempts[id.uuidString] = Date().timeIntervalSince1970
-                attempts = AppleManifestRefreshPolicy.pruned(attempts, liveIDs: Set(self.sources.map(\.id.uuidString)))
-                self.defaults.set(attempts, forKey: self.manifestRefreshKey)
-                appleTrace("manifest refresh \(self.sources.first { $0.id == id }?.name ?? "?"): \(changed ? "updated" : "unchanged")")
-            }
-        }
-    }
-
-    @discardableResult
-    public func refreshManifest(id: AppleSource.ID) async -> Bool {
-        guard let source = sources.first(where: { $0.id == id }), source.isAddon else { return false }
-        guard let loaded = try? await manifestClient.load(source.url.absoluteString) else { return false }
-        return applyManifest(loaded.1, to: id)
-    }
-
-    /// Shows or hides one of an add-on's catalogs on Discover. A choice that
-    /// matches the default is forgotten, so the defaults keep tracking the
-    /// manifest.
-    public func setCatalog(_ catalog: AppleStremioCatalog, shown: Bool, id: AppleSource.ID) {
-        guard let index = sources.firstIndex(where: { $0.id == id }), sources[index].kind == .stremio else { return }
-        let key = AppleCatalogDiscoveryPolicy.choiceKey(catalog)
-        var choices = sources[index].catalogChoices
-        let isDefault = AppleCatalogDiscoveryPolicy.defaultCatalogKeys(for: sources[index]).contains(key)
-        choices[key] = shown == isDefault ? nil : shown
-        guard choices != sources[index].catalogChoices else { return }
-        sources[index].catalogChoices = choices
-        sources[index].configurationRevision = nextConfigurationRevision(sources[index].configurationRevision)
-        persist()
-    }
-
-#endif
     public func setEnabled(_ enabled: Bool, id: AppleSource.ID) {
         guard let index = sources.firstIndex(where: { $0.id == id }) else { return }
         guard sources[index].isEnabled != enabled, !enabled || !sources[index].needsSignIn else { return }
@@ -1918,46 +966,6 @@ public final class AppleSourceStore {
         if didMigrate { persist() }
     }
 
-    /// v2: a second pass for add-ons whose first answer was recorded while
-    /// their manifest logo still went unused (2026-09-29).
-#if OPENSTREAM_ADDONS
-    private var logoBackfillKey: String { storageKey + ".logo-backfill.v2" }
-
-    /// One-time fill for add-ons saved before plain `http://` logos were
-    /// accepted: fetch each logo-less manifest in the background and store
-    /// its logo through `applyManifest`. A source whose manifest answered is
-    /// not asked again (with or without a logo); a transport failure retries
-    /// on the next load. Nothing is surfaced in the UI. The delay lets a
-    /// short-lived store (one built only to read `sources`) go away before
-    /// any request is made.
-    private func scheduleLogoBackfill() {
-        let attempted = Set(defaults.stringArray(forKey: logoBackfillKey) ?? [])
-        let pending = sources
-            .filter { $0.isAddon && !$0.needsSignIn && $0.logoURL == nil && !attempted.contains($0.id.uuidString) }
-            .map(\.id)
-        guard !pending.isEmpty else { return }
-        logoBackfill = Task { [weak self, delay = logoBackfillDelay] in
-            try? await Task.sleep(for: delay)
-            for id in pending {
-                guard let self, !Task.isCancelled else { return }
-                await self.backfillLogo(id: id)
-            }
-        }
-    }
-
-    private func backfillLogo(id: AppleSource.ID) async {
-        guard let source = sources.first(where: { $0.id == id }),
-              source.isAddon,
-              source.logoURL == nil else { return }
-        guard let loaded = try? await manifestClient.load(source.url.absoluteString) else { return }
-        applyManifest(loaded.1, to: id)
-        var attempted = Set(defaults.stringArray(forKey: logoBackfillKey) ?? [])
-        attempted.insert(id.uuidString)
-        let live = Set(sources.map { $0.id.uuidString })
-        defaults.set(attempted.intersection(live).sorted(), forKey: logoBackfillKey)
-    }
-
-#endif
     private func relocateManagedImports() {
         var changed = false
         for index in sources.indices where sources[index].kind == .library {
@@ -1982,46 +990,21 @@ public final class AppleSourceStore {
         if changed { persist() }
     }
 
-    var preservedConfigurationSources: [ApplePreservedJSON] {
-        preservedUnknownSourcePayloads.compactMap { try? JSONDecoder().decode(ApplePreservedJSON.self, from: $0) }
-    }
-
-    func restorePreservedConfigurationSources(_ payloads: [ApplePreservedJSON], secrets: AppleConfigurationSecrets? = nil, merge: Bool) throws {
-        let combined = AppleConfigurationSnapshot.mergedPayloads(merge ? preservedConfigurationSources : [], payloads)
-            .filter { payload in
-                guard let id = payload.sourceID.flatMap(UUID.init(uuidString:)) else { return true }
-                return sourceTombstones[id] == nil
-            }
-        let restored = try combined.map { payload -> ApplePreservedJSON in
-            guard case .object(var fields) = payload, let id = payload.sourceID.flatMap(UUID.init(uuidString:)),
-                  let secrets else { return payload }
-            if let value = secrets.sourceCredentials[id] {
-                let reference = payload.stringField("credentialReference") ?? id.uuidString.lowercased()
-                try keychain.set(value, for: reference)
-                fields["credentialReference"] = .string(reference)
-            }
-            if let address = secrets.sourceAddresses[id] {
-                let reference = payload.stringField("transportReference") ?? "transport.\(id.uuidString.lowercased())"
-                try keychain.set(address.absoluteString, for: reference)
-                fields["transportReference"] = .string(reference)
-                fields["needsSignIn"] = .bool(false)
-                if let guide = secrets.guideAddresses[id] { try keychain.set(guide.absoluteString, for: "guide.\(id.uuidString.lowercased())") }
-            }
-            return .object(fields)
-        }
-        preservedUnknownSourcePayloads = restored.compactMap { try? JSONEncoder().encode($0) }
+    /// Drops retired sources from the stored list and queues their Keychain
+    /// entries for removal. Their ids are not tombstoned: the list just stops
+    /// carrying them.
+    private func deleteRetiredSources(_ retired: [AppleRetiredSource]) {
+        pendingCredentialCleanupReferences = Array(Set(pendingCredentialCleanupReferences
+            + retired.flatMap(\.keychainReferences))).sorted()
+        persistPendingCredentialCleanup()
         persist()
+        appleTrace("sources: deleted \(retired.count) retired")
     }
 
     func mergeSourceTombstones(_ incoming: [UUID: Date]) {
         let combined = sourceTombstones.merging(incoming) { max($0, $1) }
         for id in combined.keys where sources.contains(where: { $0.id == id }) { _ = remove(id: id) }
         sourceTombstones = combined
-        preservedUnknownSourcePayloads.removeAll { data in
-            guard let payload = try? JSONDecoder().decode(ApplePreservedJSON.self, from: data),
-                  let id = payload.sourceID.flatMap(UUID.init(uuidString:)) else { return false }
-            return combined[id] != nil
-        }
         persist()
     }
 
@@ -2034,17 +1017,6 @@ public final class AppleSourceStore {
             if !source.needsSignIn {
                 result.sourceAddresses[source.id] = source.url
                 result.guideAddresses[source.id] = source.epgURL
-            }
-        }
-        for payload in preservedConfigurationSources {
-            guard let id = payload.sourceID.flatMap(UUID.init(uuidString:)) else { continue }
-            if let reference = payload.stringField("credentialReference") {
-                result.sourceCredentials[id] = try keychain.string(for: reference)
-            }
-            if let reference = payload.stringField("transportReference"),
-               let address = try keychain.string(for: reference).flatMap(URL.init(string:)) {
-                result.sourceAddresses[id] = address
-                result.guideAddresses[id] = try keychain.string(for: "guide.\(id.uuidString.lowercased())").flatMap(URL.init(string:))
             }
         }
         return result
@@ -2311,13 +1283,10 @@ public final class AppleSourceStore {
             sanitized.epgURL = nil
             return sanitized
         }
-        var members: [Any] = persistedSources.compactMap { source in
+        let members: [Any] = persistedSources.compactMap { source in
             guard let data = try? JSONEncoder().encode(source) else { return nil }
             return try? JSONSerialization.jsonObject(with: data)
         }
-        members.append(contentsOf: preservedUnknownSourcePayloads.compactMap {
-            try? JSONSerialization.jsonObject(with: $0)
-        })
         guard let encoded = try? JSONSerialization.data(withJSONObject: members) else {
             appleTraceFailure("sources not saved: the list could not be encoded")
             return
@@ -2328,7 +1297,7 @@ public final class AppleSourceStore {
     }
 
     private static func protectsTransportURL(_ source: AppleSource) -> Bool {
-        source.isAddon || source.kind == .liveTV
+        source.kind == .liveTV
     }
 
     private static func sanitizedTransportURL(_ source: AppleSource) -> URL {
@@ -2339,11 +1308,7 @@ public final class AppleSourceStore {
         components.password = nil
         components.query = nil
         components.fragment = nil
-        #if OPENSTREAM_ADDONS
-        components.path = source.isAddon ? "/manifest.json" : "/"
-        #else
         components.path = "/"
-        #endif
         return components.url ?? URL(string: "https://source.invalid/")!
     }
 
@@ -2355,26 +1320,4 @@ public final class AppleSourceStore {
 
 private extension String {
     var nonEmptyAppleSourceString: String? { isEmpty ? nil : self }
-}
-
-public typealias AppleStremioCatalog = AppleMediaCatalog
-
-#if OPENSTREAM_ADDONS
-public typealias AppleStremioManifest = AppleMediaManifest
-#endif
-
-private struct AppleManifestLossyList<Value: Decodable>: Decodable {
-    let values: [Value]
-
-    init(from decoder: Decoder) throws {
-        var container = try decoder.unkeyedContainer()
-        var result: [Value] = []
-        var inspected = 0
-        while !container.isAtEnd, inspected < 128 {
-            inspected += 1
-            let entry = try container.superDecoder()
-            if let value = try? Value(from: entry) { result.append(value) }
-        }
-        values = result
-    }
 }

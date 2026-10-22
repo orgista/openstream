@@ -12,8 +12,8 @@ import Testing
         AppleCatalogItem(mediaID: "tt1234567", type: "series", name: "Fixture")
     }
 
-    private func ep(_ season: Int, _ number: Int) -> AppleStremioEpisode {
-        AppleStremioEpisode(
+    private func ep(_ season: Int, _ number: Int) -> AppleMediaEpisode {
+        AppleMediaEpisode(
             id: "tt1234567:\(season):\(number)",
             title: "Episode \(season).\(number)",
             season: season,
@@ -111,7 +111,7 @@ import Testing
             name: "Local Series")
         let progress = ApplePlaybackProgress(position: 300, duration: 2400,
                                              partID: "tt1111111:2:5")
-        let episodes: [AppleStremioEpisode] = []  // no episodes supplied
+        let episodes: [AppleMediaEpisode] = []  // no episodes supplied
         let result = try #require(AppleTitlePagePolicy.heroEpisode(
             item: msItem, progress: progress, episodes: episodes))
         #expect(result.id == "tt1111111:2:5")

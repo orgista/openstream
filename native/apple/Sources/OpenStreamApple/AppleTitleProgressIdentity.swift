@@ -24,7 +24,7 @@ public enum AppleTitleProgressIdentity {
         }
         let imdb = [item.imdbID, item.mediaID, resolvedMediaID]
             .compactMap { $0 }
-            .first(where: AppleStremioMetadataClient.isIMDBIdentifier)
+            .first(where: AppleMediaIdentifier.isIMDBIdentifier)
         if let imdb {
             keys.append(AppleMediaRecord(canonicalID: imdb, kind: kind, title: item.name, year: year,
                                          availability: []).id)

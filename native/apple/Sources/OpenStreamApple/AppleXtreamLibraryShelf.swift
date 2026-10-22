@@ -31,7 +31,7 @@ struct AppleXtreamLibraryShelf: View {
         .task(id: focusedItemID) {
             guard let focusedItemID, let item = items.first(where: { $0.id == focusedItemID }),
                   let reference = AppleXtreamReference.parse(item.mediaID) else { return }
-            try? await Task.sleep(for: AppleMetadataPrefetcher.focusDwell)
+            try? await Task.sleep(for: .milliseconds(200))
             guard !Task.isCancelled else { return }
             _ = try? await AppleXtreamLibraryStore.shared.detail(reference)
         }

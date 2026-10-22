@@ -87,9 +87,8 @@ public final class NativePlaybackEngine: ApplePlaybackEngine {
     /// This route never read it. `subtitleTracks` stayed empty and
     /// `selectSubtitleTrack` was a no-op, so every stream AVFoundation demuxes
     /// itself — MP4, M4V, MOV and HLS, which on Apple TV is most well-formed
-    /// content — played with no captions available at all, whether or not an
-    /// add-on was installed (owner 2026-09-15: "subtitles are not working but
-    /// streams should have subtitles even without an add-on"). Subtitles are
+    /// content — played with no captions available at all (owner 2026-09-15:
+    /// "subtitles are not working"). Subtitles are
     /// routinely muxed into those containers: `tx3g` and `wvtt` in the MPEG-4
     /// family, `EXT-X-MEDIA:TYPE=SUBTITLES` renditions in HLS.
     /// The stream's own chapter markers, for Skip Intro. Empty when the file

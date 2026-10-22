@@ -30,7 +30,7 @@ struct AppleLibraryUnmatchedShelf: View {
             AppleLibraryUnmatchedList(sourceStore: sourceStore, settings: settings)
         }
         .sheet(item: $matching) { group in
-            AppleLibraryFixMatchView(group: group, sources: sourceStore.sources, settings: settings)
+            AppleLibraryFixMatchView(group: group, settings: settings)
         }
     }
 }
@@ -57,7 +57,7 @@ private struct AppleLibraryUnmatchedList: View {
         .navigationTitle("Unmatched")
         .scrollIndicators(.never)
         .sheet(item: $matching) { group in
-            AppleLibraryFixMatchView(group: group, sources: sourceStore.sources, settings: settings)
+            AppleLibraryFixMatchView(group: group, settings: settings)
         }
     }
 }

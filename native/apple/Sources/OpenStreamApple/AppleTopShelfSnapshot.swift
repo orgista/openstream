@@ -96,10 +96,9 @@ public struct AppleTopShelfSnapshot: Codable, Equatable, Sendable {
     public let continueWatching: [Item]
     public let recentlyAdded: [Item]
     public let favorites: [Item]
-    /// Up to 10 items from the first non-empty catalog shelf (e.g. Cinemeta
-    /// Popular), shown on Top Shelf when the user has sources configured but
-    /// nothing in progress. Defaults to empty so snapshots written before
-    /// this field existed still decode.
+    /// Older snapshots carried up to 10 shelf items here for Top Shelf when
+    /// nothing was in progress; current ones write none. Defaults to empty so
+    /// snapshots written before this field existed still decode.
     public let topPicks: [Item]
     public let favoriteChannels: [Item]
     public let recentChannels: [Item]
@@ -340,20 +339,16 @@ public enum AppleTopShelfContentBuilder {
     }
 }
 
-/// Only system-owned projections receive remote URLs from this narrow list.
-/// Arbitrary add-on artwork may carry credentials in its path or query, so it
-/// remains available in-app but is never handed to Spotlight or Top Shelf.
+/// Artwork may carry credentials in its path or query; such a URL stays
+/// in-app and is never handed to Spotlight or Top Shelf.
 /// Which artwork URLs may be handed to a system surface — the Top Shelf and
 /// the widgets, which fetch them from their own processes.
 ///
-/// This used to be a two-host allowlist (`image.tmdb.org`,
-/// `images.metahub.space`). That silently emptied the shelf: add-ons serve
-/// posters from whatever CDN they like, and on the owner's library the
-/// in-progress titles came from `images.justwatch.com` and
-/// `api.ratingposterdb.com`, so **every** Continue Watching tile published
-/// without artwork while Top Picks — which happen to come from Cinemeta, i.e.
-/// metahub — looked fine. A fixed allowlist cannot track what add-ons use, so
-/// the rule is now about what is *safe* to hand to another process rather than
+/// This used to be a two-host allowlist (`image.tmdb.org` and one other image
+/// service). That silently emptied the shelf: posters come
+/// from whatever CDN a source uses, so **every** Continue Watching tile
+/// published without artwork. A fixed allowlist cannot track that, so the
+/// rule is now about what is *safe* to hand to another process rather than
 /// who is serving it.
 ///
 /// A private host is still refused: a NAS or `.local` poster is unreachable
@@ -379,7 +374,7 @@ enum AppleSystemArtworkPolicy {
               value.user == nil,
               value.password == nil,
               // A poster URL carrying a token must not reach a system surface,
-              // and no add-on CDN seen in the wild needs one to serve an image.
+              // and no image CDN seen in the wild needs one to serve an image.
               value.query == nil,
               value.fragment == nil,
               let host = value.host?.lowercased(),
@@ -515,9 +510,9 @@ public actor AppleTopShelfSnapshotWriter {
     }
 
     /// - Parameters:
-    ///   - sources: When given, Continue Watching lists only what Discover's
-    ///     row lists (`AppleContinueWatchingResolver`): a catalog title nothing
-    ///     can open is left out. Nil treats every record as openable.
+    ///   - sources: When given, Continue Watching lists only what can open its
+    ///     own page (`AppleContinueWatchingResolver.isOpenable`). Nil treats
+    ///     every record as openable.
     ///   - watchedAt: When each record was last watched, by record id —
     ///     Continue Watching is most recent first, as on Discover. A record
     ///     missing here falls back to its `lastVerified`.
@@ -527,7 +522,6 @@ public actor AppleTopShelfSnapshotWriter {
     ///     record's own `progress`.
     public func write(
         records: [AppleMediaRecord],
-        sections: [AppleCatalogSection] = [],
         sources: [AppleSource]? = nil,
         watchedAt: [String: Date] = [:],
         savedProgress: [String: ApplePlaybackProgress]? = nil,
@@ -569,25 +563,21 @@ public actor AppleTopShelfSnapshotWriter {
             }
         let favorites = eligible.filter(\.isFavorite).sorted { $0.title < $1.title }
         let recent = eligible.sorted { $0.lastVerified > $1.lastVerified }
-        let shownContinued = Array(Self.openable(continued, sections: sections, sources: sources)
+        let shownContinued = Array(continued.filter { sources == nil || AppleContinueWatchingResolver.isOpenable($0) }
             .prefix(AppleContinueWatchingResolver.maximumCount))
-        let listed = Self.listedItems(for: Set(shownContinued.map(\.record.id)), in: sections)
         var snapshot = AppleTopShelfSnapshot(
             version: 1,
             generatedAt: .now,
-            continueWatching: shownContinued.map { entry in
-                let listedItem = listed[entry.record.id] ?? Self.matchedItem(for: entry)
-                return Self.item(entry.record, progress: savedProgress.map {
-                    AppleContinueWatchingResolver.progress(isSeries: entry.record.kind == .series,
-                        saved: $0[entry.record.id], recordProgress: entry.record.progress)
-                } ?? entry.record.progress,
-                          landscapeArtworkURL: listed[entry.record.id].flatMap { Self.landscapeURL(for: $0) }
-                              ?? Self.landscapeURL(for: entry),
-                          catalogItem: listedItem)
+            continueWatching: shownContinued.map { record in
+                Self.item(record, progress: savedProgress.map {
+                    AppleContinueWatchingResolver.progress(isSeries: record.kind == .series,
+                        saved: $0[record.id], recordProgress: record.progress)
+                } ?? record.progress,
+                          landscapeArtworkURL: AppleSystemArtworkPolicy.publicURL(record.backdropURL))
             },
             recentlyAdded: Array(recent.prefix(20)).map { Self.item($0) },
             favorites: Array(favorites.prefix(12)).map { Self.item($0) },
-            topPicks: Self.topPicks(from: sections),
+            topPicks: [],
             favoriteChannels: favoriteChannels, recentChannels: recentChannels,
             heroes: heroes.map(\.item)
         )
@@ -600,17 +590,11 @@ public actor AppleTopShelfSnapshotWriter {
         }
         try Task.checkCancellation()
         try save(snapshot, to: url, notify: false)
-        if let first = snapshot.continueWatching.first,
-           let continued = shownContinued.first {
-            let item = listed[continued.record.id] ?? Self.matchedItem(for: continued)
+        if let first = snapshot.continueWatching.first {
             let hero = heroes.first { $0.item.id == first.id }
-            let cached: AppleHeroArtworkUpgrade.Artwork?
-            if let item { cached = await AppleHeroArtworkUpgrade.shared.cachedArtwork(for: item) }
-            else { cached = nil }
-            let wordmark = await Self.wordmark(for: item)
             snapshot.widgetHero = await widgetArtwork.prepare(itemID: first.id,
-                backdrop: hero?.backdropURL ?? cached?.backdropURL ?? first.landscapeArtworkURL,
-                wordmark: hero?.wordmarkURL ?? cached?.logoURL ?? wordmark, in: root)
+                backdrop: hero?.backdropURL ?? first.landscapeArtworkURL,
+                wordmark: hero?.wordmarkURL, in: root)
             try Task.checkCancellation()
             // A newer publish or opt-out may have replaced the snapshot during the fetch.
             guard let current = try? JSONDecoder().decode(AppleTopShelfSnapshot.self, from: Data(contentsOf: url)),
@@ -622,12 +606,8 @@ public actor AppleTopShelfSnapshotWriter {
         #endif
         if let artwork {
             // Each carousel page's art: the hero's as the billboard draws it,
-            // else the backdrop and the wordmark its listed item carries.
+            // else the page's own backdrop.
             var art: [String: (backdrop: URL?, wordmark: URL?)] = [:]
-            for entry in shownContinued {
-                let item = listed[entry.record.id] ?? Self.matchedItem(for: entry)
-                art[entry.record.id] = (nil, await Self.wordmark(for: item))
-            }
             for hero in heroes { art[hero.item.id] = (hero.backdropURL, hero.wordmarkURL) }
             let pages = AppleTopShelfContentBuilder.carouselItems(for: snapshot)
                 .compactMap { page -> (id: String, backdrop: URL, wordmark: URL?)? in
@@ -681,52 +661,7 @@ public actor AppleTopShelfSnapshotWriter {
         if notify { didChange() }
     }
 
-    /// The in-progress records Continue Watching can open, resolved as on
-    /// Discover; hidden ones are logged once. Without sources, every record.
-    private static func openable(
-        _ records: [AppleMediaRecord],
-        sections: [AppleCatalogSection],
-        sources: [AppleSource]?
-    ) -> [AppleContinueWatchingResolver.Entry] {
-        guard let sources else {
-            return records.map { .init(record: $0, resolution: .notCatalog) }
-        }
-        let lookup = AppleCatalogSearchLookup(sections: sections, sources: sources)
-        let entries = AppleContinueWatchingResolver.entries(records, in: [lookup])
-        AppleContinueWatchingResolver.logHidden(entries)
-        return entries.filter(\.resolution.isAvailable)
-    }
-
-    /// A record's landscape art when no shelf carries it under its own id:
-    /// the listed item a merged source names, else the backdrop saved with
-    /// the record. Never a rebuilt item's image-service fallback — its URL
-    /// carries the IMDb id, which the snapshot deliberately never contains.
-    private static func landscapeURL(for entry: AppleContinueWatchingResolver.Entry) -> URL? {
-        if case .listed(let match) = entry.resolution, let url = landscapeURL(for: match.item) { return url }
-        return AppleSystemArtworkPolicy.publicURL(entry.record.backdropURL)
-    }
-
-    /// The listed item a merged source names, for its genre and running time.
-    private static func matchedItem(for entry: AppleContinueWatchingResolver.Entry) -> AppleCatalogItem? {
-        if case .listed(let match) = entry.resolution { return match.item }
-        return nil
-    }
-
-    /// The first non-empty catalog shelf, e.g. Cinemeta Popular for a fresh
-    /// Stremio source. Ids are derived the same way `AppleMediaIngestion`
-    /// would ingest the item, so the deep link resolves once the app has
-    /// indexed the catalog.
-    private static func topPicks(from sections: [AppleCatalogSection]) -> [AppleTopShelfSnapshot.Item] {
-        guard let shelf = sections.first(where: { !$0.items.isEmpty }) else { return [] }
-        return shelf.items.prefix(10).map { topPickItem(sourceID: shelf.sourceID, item: $0) }
-    }
-
-    private static func topPickItem(sourceID: AppleSource.ID, item: AppleCatalogItem) -> AppleTopShelfSnapshot.Item {
-        let record = AppleMediaIngestion.catalogRecord(instanceID: sourceID, item: item)
-        return catalogItem(id: record.id, title: record.title, kind: record.kind.rawValue, item: item)
-    }
-
-    /// A catalog title's page, for Top Picks and the Home hero.
+    /// A title's page, for the Home hero.
     static func catalogItem(id: String, title: String, kind: String, item: AppleCatalogItem) -> AppleTopShelfSnapshot.Item {
         let display = URL(string: "openstream://media/\(id)?action=display")!
         let play = URL(string: "openstream://media/\(id)?action=play")
@@ -746,44 +681,14 @@ public actor AppleTopShelfSnapshotWriter {
         )
     }
 
-    /// The wordmark the title page would draw: the listed item's own, else
-    /// what the preview-assets cache already knows. Cache only, never a fetch.
-    private static func wordmark(for item: AppleCatalogItem?) async -> URL? {
-        guard let item else { return nil }
-        if let logo = item.logoURL { return logo }
-        let key = AppleStremioPreviewAssetsCache.key(type: item.type, mediaID: item.mediaID)
-        return await AppleStremioPreviewAssetsCache.shared.entry(for: key)?.assets?.logoURL
-    }
-
     private static func year(of item: AppleCatalogItem) -> Int? {
         item.year ?? item.releaseInfo.flatMap { Int($0.prefix(4)) }
-    }
-
-    /// The catalog item each Continue Watching record's card shows on
-    /// Discover, for its backdrop and details: the item the record was
-    /// ingested from, matched by record id as `AppleCatalogSearchLookup`
-    /// does. Stops once every wanted id is found.
-    private static func listedItems(for recordIDs: Set<String>,
-                                    in sections: [AppleCatalogSection]) -> [String: AppleCatalogItem] {
-        var found: [String: AppleCatalogItem] = [:]
-        var remaining = recordIDs
-        for section in sections where !remaining.isEmpty {
-            for item in section.items where !remaining.isEmpty {
-                let id = AppleMediaIngestion.catalogRecord(instanceID: section.sourceID, item: item).id
-                // Only a match with a backdrop settles the id: the same record
-                // can appear in a later shelf that has one (review of 3217b67).
-                guard remaining.contains(id), landscapeURL(for: item) != nil else { continue }
-                remaining.remove(id)
-                found[id] = item
-            }
-        }
-        return found
     }
 
     /// The card's landscape art (`AppleCatalogArtworkPolicy`, landscape):
     /// the title's backdrop. An episode still would win over it, as on the
     /// title page (`AppleEpisodeStillPolicy`), but a snapshot record is a
-    /// title, never an episode, so there is no still to offer. The Cinemeta
+    /// title, never an episode, so there is no still to offer. The
     /// image-service fallback the card also tries is left out: its URL
     /// carries the IMDb id, which the snapshot deliberately never contains.
     private static func landscapeURL(for item: AppleCatalogItem) -> URL? {
@@ -791,8 +696,7 @@ public actor AppleTopShelfSnapshotWriter {
     }
 
     private static func item(_ record: AppleMediaRecord, progress: Double? = nil,
-                             landscapeArtworkURL: URL? = nil,
-                             catalogItem: AppleCatalogItem? = nil) -> AppleTopShelfSnapshot.Item {
+                             landscapeArtworkURL: URL? = nil) -> AppleTopShelfSnapshot.Item {
         let display = URL(string: "openstream://media/\(record.id)?action=display")!
         let play = record.availability.count == 1
             ? URL(string: "openstream://media/\(record.id)?action=play")
@@ -806,10 +710,8 @@ public actor AppleTopShelfSnapshotWriter {
             playURL: play,
             progress: progress.map { min(max($0, 0), 1) },
             landscapeArtworkURL: landscapeArtworkURL,
-            summary: record.summary ?? catalogItem?.summary,
-            genre: catalogItem?.genres?.first,
-            year: record.year ?? catalogItem.flatMap(year(of:)),
-            durationSeconds: record.kind == .series ? nil : catalogItem?.runtimeMinutes.map { Double($0 * 60) }
+            summary: record.summary,
+            year: record.year
         )
     }
 

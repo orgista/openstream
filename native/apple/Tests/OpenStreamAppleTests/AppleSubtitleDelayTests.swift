@@ -92,7 +92,7 @@ struct AppleSubtitleDelayTests {
 struct AppleSubtitleDelayPerPlayTests {
     private func request(_ mediaID: String, _ path: String = "movie.mp4") -> ApplePlaybackRequest {
         ApplePlaybackRequest(url: URL(string: "https://fixture.example/\(path)")!, mediaID: mediaID,
-                             sourceKind: .stremio)
+                             sourceKind: .catalog)
     }
 
     @Test("A retry or another stream of the same title keeps the delay; a new title starts at zero")

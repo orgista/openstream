@@ -91,7 +91,7 @@ enum AppleJellyfinPlaybackPolicy {
         let ranked = available.enumerated().sorted { lhs, rhs in
             func rank(_ source: AppleMediaServerPlaybackInfo.MediaSource) -> (Int, Int, Int, Int) {
                 let height = source.mediaStreams.first { $0.type?.lowercased() == "video" }?.height
-                    ?? AppleStremioCandidateRanking.resolution(source.name ?? "")
+                    ?? AppleReleaseName.resolution(source.name ?? "")
                 let badges = source.formatBadges
                 let range = badges.contains(.dolbyVision) ? 3 : badges.contains(.hdr10Plus) ? 2 : badges.contains(.hdr10) ? 1 : 0
                 return (source.supportsDirectPlay ? 2 : source.supportsDirectStream ? 1 : 0, height, range, source.bitrate ?? 0)

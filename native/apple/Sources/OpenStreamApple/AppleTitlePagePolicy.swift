@@ -103,75 +103,18 @@ public enum AppleTitlePagePolicy {
     }
 
     /// Shared by title pages and every Discover hero. A route is a source that
-    /// can play THIS title: a Stremio add-on that serves streams, a media-server
-    /// item, local or network-share files matched to the title
-    /// (`hasLocalGroup`), or a finished download. An IPTV playlist, a network
-    /// share or a media server merely being added is not one — counting them
-    /// hid "Watch on <service>" on every catalog title (iPad v2, 2026-10-01).
-    /// Metadata-only add-ons are not routes either.
-    public static func hasPlaybackRoute(
-        item: AppleCatalogItem,
-        sources: [AppleSource],
-        hasLocalGroup: Bool = false,
-        hasCompletedDownload: Bool = false,
-        episodesUnavailable: Bool = false
-    ) -> Bool {
-        if AppleMediaServerItemReference.parse(item.mediaID) != nil || hasLocalGroup { return true }
-        if hasCompletedDownload { return true }
-        if item.type == "series", episodesUnavailable { return false }
-        return sources.contains { source in
-            source.isEnabled && source.isAddon
-                && source.resources.contains { $0.caseInsensitiveCompare("stream") == .orderedSame }
-        }
-    }
-
-    /// Where the hero's own episode lookup stands, for a series.
-    public enum HeroEpisodeLookup: Equatable, Sendable {
-        /// Still out, inside `heroTrailerLookupPatience`.
-        case pending
-        /// Never answered in time, or not looked up: no evidence either way.
-        case unknown
-        /// Answered with at least one episode.
-        case found
-        /// Answered with none — the title page will say "Episodes aren't
-        /// available" and its Play is not offered.
-        case empty
-    }
-
-    /// The hero's route: the title page's `hasPlaybackRoute`, fed with what
-    /// the hero's episode lookup found. An empty answer is a title page with
-    /// no episodes, so the hero must not promise Play: it
-    /// did, for Monster: The Lizzie Borden Story with Torrentio off, and the
-    /// press ended in "Playback Unavailable" (iOS 18.6 regression
-    /// 2026-10-01). A lookup that never answered (`unknown`) is no evidence,
-    /// so the hero falls back to the source check (N17e).
-    public static func heroHasPlaybackRoute(item: AppleCatalogItem, sources: [AppleSource],
-                                             hasLocalGroup: Bool = false,
-                                             hasCompletedDownload: Bool = false,
-                                             episodeLookup: HeroEpisodeLookup = .unknown) -> Bool {
-        hasPlaybackRoute(item: item, sources: sources, hasLocalGroup: hasLocalGroup,
-                         hasCompletedDownload: hasCompletedDownload,
-                         episodesUnavailable: episodeLookup == .empty)
-    }
-
-    /// Whether the hero's route is final: false only while its episode
-    /// lookup is out and the answer turns on it (a series whose only route
-    /// is a streaming add-on), so the button waits instead of saying Play
-    /// and then changing its mind.
-    public static func heroRouteIsSettled(item: AppleCatalogItem, sources: [AppleSource],
-                                           hasLocalGroup: Bool = false,
-                                           hasCompletedDownload: Bool = false,
-                                           episodeLookup: HeroEpisodeLookup) -> Bool {
-        guard episodeLookup == .pending else { return true }
-        let withEpisodes = hasPlaybackRoute(item: item, sources: sources, hasLocalGroup: hasLocalGroup,
-                                            hasCompletedDownload: hasCompletedDownload, episodesUnavailable: false)
-        let withoutEpisodes = hasPlaybackRoute(item: item, sources: sources, hasLocalGroup: hasLocalGroup,
-                                               hasCompletedDownload: hasCompletedDownload, episodesUnavailable: true)
-        return withEpisodes == withoutEpisodes
+    /// can play THIS title: a media-server item, local or network-share files
+    /// matched to the title (`hasLocalGroup`), or a finished download. An IPTV
+    /// playlist, a network share or a media server merely being added is not
+    /// one — counting them hid "Watch on <service>" on every catalog title
+    /// (iPad v2, 2026-10-01).
+    public static func hasPlaybackRoute(item: AppleCatalogItem, hasLocalGroup: Bool = false,
+                                        hasCompletedDownload: Bool = false) -> Bool {
+        AppleMediaServerItemReference.parse(item.mediaID) != nil || hasLocalGroup || hasCompletedDownload
     }
 
     /// Whether the title page's Play is enabled. It needs a playback route
-    /// as well as an episode: with only a metadata add-on, JEOPARDY!'s title
+    /// as well as an episode: with no playable source, JEOPARDY!'s title
     /// page offered an enabled Play that could only fail, while its hero —
     /// reading the same route — rightly said Details (N17e, iPhone sim).
     public static func canStartPlayback(type: String, hasPlaybackRoute: Bool,
@@ -182,12 +125,12 @@ public enum AppleTitlePagePolicy {
     /// The title page's one button, or nil when the page has none: nothing
     /// can play and there is no trailer, so the row keeps only My List and
     /// Rate rather than a Play that is greyed out at rest (owner, N22c —
-    /// JEOPARDY! with only a metadata add-on). The Apple TV has no trailers,
+    /// JEOPARDY! with no playable source). The Apple TV has no trailers,
     /// so there nothing to play is always no button.
     public static func titlePagePrimaryAction(
         type: String,
         progress: ApplePlaybackProgress?,
-        selectedEpisode: AppleStremioEpisode?,
+        selectedEpisode: AppleMediaEpisode?,
         isPlayable: Bool,
         hasTrailer: Bool,
         namesEpisode: Bool = false,
@@ -200,15 +143,11 @@ public enum AppleTitlePagePolicy {
     }
 
     /// Whether the title page offers Download Season / Download at all: only
-    /// when one can start, which is the same route Play needs — a source
-    /// that serves streams (a metadata-only add-on cannot) or a media-server
+    /// when one can start, which is the same route Play needs — a media-server
     /// title — or when the title is already downloaded, so its state stays
     /// visible. Otherwise the button is not drawn (N22c).
-    public static func offersDownload(item: AppleCatalogItem, sources: [AppleSource],
-                                      hasCompletedDownload: Bool = false,
-                                      episodesUnavailable: Bool = false) -> Bool {
-        hasPlaybackRoute(item: item, sources: sources, hasCompletedDownload: hasCompletedDownload,
-                         episodesUnavailable: episodesUnavailable)
+    public static func offersDownload(item: AppleCatalogItem, hasCompletedDownload: Bool = false) -> Bool {
+        hasPlaybackRoute(item: item, hasCompletedDownload: hasCompletedDownload)
     }
 
     /// An episode row's download control: where a download can start, or on
@@ -221,17 +160,17 @@ public enum AppleTitlePagePolicy {
     /// use the title page's default. Media servers own their episode list and
     /// resume routing; retain their opaque saved part id for the same label.
     static func heroEpisode(item: AppleCatalogItem, progress: ApplePlaybackProgress?,
-                            episodes: [AppleStremioEpisode], completedIDs: Set<String> = [],
-                            localResumeEpisode: AppleStremioEpisode? = nil) -> AppleStremioEpisode? {
-        if let saved = AppleStremioEpisodePolicy.savedEpisode(progress: progress, in: episodes) { return saved }
+                            episodes: [AppleMediaEpisode], completedIDs: Set<String> = [],
+                            localResumeEpisode: AppleMediaEpisode? = nil) -> AppleMediaEpisode? {
+        if let saved = AppleMediaEpisodePolicy.savedEpisode(progress: progress, in: episodes) { return saved }
         if AppleMediaServerItemReference.parse(item.mediaID) != nil,
            let progress, progress.resumePosition != nil, let part = progress.partID {
-            let identity = AppleStremioMetadataClient.episodeIdentity(part)
-            return AppleStremioEpisode(id: part, title: "", season: identity?.season,
+            let identity = AppleMediaIdentifier.episodeIdentity(part)
+            return AppleMediaEpisode(id: part, title: "", season: identity?.season,
                                        episode: identity?.episode, releaseInfo: nil)
         }
         if let localResumeEpisode { return localResumeEpisode }
-        return AppleStremioEpisodePolicy.upNext(from: episodes, completedIDs: completedIDs)
+        return AppleMediaEpisodePolicy.upNext(from: episodes, completedIDs: completedIDs)
     }
 
     /// The button's verb, derived from state rather than an error after the
@@ -246,7 +185,7 @@ public enum AppleTitlePagePolicy {
     public static func primaryAction(
         type: String,
         progress: ApplePlaybackProgress?,
-        selectedEpisode: AppleStremioEpisode?,
+        selectedEpisode: AppleMediaEpisode?,
         isPlayable: Bool,
         hasTrailer: Bool,
         namesEpisode: Bool = false,
@@ -310,7 +249,7 @@ public enum AppleTitlePagePolicy {
     public static func heroPrimaryAction(
         type: String,
         progress: ApplePlaybackProgress?,
-        selectedEpisode: AppleStremioEpisode?,
+        selectedEpisode: AppleMediaEpisode?,
         isPlayable: Bool,
         trailer: TrailerAvailability
     ) -> PrimaryAction? {
@@ -348,13 +287,13 @@ public enum AppleTitlePagePolicy {
     }
 
     /// "S4, E8" — the Apple TV app's spelling. Nil without a season and number.
-    public static func episodeCode(_ episode: AppleStremioEpisode) -> String? {
+    public static func episodeCode(_ episode: AppleMediaEpisode) -> String? {
         guard let season = episode.season, let number = episode.episode else { return nil }
         return "S\(season), E\(number)"
     }
 
     /// "S4, E8 · Follow the Anger" over the next episode's synopsis.
-    public static func nextEpisodeHeading(_ episode: AppleStremioEpisode) -> String? {
+    public static func nextEpisodeHeading(_ episode: AppleMediaEpisode) -> String? {
         let code = episodeCode(episode)
         let title = episode.title.trimmingCharacters(in: .whitespacesAndNewlines)
         switch (code, title.isEmpty) {
@@ -405,7 +344,7 @@ public enum AppleTitlePagePolicy {
     /// "EPISODE 8", or "EPISODE 8 · COMING WEDNESDAY" / "· COMING SEP 30" for
     /// one that has not aired — an appointment, not a greyed-out tile (A10).
     public static func episodeEyebrow(
-        _ episode: AppleStremioEpisode,
+        _ episode: AppleMediaEpisode,
         now: Date,
         calendar: Calendar = utcCalendar()
     ) -> String {
@@ -523,8 +462,8 @@ public enum AppleTitlePagePolicy {
     }
 
     /// `people` with a portrait for anyone who has none, taken from the same
-    /// name in `others`: the add-on that wins the merge can name a person
-    /// without a picture that another source (TMDB, a second add-on) has.
+    /// name in `others`: the source that wins the merge can name a person
+    /// without a picture that another source (TMDB) has.
     public static func fillingPortraits(_ people: [AppleCreditPerson], from others: [AppleCreditPerson]) -> [AppleCreditPerson] {
         guard people.contains(where: { $0.portraitURL == nil }) else { return people }
         var portraits: [String: URL] = [:]
@@ -552,8 +491,8 @@ public enum AppleTitlePagePolicy {
     }
 
     /// A display name for a region code ("GB" → "United Kingdom"), or the
-    /// value itself when it is already a name. Cinemeta writes the two most
-    /// common countries as "usa" and "uk".
+    /// value itself when it is already a name. Some metadata writes the two
+    /// most common countries as "usa" and "uk".
     public static func regionName(_ value: String?, locale: Locale = .current) -> String? {
         guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
         let aliases = ["USA": "US", "UK": "GB"]

@@ -245,7 +245,7 @@ public protocol ApplePlaybackEngine: AnyObject {
     func seek(to seconds: Double) async
     func selectAudioTrack(id: Int)
     func selectSubtitleTrack(id: Int?)
-    /// Append subtitle files fetched from add-ons to `subtitleTracks`, after the
+    /// Append sidecar subtitle files to `subtitleTracks`, after the
     /// tracks embedded in the media. Engines that cannot render an external
     /// file ignore them.
     func addExternalSubtitleTracks(_ tracks: [AppleExternalSubtitleTrack])

@@ -1276,8 +1276,8 @@ public final class AppleMediaServerLibraryStore {
         )
     }
 
-    public func episodes(from detail: AppleMediaServerDetail) -> [AppleStremioEpisode] {
-        var results: [AppleStremioEpisode] = []
+    public func episodes(from detail: AppleMediaServerDetail) -> [AppleMediaEpisode] {
+        var results: [AppleMediaEpisode] = []
         for season in detail.seasons {
             if let eps = detail.episodesBySeason[season.id] {
                 for ep in eps {
@@ -1288,7 +1288,7 @@ public final class AppleMediaServerLibraryStore {
                         return nil
                     }()
                     
-                    results.append(AppleStremioEpisode(
+                    results.append(AppleMediaEpisode(
                         id: ep.id, // the raw item id for playbackRequest
                         title: ep.name,
                         season: ep.parentIndexNumber,

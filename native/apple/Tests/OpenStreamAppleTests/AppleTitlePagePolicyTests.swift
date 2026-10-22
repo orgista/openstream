@@ -10,8 +10,8 @@ struct AppleTitlePagePolicyTests {
         AppleHeroBadge.releaseDate(value)!
     }
 
-    private func episode(_ season: Int, _ number: Int, title: String = "", released: String? = nil) -> AppleStremioEpisode {
-        AppleStremioEpisode(id: "tt0903747:\(season):\(number)", title: title, season: season, episode: number, releaseInfo: released)
+    private func episode(_ season: Int, _ number: Int, title: String = "", released: String? = nil) -> AppleMediaEpisode {
+        AppleMediaEpisode(id: "tt0903747:\(season):\(number)", title: title, season: season, episode: number, releaseInfo: released)
     }
 
     // MARK: Primary action
@@ -110,7 +110,7 @@ struct AppleTitlePagePolicyTests {
     @Test func nextEpisodeHeadingUsesTheAppleSpelling() {
         #expect(AppleTitlePagePolicy.nextEpisodeHeading(episode(4, 8, title: "Follow the Anger")) == "S4, E8 · Follow the Anger")
         #expect(AppleTitlePagePolicy.nextEpisodeHeading(episode(1, 2)) == "S1, E2")
-        #expect(AppleTitlePagePolicy.nextEpisodeHeading(AppleStremioEpisode(id: "x", title: "")) == nil)
+        #expect(AppleTitlePagePolicy.nextEpisodeHeading(AppleMediaEpisode(id: "x", title: "")) == nil)
     }
 
     // MARK: Schedule badge and eyebrow

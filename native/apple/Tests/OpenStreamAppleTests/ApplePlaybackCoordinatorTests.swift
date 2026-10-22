@@ -6,7 +6,7 @@ import Testing
 @Suite(.serialized, .timeLimit(.minutes(1))) struct ApplePlaybackCoordinatorTests {
     private func makeRequest(
         isLive: Bool = false,
-        sourceKind: ApplePlaybackRequest.SourceKind = .stremio
+        sourceKind: ApplePlaybackRequest.SourceKind = .catalog
     ) -> ApplePlaybackRequest {
         ApplePlaybackRequest(
             url: URL(string: "http://127.0.0.1:8765/media/movie.mp4")!,
@@ -62,7 +62,7 @@ import Testing
         let engine = FakePlaybackEngine()
         engine.loadHandler = { request in engine.phase = request.mediaID == "next" ? .playing : .loading }
         let coordinator = ApplePlaybackCoordinator(engine: engine)
-        let next = ApplePlaybackRequest(url: makeRequest().url, mediaID: "next", sourceKind: .stremio)
+        let next = ApplePlaybackRequest(url: makeRequest().url, mediaID: "next", sourceKind: .catalog)
         await coordinator.begin(makeRequest(), fallbackCandidates: [next])
         // Fixed sleeps made this the flakiest test in the suite: 50 ms is not
         // enough for the fallback to load on a machine that is also running a
