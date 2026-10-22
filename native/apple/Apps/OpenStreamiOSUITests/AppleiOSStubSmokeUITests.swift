@@ -219,13 +219,48 @@ final class AppleiOSStubSmokeUITests: OpenStreamUITestCase {
         XCTAssertTrue(app.navigationBars["Library"].exists)
         capture("ipad-split-library")
         tapTab("Live")
-        XCTAssertTrue(app.descendants(matching: .any)["live.stage.player"].firstMatch.waitForExistence(timeout: 60))
+        let stage = app.descendants(matching: .any)["live.stage.player"].firstMatch
+        XCTAssertTrue(stage.waitForExistence(timeout: 60))
         XCTAssertTrue(app.buttons["live.guide"].firstMatch.exists)
+        XCTAssertGreaterThan(app.buttons["live.guide"].firstMatch.frame.minY, stage.frame.maxY - 1)
         capture("ipad-split-live")
         tapTab("Settings")
         XCTAssertTrue(app.buttons["Sources"].firstMatch.waitForExistence(timeout: 30))
         XCTAssertFalse(app.buttons["Media Server"].exists, "A compact iPad window pushes Settings pages")
         capture("ipad-split-settings")
+    }
+
+    /// A 1/2 split on a 13-inch iPad on its side stacks Live like full screen.
+    func testHalfIPadWindowStacksLive() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            throw XCTSkip("iPad split-window proof")
+        }
+        app.launchArguments = Self.stubbedLaunchArguments + ["-OpenStreamDebugLayoutSize", "683,1032",
+                                                            "-OpenStreamVisionScreen", "live"]
+        configureFixtureLaunch(app)
+        app.launch()
+        let captureButton = app.buttons["debug.layout.capture"].firstMatch
+        XCTAssertTrue(captureButton.waitForExistence(timeout: 30))
+        XCTAssertTrue((captureButton.value as? String ?? "").contains("683x1032 pad regular"))
+        let stage = app.descendants(matching: .any)["live.stage.player"].firstMatch
+        XCTAssertTrue(stage.waitForExistence(timeout: 60))
+        let bar = app.descendants(matching: .any)["live.categories"].firstMatch
+        let list = app.descendants(matching: .any)["live.list"].firstMatch
+        XCTAssertTrue(bar.exists && list.exists)
+        XCTAssertEqual(stage.frame.width, bar.frame.width, accuracy: 1, "The stage spans the window")
+        XCTAssertEqual(bar.frame.minY, stage.frame.maxY, accuracy: 1)
+        XCTAssertEqual(list.frame.minX, bar.frame.minX, accuracy: 1)
+        XCTAssertEqual(list.frame.width, bar.frame.width, accuracy: 1)
+        captureButton.tap()
+        let record = XCTAttachment(string: (captureButton.value as? String ?? "")
+            + "\nstage: \(stage.frame)\nbar: \(bar.frame)\nlist: \(list.frame)")
+        record.name = "ipad-half-live-canvas"
+        record.lifetime = .keepAlways
+        add(record)
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "ipad-half-live"
+        shot.lifetime = .keepAlways
+        add(shot)
     }
 
     private func tapTab(_ title: String) {

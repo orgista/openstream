@@ -18,19 +18,31 @@ enum AppleLiveStagePolicy {
     static let phonePanel = Color(white: 18 / 255)
     static let phoneGuideRowHeight: CGFloat = 64
 
-    /// iPad windows split when wide enough in landscape. A large phone window
-    /// (an unfolded Duo; the root already checked its size class and size)
-    /// splits on its side and stacks upright, where the stage spans the width
-    /// and the list fills the height below it.
-    static func sideBySide(isRegularWidth: Bool, size: CGSize, expandsPhoneLayout: Bool = false) -> Bool {
-        guard size.width > size.height else { return false }
+    /// Every iPad window stacks like Paramount+ (owner 2026-10-21: "live on
+    /// ipad needs to full screen"). A large phone window (an unfolded Duo; the
+    /// root already checked its size class and size) splits on its side and
+    /// stacks upright. A visionOS window splits when wide enough.
+    static func sideBySide(isRegularWidth: Bool, size: CGSize, expandsPhoneLayout: Bool = false,
+                           isPad: Bool = false) -> Bool {
+        guard size.width > size.height, !isPad else { return false }
         if expandsPhoneLayout { return true }
         return isRegularWidth && size.width >= minimumGuideWidth / 0.38
     }
 
+    /// Channel rows a stacked large window keeps under the strip.
+    static let minimumStackedRows = 3
+
+    /// The stacked stage on a large window: as wide as the window at 16:9,
+    /// shorter only when that would leave fewer than `minimumStackedRows`
+    /// rows under the category strip (an iPad on its side).
+    static func stackedStageHeight(size: CGSize) -> CGFloat {
+        let fullWidth = size.width * 9 / 16
+        let room = size.height - phoneCategoryHeight - CGFloat(minimumStackedRows) * phoneChannelRowHeight
+        return max(0, min(fullWidth, room)).rounded(.down)
+    }
+
     /// Beside the list on a large phone window the stage's column continues
-    /// with the playing channel's schedule (`AppleLiveStageSchedule`). The
-    /// iPad keeps its stage alone.
+    /// with the playing channel's schedule (`AppleLiveStageSchedule`).
     static func showsSchedule(sideBySide: Bool, expandsPhoneLayout: Bool) -> Bool {
         sideBySide && expandsPhoneLayout
     }

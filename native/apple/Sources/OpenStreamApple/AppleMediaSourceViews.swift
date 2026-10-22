@@ -1393,22 +1393,29 @@ struct AppleLiveTVView: View {
     #if os(iOS) || os(visionOS)
     /// iPhone and iPad Live (owner items 7–10): the video edge to edge under
     /// the status bar, the category row fixed under it, the channel list the
-    /// only thing that scrolls. One `AnyLayout` stacks the two columns on a
-    /// phone and sets them side by side on a wide iPad window; the same child
-    /// views keep their identity across the switch, so the channel never
-    /// reloads on rotation or resize.
+    /// only thing that scrolls. One `AnyLayout` stacks the two columns on
+    /// iPhone and iPad and sets them side by side on a Duo on its side or a
+    /// wide visionOS window; the same child views keep their identity across
+    /// the switch, so the channel never reloads on rotation or resize.
     private var liveStage: some View {
+        #if os(iOS)
+        let isPad = UIDevice.current.userInterfaceIdiom == .pad
+        #else
+        let isPad = false
+        #endif
         let sideBySide = AppleLiveStagePolicy.sideBySide(
             isRegularWidth: horizontalSizeClass == .regular, size: viewportSize,
-            expandsPhoneLayout: expandsPhoneLayout)
+            expandsPhoneLayout: expandsPhoneLayout, isPad: isPad)
         let layout = sideBySide
             ? AnyLayout(HStackLayout(alignment: .top, spacing: 0))
             : AnyLayout(VStackLayout(spacing: 0))
         return layout {
-            liveStagePlayerColumn(showsSchedule: AppleLiveStagePolicy.showsSchedule(
+            liveStagePlayerColumn(sideBySide: sideBySide, showsSchedule: AppleLiveStagePolicy.showsSchedule(
                 sideBySide: sideBySide, expandsPhoneLayout: expandsPhoneLayout))
                 .frame(width: sideBySide ? AppleLiveStagePolicy.playerWidth(total: viewportSize.width) : nil)
                 .frame(maxHeight: sideBySide ? .infinity : nil, alignment: .top)
+                // Stacked, the stage takes its full height first; the list gets the rest.
+                .layoutPriority(1)
             liveStageGuideColumn
                 .overlay(alignment: .leading) {
                     Rectangle().fill(.white.opacity(0.1)).frame(width: 1)
@@ -1433,6 +1440,23 @@ struct AppleLiveTVView: View {
         #else
         false
         #endif
+    }
+
+    /// iPhone, iPad and Duo share the Paramount+ strip and rows (owner 2026-10-21).
+    private var usesParamountLiveStyle: Bool {
+        #if os(iOS)
+        true
+        #else
+        false
+        #endif
+    }
+
+    /// The stage's shape: 16:9, or as wide as the window and shorter when a
+    /// large window stacks with too little room left for the rows.
+    private func stageAspectRatio(sideBySide: Bool) -> CGFloat {
+        guard usesParamountLiveStyle, !usesPhoneLiveLayout, !sideBySide else { return 16 / 9 }
+        let height = AppleLiveStagePolicy.stackedStageHeight(size: viewportSize)
+        return height > 0 ? viewportSize.width / height : 16 / 9
     }
 
     private var liveGuideSheet: some View {
@@ -1468,7 +1492,7 @@ struct AppleLiveTVView: View {
         .presentationDragIndicator(.visible)
     }
 
-    private func liveStagePlayerColumn(showsSchedule: Bool) -> some View {
+    private func liveStagePlayerColumn(sideBySide: Bool, showsSchedule: Bool) -> some View {
         let programme = selectedChannel.flatMap {
             guideStore.guide(for: [$0.id]).nowAndNext(channelID: $0.id).now
         }
@@ -1484,13 +1508,13 @@ struct AppleLiveTVView: View {
                                                label: channels.isEmpty ? "No channels" : "Connecting to live channel")
                 }
             }
-            .aspectRatio(16 / 9, contentMode: .fit)
+            .aspectRatio(stageAspectRatio(sideBySide: sideBySide), contentMode: .fit)
             .frame(maxWidth: .infinity)
             .clipped()
             // The schedule under it takes what is left, never the stage's 16:9.
             .layoutPriority(1)
             .accessibilityIdentifier("live.stage.player")
-            if !usesPhoneLiveLayout {
+            if sideBySide || !usesParamountLiveStyle {
                 AppleLiveProgrammeLine(programme: programme)
             }
             #if os(iOS)
@@ -1533,7 +1557,7 @@ struct AppleLiveTVView: View {
                 get: { AppleLiveCategoryOrder.resolved(selectedCategory, in: liveCategoryTabs) },
                 set: { selectedCategory = $0 }
             ), onSearch: { showsSearch = true }, onGuide: { showsGuide = true },
-                usesPhoneLayout: usesPhoneLiveLayout)
+                usesParamountStyle: usesParamountLiveStyle)
             liveOnNowList(channels: channelSnapshot.channels)
         }
     }
@@ -1548,7 +1572,7 @@ struct AppleLiveTVView: View {
             hiddenCount: showsSourceProblems ? channelSnapshot.hiddenCount : 0,
             showsEmptyText: snapshotRevision > 0 && hasResolvedFirstLoad,
             sourceProblems: showsSourceProblems ? liveSourceProblems : [],
-            usesPhoneLayout: usesPhoneLiveLayout,
+            usesParamountStyle: usesParamountLiveStyle,
             onSelect: playFromList,
             onToggleFavorite: toggleFavorite,
             onHide: { settings.hiddenLiveChannelIDs.insert($0.id) },

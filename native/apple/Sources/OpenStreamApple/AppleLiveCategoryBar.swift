@@ -6,24 +6,24 @@ struct AppleLiveCategoryBar: View {
     @Binding var selection: String
     let onSearch: () -> Void
     let onGuide: (() -> Void)?
-    let usesPhoneLayout: Bool
+    let usesParamountStyle: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var chipsFit = false
 
     init(tabs: [String], selection: Binding<String>, onSearch: @escaping () -> Void,
-         onGuide: (() -> Void)? = nil, usesPhoneLayout: Bool = false) {
+         onGuide: (() -> Void)? = nil, usesParamountStyle: Bool = false) {
         self.tabs = tabs
         _selection = selection
         self.onSearch = onSearch
         self.onGuide = onGuide
-        self.usesPhoneLayout = usesPhoneLayout
+        self.usesParamountStyle = usesParamountStyle
     }
 
     var body: some View {
         HStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView(.horizontal) {
-                    HStack(spacing: usesPhoneLayout ? AppleLiveStagePolicy.phoneCategorySpacing : 24) {
+                    HStack(spacing: usesParamountStyle ? AppleLiveStagePolicy.phoneCategorySpacing : 24) {
                         ForEach(tabs, id: \.self) { tab in
                             tabButton(tab)
                                 .id(tab)
@@ -32,16 +32,16 @@ struct AppleLiveCategoryBar: View {
                     .padding(.horizontal, 16)
                 }
                 .scrollIndicators(.never)
-                .scrollBounceBehavior(usesPhoneLayout ? .basedOnSize : .automatic, axes: .vertical)
+                .scrollBounceBehavior(usesParamountStyle ? .basedOnSize : .automatic, axes: .vertical)
                 // A vertical drag on the strip rubber-banded the chips 24 pt inside it even with
                 // `.basedOnSize` (iOS 18.6, 2026-10-21): chips that fit have nothing to scroll.
                 .onScrollGeometryChange(for: Bool.self) { $0.contentSize.width <= $0.containerSize.width } action: { _, fits in
                     chipsFit = fits
                 }
-                .scrollDisabled(usesPhoneLayout && chipsFit)
+                .scrollDisabled(usesParamountStyle && chipsFit)
                 .onChange(of: selection) { _, tab in
-                    if usesPhoneLayout {
-                        // The phone strip stays put: it scrolls only to uncover a chip cut off at its edge.
+                    if usesParamountStyle {
+                        // The Paramount+ strip stays put: it scrolls only to uncover a chip cut off at its edge.
                         proxy.scrollTo(tab)
                     } else {
                         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
@@ -77,26 +77,26 @@ struct AppleLiveCategoryBar: View {
             .accessibilityIdentifier("live.search")
         }
         .frame(height: categoryHeight)
-        .background(usesPhoneLayout ? AppleLiveStagePolicy.phonePanel : .black)
+        .background(usesParamountStyle ? AppleLiveStagePolicy.phonePanel : .black)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("live.categories")
     }
 
     private var categoryHeight: CGFloat {
-        usesPhoneLayout ? AppleLiveStagePolicy.phoneCategoryHeight : AppleDesignTokens.minimumActionSize
+        usesParamountStyle ? AppleLiveStagePolicy.phoneCategoryHeight : AppleDesignTokens.minimumActionSize
     }
 
     private func tabButton(_ tab: String) -> some View {
         let isSelected = tab == selection
         return Button {
-            if usesPhoneLayout {
+            if usesParamountStyle {
                 selection = tab
             } else {
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { selection = tab }
             }
         } label: {
             Group {
-                if usesPhoneLayout {
+                if usesParamountStyle {
                     // The underline is as wide as the label, not the 44 pt tap frame.
                     tabLabel(tab, isSelected: isSelected)
                         .padding(.bottom, AppleLiveStagePolicy.phoneCategoryUnderlineGap
@@ -112,7 +112,7 @@ struct AppleLiveCategoryBar: View {
                         .overlay(alignment: .bottom) { underline(height: 2, isSelected: isSelected) }
                 }
             }
-            .frame(minWidth: AppleDesignTokens.minimumActionSize, alignment: usesPhoneLayout ? .leading : .center)
+            .frame(minWidth: AppleDesignTokens.minimumActionSize, alignment: usesParamountStyle ? .leading : .center)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)

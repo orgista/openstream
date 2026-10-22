@@ -64,6 +64,13 @@ final class ApplePadParityUITests: XCTestCase {
         XCTAssertTrue(element("live.list").exists)
         let channel = app.buttons.matching(NSPredicate(format: "label == %@", "Play Fixture News")).firstMatch
         XCTAssertTrue(channel.waitForExistence(timeout: 20))
+        #if os(iOS)
+        // Paramount+ on iPad (owner 2026-10-21): the stage spans the window, the list fills the rest below it.
+        let stage = element("live.stage.player")
+        XCTAssertEqual(stage.frame.width, app.frame.width, accuracy: 1)
+        XCTAssertGreaterThan(element("live.guide").frame.minY, stage.frame.maxY - 1)
+        XCTAssertGreaterThan(channel.frame.minY, stage.frame.maxY - 1)
+        #endif
         try checkpoint("live-stage")
         element("live.guide").tap()
         let done = element("live.guide.done")

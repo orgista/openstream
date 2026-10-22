@@ -707,6 +707,59 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         XCTAssertTrue(guide.waitForExistence(timeout: 10))
     }
 
+    /// Owner 2026-10-21 ("live on ipad needs to full screen"): Paramount+'s iPad
+    /// stack in both orientations. The stage spans the window, the flat strip
+    /// sits on it and the list fills the rest with room for three rows. The
+    /// playing row and Full Screen still open the full-screen player.
+    func testIPadLiveStacksLikeParamountPlus() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            throw XCTSkip("iPad Live layout")
+        }
+        continueAfterFailure = true
+        defer { XCUIDevice.shared.orientation = .portrait }
+        for orientation in [UIDeviceOrientation.portrait, .landscapeLeft] {
+            let name = orientation == .portrait ? "portrait" : "landscape"
+            XCUIDevice.shared.orientation = orientation
+            app.terminate()
+            app.launchArguments = ["-OpenStreamMuteAudio", "YES", "-OpenStreamHoldPlayerChrome", "YES"]
+            launch(screen: "live")
+            let player = app.descendants(matching: .any).matching(identifier: "live.stage.player").firstMatch
+            XCTAssertTrue(player.waitForExistence(timeout: 60))
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "value == %@", "Playing"), object: player)], timeout: 60), .completed)
+            attach("ipad-live-\(name)")
+            let bar = app.descendants(matching: .any).matching(identifier: "live.categories").firstMatch
+            let list = app.descendants(matching: .any).matching(identifier: "live.list").firstMatch
+            XCTAssertTrue(bar.exists && list.exists)
+            let stage = player.frame
+            XCTAssertEqual(stage.minX, app.frame.minX, accuracy: 1)
+            XCTAssertEqual(stage.width, app.frame.width, accuracy: 1)
+            XCTAssertEqual(bar.frame.minY, stage.maxY, accuracy: 1, "The strip sits directly on the stage")
+            XCTAssertEqual(bar.frame.width, app.frame.width, accuracy: 1)
+            XCTAssertEqual(bar.frame.height, 81, accuracy: 1)
+            XCTAssertGreaterThanOrEqual(list.frame.maxY - bar.frame.maxY, 3 * 88 - 1, "Three rows fit under the strip")
+            XCTAssertEqual(list.frame.maxY, app.frame.maxY, accuracy: 1, "The list reaches the bottom")
+            let frames = XCTAttachment(string: "app: \(app.frame)\nstage: \(stage)\nbar: \(bar.frame)\nlist: \(list.frame)")
+            frames.name = "ipad-live-\(name)-frames"
+            frames.lifetime = .keepAlways
+            add(frames)
+        }
+        let watching = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND selected == true",
+                                                        "guide.play.")).firstMatch
+        XCTAssertTrue(watching.waitForExistence(timeout: 10))
+        watching.tap()
+        let close = app.buttons["player.close"].firstMatch
+        XCTAssertTrue(close.waitForExistence(timeout: 10), "The playing row opens full screen on iPad")
+        attach("ipad-live-playing-row-full-screen")
+        close.tap()
+        XCTAssertTrue(revealInlineLiveControls(timeout: 30))
+        let fullScreen = app.buttons["player.fullscreen"].firstMatch
+        XCTAssertTrue(isSafelyHittable(fullScreen))
+        fullScreen.tap()
+        XCTAssertTrue(close.waitForExistence(timeout: 10), "Full Screen still opens the player")
+        close.tap()
+    }
+
     func testLiveCategoryBarStaysFixedWhileScrolling() throws {
         guard UIDevice.current.userInterfaceIdiom == .phone else {
             throw XCTSkip("Phone Live layout")
