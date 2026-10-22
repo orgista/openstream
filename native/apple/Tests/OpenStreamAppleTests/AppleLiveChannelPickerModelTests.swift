@@ -120,16 +120,8 @@ struct AppleLiveChannelPickerModelTests {
         #expect(notCurrentWithoutShow.accessibilityLabel == "One")
     }
 
-    @Test func choosePicksTheBottomStripOnlyForIPad() {
-        #expect(AppleLiveChannelPickerPresentation.choose(isPad: true) == .bottomStrip)
-        #expect(AppleLiveChannelPickerPresentation.choose(isPad: false) == .panel)
-    }
-
-    @MainActor
-    @Test func currentIsThePanelWhenNotRunningOnIOS() {
-        // This test target builds for macOS, so the `#if os(iOS)` branch that
-        // reads the device idiom is never compiled here: `current` falls
-        // straight through to `.panel`.
-        #expect(AppleLiveChannelPickerPresentation.current == .panel)
+    @Test func choosePicksTheBottomStripOnlyForLargeLayouts() {
+        #expect(AppleLiveChannelPickerPresentation.choose(isLargeLayout: true) == .bottomStrip)
+        #expect(AppleLiveChannelPickerPresentation.choose(isLargeLayout: false) == .panel)
     }
 }

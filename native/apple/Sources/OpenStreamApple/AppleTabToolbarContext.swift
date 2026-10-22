@@ -23,9 +23,10 @@ extension View {
     /// page's items apart from the tab's and from a title page under it
     /// (`AppleTabToolbar.scope`).
     func appleTitlePageToolbar(pageID: String, title: String, heroIsOffscreen: Bool,
-                               topInset: CGFloat, backIsBlocked: Bool = false, onBack: @escaping () -> Void) -> some View {
+                               topInset: CGFloat, usesPhoneLayout: Bool = false,
+                               backIsBlocked: Bool = false, onBack: @escaping () -> Void) -> some View {
         modifier(AppleTitlePageToolbar(pageID: pageID, title: title, heroIsOffscreen: heroIsOffscreen,
-                                      topInset: topInset, backIsBlocked: backIsBlocked, onBack: onBack))
+                                      topInset: topInset, usesPhoneLayout: usesPhoneLayout, backIsBlocked: backIsBlocked, onBack: onBack))
     }
 
     /// iOS 26 sets a title page's bar buttons on round glass; iOS 18 draws bare
@@ -69,6 +70,7 @@ private struct AppleTitlePageToolbar: ViewModifier {
     let title: String
     let heroIsOffscreen: Bool
     let topInset: CGFloat
+    let usesPhoneLayout: Bool
     let backIsBlocked: Bool
     let onBack: () -> Void
     @Environment(\.appleTabToolbar) private var tabToolbar
@@ -76,12 +78,9 @@ private struct AppleTitlePageToolbar: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
         #if os(iOS)
-        if UIDevice.current.userInterfaceIdiom == .phone {
-            content.modifier(ApplePhoneTitlePageChrome(title: title, heroIsOffscreen: heroIsOffscreen,
-                                                     topInset: topInset, onBack: onBack))
-        } else {
-            standardToolbar(content)
-        }
+        standardToolbar(content)
+            .modifier(ApplePhoneTitlePageChrome(isEnabled: usesPhoneLayout, title: title,
+                heroIsOffscreen: heroIsOffscreen, topInset: topInset, onBack: onBack))
         #else
         standardToolbar(content)
         #endif
@@ -90,24 +89,26 @@ private struct AppleTitlePageToolbar: ViewModifier {
     private func standardToolbar(_ content: Content) -> some View {
         // Read here, in `body`, so the page redraws when the tab's store
         // changes; the toolbar builder below runs outside that tracking.
-        let isRefreshing = tabToolbar?.isRefreshing() ?? false
+        let isRefreshing = !usesPhoneLayout && (tabToolbar?.isRefreshing() ?? false)
         return content
             .navigationBarBackButtonHidden(true)
             .toolbar {
-                ToolbarItem(placement: .navigation) {
-                    Button(action: onBack) {
-                        Label("Back", systemImage: "chevron.left")
+                if !usesPhoneLayout {
+                    ToolbarItem(placement: .navigation) {
+                        Button(action: onBack) {
+                            Label("Back", systemImage: "chevron.left")
+                        }
+                        .keyboardShortcut("[", modifiers: .command)
+                        .help("Back")
+                        .accessibilityIdentifier("detail.back")
+                        .appleVisionActionTarget()
+                        .appleTitleBarButtonBacking()
                     }
-                    .keyboardShortcut("[", modifiers: .command)
-                    .help("Back")
-                    .accessibilityIdentifier("detail.back")
-                    .appleVisionActionTarget()
-                    .appleTitleBarButtonBacking()
-                }
-                if let tabToolbar {
-                    AppleTabToolbar(tab: tabToolbar.tab, isRefreshing: isRefreshing,
-                                    onSearch: tabToolbar.onSearch, onRefresh: tabToolbar.onRefresh,
-                                    scope: "title.\(pageID)", isTitlePage: true)
+                    if let tabToolbar {
+                        AppleTabToolbar(tab: tabToolbar.tab, isRefreshing: isRefreshing,
+                                        onSearch: tabToolbar.onSearch, onRefresh: tabToolbar.onRefresh,
+                                        scope: "title.\(pageID)", isTitlePage: true)
+                    }
                 }
             }
             #if os(macOS)

@@ -340,7 +340,7 @@ public struct OpenStreamRootView: View {
     }
 
     // Compact iPad windows retain their existing landscape behavior.
-    // The phone shell is portrait-only, including while a player covers it.
+    // Small phone windows stay portrait-only, including under a player.
     #if os(iOS)
     private var iPadTabBarIsHidden: Bool {
         UIDevice.current.userInterfaceIdiom == .pad
@@ -348,12 +348,19 @@ public struct OpenStreamRootView: View {
             && AppleDetailMetrics.isLandscapeLayout(viewport: rootViewportSize)
     }
 
-    /// Settings as a sidebar and a pane on a regular-width iPad in
-    /// landscape; a single pushed stack everywhere else.
+    private var isLargeLayout: Bool {
+        AppleLayoutClass.isLarge(size: rootViewportSize, isRegularWidth: horizontalSizeClass == .regular)
+    }
+
+    private var expandsPhoneLayout: Bool {
+        isLargeLayout && UIDevice.current.userInterfaceIdiom == .phone
+    }
+
+    /// Preserve today's iPad portrait presentation while an expanded phone uses both panes.
     private var settingsUsesSplitView: Bool {
-        UIDevice.current.userInterfaceIdiom == .pad
-            && horizontalSizeClass == .regular
-            && AppleDetailMetrics.isLandscapeLayout(viewport: rootViewportSize)
+        AppleLayoutClass.settingsUseSplitView(size: rootViewportSize,
+            isRegularWidth: horizontalSizeClass == .regular,
+            preservesPortraitStack: UIDevice.current.userInterfaceIdiom == .pad)
     }
     #elseif os(visionOS)
     /// The iPad's rule: a sidebar and a pane in a regular, landscape window.
@@ -436,9 +443,8 @@ public struct OpenStreamRootView: View {
             Button("Cancel", role: .cancel) { router.clearExternalLivePlayback() }
         }
         #if os(iOS)
-        .onGeometryChange(for: CGSize.self) { [isPad = UIDevice.current.userInterfaceIdiom == .pad] proxy in
-            isPad ? proxy.size : .zero
-        } action: { rootViewportSize = $0 }
+        .modifier(AppleRootLayoutReader(viewportSize: $rootViewportSize,
+            isLargeLayout: isLargeLayout, expandsPhoneLayout: expandsPhoneLayout))
         #endif
         #if os(visionOS)
         .onGeometryChange(for: CGSize.self) { $0.size } action: { rootViewportSize = $0 }

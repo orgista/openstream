@@ -1,12 +1,12 @@
-/// The application mask stays independent of viewport size and size classes.
+/// Small phone windows stay upright outside the player; large windows rotate freely.
 enum AppleOrientationPolicy: Equatable {
     case portrait
     case allButUpsideDown
     case all
 
-    static func supportedOrientations(isPhone: Bool, allowsLandscape: Bool) -> Self {
+    static func supportedOrientations(isPhone: Bool, allowsLandscape: Bool, isLargeLayout: Bool = false) -> Self {
         guard isPhone else { return .all }
-        return allowsLandscape ? .allButUpsideDown : .portrait
+        return allowsLandscape || isLargeLayout ? .allButUpsideDown : .portrait
     }
 }
 
@@ -29,14 +29,24 @@ public final class AppleOrientationLock {
 
     private init() {}
 
-    public func supportedOrientations(for idiom: UIUserInterfaceIdiom) -> UIInterfaceOrientationMask {
+    public func supportedOrientations(for idiom: UIUserInterfaceIdiom, window: UIWindow? = nil) -> UIInterfaceOrientationMask {
         switch AppleOrientationPolicy.supportedOrientations(
-            isPhone: idiom == .phone, allowsLandscape: allowsLandscape
+            isPhone: idiom == .phone, allowsLandscape: allowsLandscape,
+            isLargeLayout: window.map(Self.isLargeLayout) ?? false
         ) {
         case .portrait: .portrait
         case .allButUpsideDown: .allButUpsideDown
         case .all: .all
         }
+    }
+
+    public func windowSizeDidChange() {
+        updateOrientation()
+    }
+
+    private static func isLargeLayout(_ window: UIWindow) -> Bool {
+        AppleLayoutClass.isLarge(size: window.bounds.size,
+            isRegularWidth: window.traitCollection.horizontalSizeClass == .regular)
     }
 
     private func updateOrientation() {
@@ -48,6 +58,8 @@ public final class AppleOrientationLock {
                 root.setNeedsUpdateOfSupportedInterfaceOrientations()
                 topViewController(from: root).setNeedsUpdateOfSupportedInterfaceOrientations()
             }
+            // Closing a player must not force a large phone window into portrait.
+            guard !scene.windows.contains(where: { $0.isKeyWindow && Self.isLargeLayout($0) }) else { continue }
             // Also handles opening a player while the device is already sideways.
             scene.requestGeometryUpdate(.iOS(interfaceOrientations: requestedOrientations))
         }

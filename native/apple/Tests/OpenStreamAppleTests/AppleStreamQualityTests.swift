@@ -99,6 +99,26 @@ struct AppleStreamQualityTests {
 
     // MARK: Automatic and fallback order
 
+    @Test(arguments: [
+        (CGSize(width: 1080, height: 2340), false, AppleStreamQualityTier.fullHD),
+        (CGSize(width: 2340, height: 1080), false, .fullHD),
+        (CGSize(width: 1081, height: 2400), false, .uhd),
+        (CGSize(width: 1290, height: 2796), false, .uhd),
+        (CGSize(width: 2208, height: 1840), false, .uhd),
+        (CGSize(width: 1840, height: 2208), false, .uhd),
+        (CGSize(width: 2208, height: 1840), true, .fullHD),
+        (CGSize.zero, false, .fullHD),
+    ])
+    func automaticUsesTheNativePanelAndNetworkCost(_ sample: (CGSize, Bool, AppleStreamQualityTier)) throws {
+        let (pixels, costly, expected) = sample
+        let cap = AppleStreamDeviceCapabilities.automaticTierCap(nativePixelSize: pixels, isCostly: costly)
+        let device = AppleStreamDeviceCapabilities(supportsHDR: true, supportsDolbyVision: true,
+                                                   automaticTierCap: cap)
+        let first = try #require(AppleStremioCandidateRanking.playbackOrder(Self.sample, choice: .automatic,
+                                                                            device: device).first)
+        #expect(AppleStremioCandidateRanking.traits(of: first).tier == expected)
+    }
+
     @Test func automaticTakesTheBestTierTheDeviceIsCappedAt() {
         let tv = Self.names(AppleStremioCandidateRanking.playbackOrder(Self.sample, choice: .automatic, device: Self.dolbyVisionTV))
         #expect(tv.first == "Film.2023.2160p.HDR.HEVC.EAC3.mp4")

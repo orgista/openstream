@@ -2,6 +2,7 @@
 import SwiftUI
 
 struct ApplePhoneTitlePageChrome: ViewModifier {
+    var isEnabled = true
     let title: String
     let heroIsOffscreen: Bool
     let topInset: CGFloat
@@ -9,7 +10,7 @@ struct ApplePhoneTitlePageChrome: ViewModifier {
     func body(content: Content) -> some View {
         content
             .navigationBarBackButtonHidden(true)
-            .modifier(ApplePhoneHeroChrome(title: title, identifier: "detail.compact-title",
+            .modifier(ApplePhoneHeroChrome(isEnabled: isEnabled, title: title, identifier: "detail.compact-title",
                                           heroIsOffscreen: heroIsOffscreen, topInset: topInset) {
                 HStack {
                     backButton
@@ -39,6 +40,7 @@ struct ApplePhoneTitlePageChrome: ViewModifier {
 
 /// The title and landing pages keep a stable overlay while the hero scrolls away.
 private struct ApplePhoneHeroChrome<Controls: View>: ViewModifier {
+    var isEnabled = true
     let title: String
     let identifier: String
     let heroIsOffscreen: Bool
@@ -49,38 +51,42 @@ private struct ApplePhoneHeroChrome<Controls: View>: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .toolbar(.hidden, for: .navigationBar)
+            .toolbar(isEnabled ? .hidden : .visible, for: .navigationBar)
             .overlay(alignment: .top) {
-                LinearGradient(colors: [.black.opacity(0.65), .clear], startPoint: .top, endPoint: .bottom)
-                    .frame(height: topInset + AppleDesignTokens.minimumActionSize)
-                    .offset(y: -topInset)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
+                if isEnabled {
+                    LinearGradient(colors: [.black.opacity(0.65), .clear], startPoint: .top, endPoint: .bottom)
+                        .frame(height: topInset + AppleDesignTokens.minimumActionSize)
+                        .offset(y: -topInset)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
             }
             .overlay(alignment: .top) {
-                controls()
-                    .overlay {
-                        // Keep layout fixed; only the visible title has an identifier.
-                        Text(title)
-                            .font(.headline)
-                            .foregroundStyle(.white)
-                            .lineLimit(1)
-                            .padding(.horizontal, titleInset)
-                            .opacity(heroIsOffscreen ? 1 : 0)
-                            .accessibilityHidden(!heroIsOffscreen)
-                            .accessibilityAddTraits(.isHeader)
-                            .accessibilityIdentifier(heroIsOffscreen ? identifier : "")
-                            .allowsHitTesting(false)
-                    }
-                    .frame(height: AppleDesignTokens.minimumActionSize)
-                    .padding(.horizontal, AppleDesignTokens.phoneHeroControlInset)
-                    .background {
-                        Rectangle()
-                            .fill(.bar)
-                            .opacity(heroIsOffscreen ? 1 : 0)
-                            .ignoresSafeArea(edges: .top)
-                    }
-                    .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: heroIsOffscreen)
+                if isEnabled {
+                    controls()
+                        .overlay {
+                            // Keep layout fixed; only the visible title has an identifier.
+                            Text(title)
+                                .font(.headline)
+                                .foregroundStyle(.white)
+                                .lineLimit(1)
+                                .padding(.horizontal, titleInset)
+                                .opacity(heroIsOffscreen ? 1 : 0)
+                                .accessibilityHidden(!heroIsOffscreen)
+                                .accessibilityAddTraits(.isHeader)
+                                .accessibilityIdentifier(heroIsOffscreen ? identifier : "")
+                                .allowsHitTesting(false)
+                        }
+                        .frame(height: AppleDesignTokens.minimumActionSize)
+                        .padding(.horizontal, AppleDesignTokens.phoneHeroControlInset)
+                        .background {
+                            Rectangle()
+                                .fill(.bar)
+                                .opacity(heroIsOffscreen ? 1 : 0)
+                                .ignoresSafeArea(edges: .top)
+                        }
+                        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: heroIsOffscreen)
+                }
             }
     }
 }
@@ -95,29 +101,26 @@ struct ApplePhoneLandingChrome<Accessory: View>: ViewModifier {
     @ViewBuilder let accessory: () -> Accessory
     @State private var heroIsOffscreen = false
     @State private var topInset: CGFloat = 0
+    @Environment(\.appleUsesPadLandingChrome) private var usesPadLandingChrome
 
     func body(content: Content) -> some View {
-        if UIDevice.current.userInterfaceIdiom == .phone {
-            content
-                .padding(.top, hasHero ? 0 : AppleDesignTokens.minimumActionSize)
-                .onPreferenceChange(ApplePhoneLandingHeroOffscreenKey.self) { heroIsOffscreen = $0 }
-                .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { topInset = $0 }
-                .modifier(ApplePhoneHeroChrome(title: title, identifier: identifier,
-                                              heroIsOffscreen: !hasHero || heroIsOffscreen, topInset: topInset, titleInset: 104) {
-                    HStack(spacing: 8) {
-                        accessory()
-                        Spacer(minLength: 0)
-                        roundControl("Search", symbol: "magnifyingglass", action: onSearch)
-                            .accessibilityIdentifier(identifier + ".search")
-                        roundControl("Refresh", symbol: "arrow.clockwise", action: onRefresh)
-                            .accessibilityIdentifier(identifier + ".refresh")
-                            .symbolEffect(.rotate, options: .repeat(.continuous), isActive: isRefreshing)
-                            .disabled(isRefreshing)
-                    }
-                })
-        } else {
-            content
-        }
+        content
+            .padding(.top, usesPadLandingChrome || hasHero ? 0 : AppleDesignTokens.minimumActionSize)
+            .onPreferenceChange(ApplePhoneLandingHeroOffscreenKey.self) { heroIsOffscreen = $0 }
+            .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { topInset = $0 }
+            .modifier(ApplePhoneHeroChrome(isEnabled: !usesPadLandingChrome, title: title, identifier: identifier,
+                                          heroIsOffscreen: !hasHero || heroIsOffscreen, topInset: topInset, titleInset: 104) {
+                HStack(spacing: 8) {
+                    accessory()
+                    Spacer(minLength: 0)
+                    roundControl("Search", symbol: "magnifyingglass", action: onSearch)
+                        .accessibilityIdentifier(identifier + ".search")
+                    roundControl("Refresh", symbol: "arrow.clockwise", action: onRefresh)
+                        .accessibilityIdentifier(identifier + ".refresh")
+                        .symbolEffect(.rotate, options: .repeat(.continuous), isActive: isRefreshing)
+                        .disabled(isRefreshing)
+                }
+            })
     }
 
     private func roundControl(_ label: String, symbol: String, action: @escaping () -> Void) -> some View {
@@ -184,11 +187,12 @@ private struct ApplePhoneLandingHeroExtentKey: PreferenceKey {
 }
 
 struct ApplePhoneLandingHeroReader: ViewModifier {
-    let isPhone: Bool
+    /// The hero under the phone landing chrome: the phone's, or the iPad's on a large phone window.
+    let isUnderPhoneChrome: Bool
 
     func body(content: Content) -> some View {
         content.background {
-            if isPhone {
+            if isUnderPhoneChrome {
                 GeometryReader { proxy in
                     Color.clear.preference(key: ApplePhoneLandingHeroExtentKey.self,
                         value: proxy.size.height > 0

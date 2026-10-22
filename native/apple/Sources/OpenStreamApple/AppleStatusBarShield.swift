@@ -20,6 +20,7 @@ struct AppleStatusBarShield: ViewModifier {
     /// The page's own top safe-area inset. Passed in rather than measured here
     /// because an overlay reads a safe area its parent has already consumed.
     let topInset: CGFloat
+    var isEnabled = true
 
     @State private var isScrolled = false
 
@@ -35,7 +36,7 @@ struct AppleStatusBarShield: ViewModifier {
             .overlay(alignment: .top) {
                 Color.black
                     .frame(height: topInset)
-                    .opacity(isScrolled ? 1 : 0)
+                    .opacity(isEnabled && isScrolled ? 1 : 0)
                     .animation(.easeOut(duration: 0.15), value: isScrolled)
                     .ignoresSafeArea(edges: .top)
                     .allowsHitTesting(false)
@@ -48,13 +49,9 @@ extension View {
     /// iOS only: every other platform either keeps its navigation bar or has no
     /// status bar to collide with.
     @ViewBuilder
-    func appleStatusBarShield(topInset: CGFloat) -> some View {
+    func appleStatusBarShield(topInset: CGFloat, usesPhoneLayout: Bool = false) -> some View {
         #if os(iOS)
-        if UIDevice.current.userInterfaceIdiom == .phone {
-            self
-        } else {
-            modifier(AppleStatusBarShield(topInset: topInset))
-        }
+        modifier(AppleStatusBarShield(topInset: topInset, isEnabled: !usesPhoneLayout))
         #else
         self
         #endif

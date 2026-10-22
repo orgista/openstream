@@ -1,7 +1,4 @@
 import SwiftUI
-#if os(iOS)
-import UIKit
-#endif
 
 /// One platform selector and page gate for both home tabs. Callers own content and actions.
 struct AppleHomeHeroCarousel<Page: View>: View {
@@ -20,25 +17,28 @@ struct AppleHomeHeroCarousel<Page: View>: View {
     @State private var rotatingTrailer = AppleHomeHeroTrailerStateKey.Value()
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.appleIsLargeLayout) private var isLargeLayout
+    @Environment(\.appleUsesPadLandingChrome) private var usesPadLandingChrome
 
     var presentation: AppleHomePresentationPolicy.Hero {
         Self.presentation(viewport: viewportSize, compact: horizontalSizeClass == .compact,
-                          accessibility: dynamicTypeSize.isAccessibilitySize)
+                          accessibility: dynamicTypeSize.isAccessibilitySize, isLargeLayout: isLargeLayout)
     }
 
-    static func presentation(viewport: CGSize, compact: Bool, accessibility: Bool) -> AppleHomePresentationPolicy.Hero {
+    static func presentation(viewport: CGSize, compact: Bool, accessibility: Bool,
+                             isLargeLayout: Bool) -> AppleHomePresentationPolicy.Hero {
         #if os(macOS)
         let platform = AppleHomePresentationPolicy.Platform.mac
         #elseif os(tvOS)
         let platform = AppleHomePresentationPolicy.Platform.tv
         #elseif os(iOS)
-        let platform = UIDevice.current.userInterfaceIdiom == .pad
-            ? AppleHomePresentationPolicy.Platform.pad : .phone
+        let platform = AppleHomePresentationPolicy.Platform.iOS
         #else
         let platform = AppleHomePresentationPolicy.Platform.vision
         #endif
         return AppleHomePresentationPolicy.hero(platform: platform, compact: compact,
-            landscape: AppleDetailMetrics.isLandscapeLayout(viewport: viewport), accessibility: accessibility)
+            landscape: AppleDetailMetrics.isLandscapeLayout(viewport: viewport),
+            accessibility: accessibility, isLargeLayout: isLargeLayout)
     }
 
     private var art: [AppleHeroPageArt] {
@@ -101,7 +101,8 @@ struct AppleHomeHeroCarousel<Page: View>: View {
             #endif
         }
         #if os(iOS)
-        .modifier(ApplePhoneLandingHeroReader(isPhone: presentation == .phone))
+        .modifier(ApplePhoneLandingHeroReader(isUnderPhoneChrome: presentation == .phone
+            || (presentation == .pad && !usesPadLandingChrome)))
         #endif
     }
     #if !os(macOS) && !os(tvOS)

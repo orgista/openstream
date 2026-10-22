@@ -23,6 +23,7 @@ struct AppleAlignedTabTitle: ViewModifier {
     /// shows its stock material over the hero from the start.
     let overArtwork: Bool
     var phoneHero = false
+    @Environment(\.appleUsesPadLandingChrome) private var usesPadLandingChrome
 
     static func style(for platform: AppleUIPlatform, isLive: Bool = false) -> AppleTabTitleStyle {
         switch platform {
@@ -34,20 +35,9 @@ struct AppleAlignedTabTitle: ViewModifier {
 
     func body(content: Content) -> some View {
         #if os(iOS)
-        if phoneHero && UIDevice.current.userInterfaceIdiom == .phone {
-            content.navigationTitle("").navigationBarTitleDisplayMode(.inline)
-        } else if isLive {
-            legacyNavigationBackground(content)
-                .navigationTitle(title)
-                .navigationBarTitleDisplayMode(.inline)
-        } else {
-            // `.inlineLarge` puts the large title in the toolbar row instead of a
-            // second row beneath it, so "Discover" and "Live" sit right under the
-            // status bar (owner, 2026-09-18: "Live is too low… Discover is too low").
-            legacyNavigationBackground(content)
-                .navigationTitle(title)
-                .toolbarTitleDisplayMode(.inlineLarge)
-        }
+        legacyNavigationBackground(content)
+            .navigationTitle(phoneHero && !usesPadLandingChrome ? "" : title)
+            .toolbarTitleDisplayMode(isLive || (phoneHero && !usesPadLandingChrome) ? .inline : .inlineLarge)
         #elseif os(tvOS)
         content
         #else

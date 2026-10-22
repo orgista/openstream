@@ -586,6 +586,7 @@ struct AppleHomeHeroPageIndicator: View {
 #if !os(tvOS)
 @MainActor
 private struct AppleHomeHeroPreview: View {
+    @Environment(\.appleIsLargeLayout) private var isLargeLayout
     let item: AppleCatalogItem
     let sources: [AppleSource]
     let settings: AppleSettingsStore
@@ -817,7 +818,7 @@ private struct AppleHomeHeroPreview: View {
     /// trailer goes in; a pressed one goes in at once. False when cancelled.
     private func waitForStartDelay() async -> Bool {
         guard trailerRequest == nil else { return true }
-        let remaining = AppleTrailerStartPolicy.remainingDelay(on: AppleTrailerStartPolicy.current,
+        let remaining = AppleTrailerStartPolicy.remainingDelay(on: AppleTrailerStartPolicy.current(isLargeLayout: isLargeLayout),
                                                                pageShownAt: pageShownAt, now: .now)
         guard remaining > 0 else { return true }
         do { try await Task.sleep(for: .seconds(remaining)) } catch { return false }

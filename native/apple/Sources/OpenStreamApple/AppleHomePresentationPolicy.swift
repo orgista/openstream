@@ -2,16 +2,17 @@ import Foundation
 
 /// The home presentation contract shared by Discover and Library.
 enum AppleHomePresentationPolicy {
-    enum Platform { case phone, pad, mac, tv, vision }
+    enum Platform { case iOS, mac, tv, vision }
     enum Hero { case phone, pad, mac, tv, rotating }
 
     static func hero(platform: Platform, compact: Bool = false, landscape: Bool = false,
-                     accessibility: Bool = false) -> Hero {
+                     accessibility: Bool = false, isLargeLayout: Bool = false) -> Hero {
         switch platform {
         case .mac: .mac
         case .tv: .tv
-        case .pad, .vision: accessibility ? .rotating : .pad
-        case .phone: compact && !landscape ? .phone : .rotating
+        case .iOS where isLargeLayout: accessibility ? .rotating : .pad
+        case .vision: accessibility ? .rotating : .pad
+        case .iOS: compact && !landscape ? .phone : .rotating
         }
     }
 

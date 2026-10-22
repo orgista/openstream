@@ -9,10 +9,10 @@ import Testing
         // Vision Pro draws the iPad's hero, accessibility sizes included.
         #expect(AppleHomePresentationPolicy.hero(platform: .vision) == .pad)
         #expect(AppleHomePresentationPolicy.hero(platform: .vision, accessibility: true) == .rotating)
-        #expect(AppleHomePresentationPolicy.hero(platform: .phone, compact: true) == .phone)
-        #expect(AppleHomePresentationPolicy.hero(platform: .phone, compact: true, landscape: true) == .rotating)
-        #expect(AppleHomePresentationPolicy.hero(platform: .pad) == .pad)
-        #expect(AppleHomePresentationPolicy.hero(platform: .pad, accessibility: true) == .rotating)
+        #expect(AppleHomePresentationPolicy.hero(platform: .iOS, compact: true) == .phone)
+        #expect(AppleHomePresentationPolicy.hero(platform: .iOS, compact: true, landscape: true) == .rotating)
+        #expect(AppleHomePresentationPolicy.hero(platform: .iOS, isLargeLayout: true) == .pad)
+        #expect(AppleHomePresentationPolicy.hero(platform: .iOS, accessibility: true, isLargeLayout: true) == .rotating)
     }
     @Test func rowResolutionMatchesBothTabs() {
         #expect(AppleHomePresentationPolicy.rows(hero: .phone, width: 390, inset: 16) == .phone)

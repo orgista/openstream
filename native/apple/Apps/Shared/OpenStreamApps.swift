@@ -105,6 +105,9 @@ struct OpenStreamPlatformApp: App {
                     // created again from the emptied storage (no app exit).
                     .id(resetGeneration.value)
                     .transition(.opacity)
+                    #if DEBUG && os(iOS)
+                    .appleDebugLayoutHost()
+                    #endif
                 if showLaunch {
                     AppleOpenStreamLaunchView()
                         .transition(.opacity)
@@ -218,7 +221,7 @@ private final class OpenStreamAppDelegate: NSObject, UIApplicationDelegate {
         supportedInterfaceOrientationsFor window: UIWindow?
     ) -> UIInterfaceOrientationMask {
         AppleOrientationLock.shared.supportedOrientations(
-            for: UIDevice.current.userInterfaceIdiom
+            for: UIDevice.current.userInterfaceIdiom, window: window
         )
     }
 }

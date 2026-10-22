@@ -28,12 +28,10 @@ enum AppleHomePageViewport {
 struct AppleDiscoverHeroLayoutReader: ViewModifier {
     /// The page, in the trace.
     let page: String
-    /// The iPhone never draws the iPad's hero, so it never reads for it.
-    /// Vision Pro draws the iPad's.
-    #if os(visionOS)
-    private let measuresPad = true
+    #if os(iOS)
+    @Environment(\.appleIsLargeLayout) private var measuresPad
     #else
-    private let measuresPad = UIDevice.current.userInterfaceIdiom == .pad
+    private let measuresPad = true
     #endif
     @Binding var phone: AppleHomePhoneHeroLayout
     @Binding var pad: AppleMacHeroLayout
@@ -51,7 +49,8 @@ struct AppleDiscoverHeroLayoutReader: ViewModifier {
                 AppleHomePhoneHeroLayout(containerHeight: geometry.containerSize.height
                                              + geometry.contentInsets.top + geometry.contentInsets.bottom,
                                          topInset: geometry.contentInsets.top,
-                                         bottomInset: geometry.contentInsets.bottom)
+                                         bottomInset: geometry.contentInsets.bottom,
+                                         containerWidth: geometry.containerSize.width)
             } action: { _, layout in
                 measured = layout
                 appleTrace("\(page) phone hero layout h=\(Int(layout.containerHeight)) top=\(Int(layout.topInset)) bottom=\(Int(layout.bottomInset)) art=\(Int(layout.artHeight))")
@@ -59,7 +58,7 @@ struct AppleDiscoverHeroLayoutReader: ViewModifier {
             }
             .task(id: measured) {
                 try? await Task.sleep(for: AppleHomePhoneHeroLayout.settleDelay)
-                guard !Task.isCancelled, measured.topInset > 0 else { return }
+                guard !Task.isCancelled, measured.containerWidth > 0, measured.containerHeight > 0 else { return }
                 if measured.containerHeight != phone.containerHeight { draw(measured) }
                 held = true
             }
