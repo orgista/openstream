@@ -194,21 +194,29 @@ struct AppleMediaPlayerView: View {
         (coordinator.engine as? AetherPlaybackEngine)?.discMenu.state?.isInMenu == true
     }
 
+    private var usesTransportOverlay: Bool {
+        #if os(iOS)
+        coordinator.route != .none
+        #else
+        coordinator.route == .surface
+        #endif
+    }
+
     private var playbackContent: some View {
         ZStack {
             if coordinator.route == .surface {
                 ApplePlaybackSurfaceView(engine: coordinator.engine)
                     .ignoresSafeArea()
-            } else {
+            } else if coordinator.route == .avPlayer || coordinator.route == .audioOnly {
                 platformPlayer
                     .ignoresSafeArea()
             }
-            if drawsStockPlayerCues {
+            if drawsStockPlayerCues, !usesTransportOverlay || discMenuIsVisible {
                 AppleStockPlayerCueLayer(engine: coordinator.engine, subtitles: stockSubtitles,
                                          timing: coordinator.subtitleTiming)
                     .ignoresSafeArea()
             }
-            if coordinator.route == .surface, !discMenuIsVisible {
+            if usesTransportOverlay, !discMenuIsVisible {
                 #if os(visionOS)
                 AppleTransportOverlay(coordinator: coordinator, request: request,
                     otherSources: qualityPickerAction, onClose: closePlayer,
@@ -224,7 +232,8 @@ struct AppleMediaPlayerView: View {
                     nextEpisode: nextEpisode)
                 #else
                 AppleTransportOverlay(coordinator: coordinator, request: request,
-                    otherSources: qualityPickerAction, onPlaybackMenu: { sleepTimerMenu = true }, nextEpisode: nextEpisode)
+                    otherSources: qualityPickerAction, onClose: closePlayer,
+                    nextEpisode: nextEpisode, onPictureInPicture: pictureInPictureAction)
                 #endif
             }
             if discMenuIsVisible, let engine = coordinator.engine as? AetherPlaybackEngine {
@@ -249,7 +258,8 @@ struct AppleMediaPlayerView: View {
         }
         #if !os(tvOS)
         .overlay(alignment: .topTrailing) {
-            if coordinator.route == .avPlayer, (coordinator.engine as? AetherPlaybackEngine)?.discMenu.state != nil {
+            if !usesTransportOverlay, coordinator.route == .avPlayer,
+               (coordinator.engine as? AetherPlaybackEngine)?.discMenu.state != nil {
                 AppleDiscMenuControl(coordinator: coordinator)
                     .padding(16)
                     #if os(macOS)
@@ -340,6 +350,7 @@ struct AppleMediaPlayerView: View {
         }
         #endif
         #if os(iOS) || os(visionOS)
+        #if os(visionOS)
         .overlay(alignment: .topTrailing) {
             if coordinator.route == .avPlayer && nativeMenuVisible {
                 Menu {
@@ -386,11 +397,18 @@ struct AppleMediaPlayerView: View {
                 .accessibilityIdentifier("player.more")
             }
         }
+        #endif
         .simultaneousGesture(TapGesture().onEnded {
+            #if os(iOS)
+            guard discMenuIsVisible else { return }
+            #endif
             nativeMenuVisible = true
             nativeMenuActivity &+= 1
         })
         .task(id: "\(nativeMenuActivity):\(coordinator.phase):\(nativeMenuOpenItems > 0)") {
+            #if os(iOS)
+            guard discMenuIsVisible else { return }
+            #endif
             nativeMenuVisible = true
             guard case .playing = coordinator.phase else { return }
             try? await Task.sleep(for: .seconds(nativeMenuOpenItems > 0 ? 60 : 3))
@@ -470,7 +488,7 @@ struct AppleMediaPlayerView: View {
             visionHost?.attachRemoteCommands(request: request)
             #else
             host.activate()
-            #if os(iOS) || os(macOS)
+            #if os(macOS)
             host.enableSubtitleSelectionMirroring()
             #endif
             // The AirPods stem, Control Centre and the lock screen. Bound here
@@ -562,8 +580,8 @@ struct AppleMediaPlayerView: View {
             if case .ended = newPhase {
                 // The transport is starting the next episode; the title page
                 // swaps this player for it, so closing here would drop it.
-                if coordinator.handsOffAtEnd, coordinator.route == .surface { return }
-                if coordinator.route != .surface, startNextEpisodeFromStockRoute() { return }
+                if coordinator.handsOffAtEnd, usesTransportOverlay { return }
+                if !usesTransportOverlay, startNextEpisodeFromStockRoute() { return }
                 closePlayer()
             }
         }
@@ -680,7 +698,7 @@ struct AppleMediaPlayerView: View {
     #endif
     #endif
 
-    #if os(iOS) || os(visionOS)
+    #if os(visionOS)
     /// The app's Subtitles menu beside the stock player, only where AVKit's
     /// own captions button cannot do the job (`AppleStockSubtitleMenuPolicy`).
     private var showsAppSubtitleMenu: Bool {
@@ -690,7 +708,6 @@ struct AppleMediaPlayerView: View {
                 stockPlayerListsCaptions: stockSubtitles.stockPlayerListsCaptions)
     }
 
-    #if os(iOS) || os(visionOS)
     private func stockSubtitleButton(_ entry: AppleSubtitleCueLayerPolicy.MenuEntry) -> some View {
         Button {
             selectStockSubtitle(entry.trackID)
@@ -707,16 +724,9 @@ struct AppleMediaPlayerView: View {
         .onAppear { nativeMenuOpenItems += 1 }
         .onDisappear { nativeMenuOpenItems = max(0, nativeMenuOpenItems - 1) }
     }
-    #endif
 
     private func selectStockSubtitle(_ id: Int?) {
-        #if os(iOS)
-        // Through the host, so AVKit's CC menu and this one agree.
-        host.selectSubtitleTrack(id: id)
-        stockSubtitles.refresh(from: coordinator.engine)
-        #else
         stockSubtitles.select(id, on: coordinator.engine)
-        #endif
     }
     #endif
 
@@ -725,6 +735,13 @@ struct AppleMediaPlayerView: View {
     private var qualityPickerAction: (() -> Void)? {
         sourceOptionsLoader == nil ? nil : { showsOtherSources = true }
     }
+
+    #if os(iOS)
+    private var pictureInPictureAction: (() -> Void)? {
+        guard coordinator.route == .avPlayer, AVPictureInPictureController.isPictureInPictureSupported() else { return nil }
+        return { Task { await host.startPictureInPicture() } }
+    }
+    #endif
 
     /// Both engines publish sidecar cues and use the app's subtitle menu.
     private var drawsStockPlayerCues: Bool {
@@ -921,6 +938,9 @@ struct AppleMediaPlayerView: View {
         }
         #else
         AppleMediaPlayerControllerRepresentable(viewController: host.viewController)
+            #if os(iOS)
+            .background(ApplePlayerPictureInPictureLayer(view: host.pictureInPictureLayerView))
+            #endif
         #endif
     }
 
@@ -972,7 +992,12 @@ private struct ApplePlayerCloseButton: View {
 private struct AppleMediaPlayerControllerRepresentable: UIViewControllerRepresentable {
     let viewController: AVPlayerViewController
 
-    func makeUIViewController(context: Context) -> AVPlayerViewController { viewController }
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
+        #if os(iOS)
+        viewController.showsPlaybackControls = false
+        #endif
+        return viewController
+    }
     func updateUIViewController(_ vc: AVPlayerViewController, context: Context) {}
 }
 #endif

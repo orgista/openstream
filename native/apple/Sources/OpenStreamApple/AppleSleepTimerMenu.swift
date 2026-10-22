@@ -12,16 +12,21 @@ struct AppleSleepTimerMenu: View {
         .holdSleepTimerControls(transport)
     }
 
-    #if os(tvOS)
-    static func uiMenu(coordinator: ApplePlaybackCoordinator) -> UIMenu {
+    #if os(iOS) || os(tvOS)
+    static func uiMenu(coordinator: ApplePlaybackCoordinator, isLive: Bool = false) -> UIMenu {
         var actions: [UIMenuElement] = [UIAction(title: "Off") { _ in coordinator.sleepTimer.cancel() }]
         for minutes in AppleSleepTimerPolicy.minuteOptions {
             actions.append(UIAction(title: "\(minutes) min") { _ in coordinator.armSleepTimer(minutes: minutes) })
         }
+        if isLive, let end = AppleSleepTimerPolicy.programmeDeadline(end: coordinator.sleepProgrammeEnd) {
+            actions.append(UIAction(title: "End of programme") { _ in coordinator.armSleepTimer(deadline: end) })
+        }
         #if DEBUG
         actions.append(UIAction(title: "1 min (Debug)") { _ in coordinator.armSleepTimer(minutes: 1) })
         #endif
-        return UIMenu(title: "Sleep Timer", image: UIImage(systemName: "moon.zzz"), children: actions)
+        let menu = UIMenu(title: "Sleep Timer", image: UIImage(systemName: "moon.zzz"), children: actions)
+        menu.accessibilityIdentifier = "player.sleepTimer"
+        return menu
     }
     #endif
 }

@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import Observation
 
@@ -7,8 +8,8 @@ import Observation
 /// formatting, live/DVR behaviour), and owns the 3-second control auto-hide
 /// timer. The view stays declarative; this type owns the state.
 ///
-/// VOD uses this transport on `.surface`; full-screen Live also uses it on
-/// `.avPlayer`. Stock and inline players share `AppleSubtitleCueLayer` and
+/// iOS VOD and full-screen Live also use it on `.avPlayer`.
+/// Stock and inline players share `AppleSubtitleCueLayer` and
 /// use `AppleStockPlayerSubtitles` when they own their controls.
 ///
 /// Policy table (see T5 spec):
@@ -203,6 +204,12 @@ public final class AppleTransportOverlayModel {
     /// Whether the transport controls are currently visible. Auto-hides 3 s
     /// after the last interaction while playing; any interaction re-shows them.
     public private(set) var controlsVisible: Bool = true
+    public var playbackRate: Float = 1 {
+        didSet {
+            coordinator.engine.avPlayer?.defaultRate = playbackRate
+            if coordinator.phase == .playing { coordinator.engine.setPlaybackRate(playbackRate) }
+        }
+    }
 
     // MARK: - Mirrored engine state
 
@@ -263,6 +270,7 @@ public final class AppleTransportOverlayModel {
     private var observationTask: Task<Void, Never>?
     private var hideTask: Task<Void, Never>?
     private let hideClock: any AppleClock
+    private let usesSystemControls: Bool
     /// Three seconds of stillness hides the chrome. A UI test cannot read a
     /// button's frame and its neighbour's inside that window — the second query
     /// lands after the timer — so the crawler and the live photo tests launch
@@ -285,10 +293,12 @@ public final class AppleTransportOverlayModel {
         #endif
     }()
 
-    public init(coordinator: ApplePlaybackCoordinator, isLive: Bool, hideClock: any AppleClock = AppleSystemClock()) {
+    public init(coordinator: ApplePlaybackCoordinator, isLive: Bool, hideClock: any AppleClock = AppleSystemClock(),
+                usesSystemControls: Bool = true) {
         self.coordinator = coordinator
         self.isLive = isLive
         self.hideClock = hideClock
+        self.usesSystemControls = usesSystemControls
         // Seed from the engine's current synchronous state so the first render
         // is correct before any event has been emitted.
         self.position = coordinator.engine.position
@@ -322,20 +332,12 @@ public final class AppleTransportOverlayModel {
 
     // MARK: - Overlay visibility
 
-    /// Whether VOD needs the custom transport. Live hosts can also mount it
-    /// on `.avPlayer` in place of AVKit's controls.
-    public var showsOverlay: Bool { route == .surface }
+    /// Whether this route uses the app's transport instead of AVKit's controls.
+    public var showsOverlay: Bool { route == .surface || (!usesSystemControls && route != .none) }
 
-    /// `true` when the centered spinning waiting indicator should be shown.
-    /// Only on `.surface` routes, and only before the player is ready
-    /// (`.resolving` / `.loading`) or while it is buffering / reconnecting
-    /// (`.waiting`). On `.avPlayer` routes the system player shows its own
-    /// spinner, so this is always `false`.
-    ///
-    /// A live channel shows it on either route: a stalled channel otherwise
-    /// sat on its last frame under a Play glyph (iPad v2 re-run).
+    /// AVKit owns the indicator only while it also owns the controls.
     public var showsWaitingIndicator: Bool {
-        guard route == .surface || isLive else { return false }
+        guard showsOverlay || isLive else { return false }
         switch coordinator.phase {
         case .resolving, .loading, .waiting:
             return true
@@ -442,6 +444,7 @@ public final class AppleTransportOverlayModel {
             coordinator.userPause()
         } else {
             coordinator.userPlay()
+            if playbackRate != 1 { coordinator.engine.setPlaybackRate(playbackRate) }
         }
     }
 
