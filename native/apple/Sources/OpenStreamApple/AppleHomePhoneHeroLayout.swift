@@ -6,6 +6,7 @@ import CoreGraphics
 /// reference screen, buttons remain
 /// centred near 64% and dots near 70% of the screen height.
 public struct AppleHomePhoneHeroLayout: Equatable, Sendable {
+    public var containerWidth: CGFloat
     /// The scroll view's height: the whole screen, bars included.
     public var containerHeight: CGFloat
     /// What the status bar and the navigation bar take off the top, and the
@@ -13,7 +14,9 @@ public struct AppleHomePhoneHeroLayout: Equatable, Sendable {
     public var topInset: CGFloat
     public var bottomInset: CGFloat
 
-    public init(containerHeight: CGFloat = 0, topInset: CGFloat = 0, bottomInset: CGFloat = 0) {
+    public init(containerHeight: CGFloat = 0, topInset: CGFloat = 0, bottomInset: CGFloat = 0,
+                containerWidth: CGFloat = 0) {
+        self.containerWidth = containerWidth
         self.containerHeight = containerHeight
         self.topInset = topInset
         self.bottomInset = bottomInset
@@ -58,11 +61,12 @@ public struct AppleHomePhoneHeroLayout: Equatable, Sendable {
     /// 949 and 913 pt for a 932 pt screen). Drawn as read, the art moved and
     /// resized with each reading. A reading at the screen height already
     /// drawn keeps the tallest top inset, the bar with its title expanded;
-    /// another height is only drawn once it has held for `settleDelay`.
+    /// another height at the same width is only drawn after `settleDelay`.
     /// The owner's 15 Pro Max also reports the tab bar as 82.67 then 83 pt
     /// while the bar moves (trace 2026-10-17): less than a point is not a
     /// new layout, or the hero redrew every frame with nothing moved.
     public static func settled(drawn: Self, measured: Self) -> Self {
+        if widthChanged(drawn: drawn, measured: measured) { return measured }
         guard measured.topInset > 0 else { return drawn }
         guard drawn.topInset > 0 else { return measured }
         guard abs(measured.containerHeight - drawn.containerHeight) < 1 else { return drawn }
@@ -77,8 +81,15 @@ public struct AppleHomePhoneHeroLayout: Equatable, Sendable {
     /// What is drawn after one reading: as read until the first layout has
     /// held (the launch passes land in the same frame), `settled` after.
     public static func next(drawn: Self, measured: Self, held: Bool) -> Self {
-        if held { return settled(drawn: drawn, measured: measured) }
+        if held || widthChanged(drawn: drawn, measured: measured) {
+            return settled(drawn: drawn, measured: measured)
+        }
         return measured.topInset > 0 ? measured : drawn
+    }
+
+    private static func widthChanged(drawn: Self, measured: Self) -> Bool {
+        drawn.containerWidth > 0 && measured.containerWidth > 0
+            && abs(measured.containerWidth - drawn.containerWidth) >= 1
     }
 
     /// How far the hero is pulled up so its art starts at the top edge.

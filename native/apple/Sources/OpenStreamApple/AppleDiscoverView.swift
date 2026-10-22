@@ -52,6 +52,8 @@ private func applyCatalogRefreshHealth(
 
 @MainActor
 struct AppleDiscoverView: View {
+    @Environment(\.appleIsLargeLayout) private var isLargeLayout
+    @Environment(\.appleUsesPadLandingChrome) private var usesPadLandingChrome
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var viewportSize: CGSize = .zero
@@ -434,7 +436,7 @@ struct AppleDiscoverView: View {
         #if !os(tvOS)
         .toolbar {
             #if os(iOS)
-            if UIDevice.current.userInterfaceIdiom != .phone {
+            if usesPadLandingChrome {
                 AppleTabToolbar(tab: .home, isRefreshing: isRefreshing || catalogStore.isLoading,
                                 onSearch: { showsSearch = true }, onRefresh: refresh)
             }
@@ -1601,7 +1603,8 @@ struct AppleDiscoverView: View {
 
     private var heroPresentation: AppleHomePresentationPolicy.Hero {
         AppleHomeHeroCarousel<EmptyView>.presentation(viewport: viewportSize,
-            compact: horizontalSizeClass == .compact, accessibility: dynamicTypeSize.isAccessibilitySize)
+            compact: horizontalSizeClass == .compact, accessibility: dynamicTypeSize.isAccessibilitySize,
+            isLargeLayout: isLargeLayout)
     }
 
     private func heroWordmark(_ value: IndexedCatalogItem, item: AppleCatalogItem) -> URL? {
@@ -3326,6 +3329,8 @@ struct AppleCatalogArtwork: View {
 
 @MainActor
 struct AppleCatalogItemDetailView: View {
+    @Environment(\.appleIsLargeLayout) private var isLargeLayout
+    @Environment(\.appleExpandsPhoneLayout) private var expandsPhoneLayout
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -3669,7 +3674,7 @@ struct AppleCatalogItemDetailView: View {
                 // once the page scrolls, and the synopsis was drawn through the
                 // clock. Applied to the scroll view itself, not the group, because
                 // it reads that scroll view's offset.
-                .appleStatusBarShield(topInset: pageGeometry.safeAreaInsets.top)
+                .appleStatusBarShield(topInset: pageGeometry.safeAreaInsets.top, usesPhoneLayout: usesPhoneTitleChrome)
                 #endif
             }
         }
@@ -3717,6 +3722,7 @@ struct AppleCatalogItemDetailView: View {
         #if os(macOS) || os(iOS) || os(visionOS)
         .appleTitlePageToolbar(pageID: item.id, title: displayTitle, heroIsOffscreen: detailHeroIsOffscreen,
                               topInset: pageGeometry.safeAreaInsets.top,
+                              usesPhoneLayout: usesPhoneTitleChrome,
                               backIsBlocked: playbackUI.presentation != nil) { dismiss() }
         .environment(\.appleTabToolbar, tabToolbar)
         #endif
@@ -3866,7 +3872,7 @@ struct AppleCatalogItemDetailView: View {
             guard !Task.isCancelled, !heroTrailer.hasStarted else { return }
             guard let playableKey = await resolvePlayableTrailerKey(startingAt: 0) else { return }
             // The still's delay runs from the page appearing; the probe's time counts against it.
-            let remaining = AppleTrailerStartPolicy.remainingDelay(on: AppleTrailerStartPolicy.current,
+            let remaining = AppleTrailerStartPolicy.remainingDelay(on: AppleTrailerStartPolicy.current(isLargeLayout: isLargeLayout),
                                                                    pageShownAt: heroTrailer.pageShownAt, now: .now)
             if remaining > 0 { try? await Task.sleep(for: .seconds(remaining)) }
             // …or while its first candidate was being probed. Nor under or
@@ -5517,7 +5523,7 @@ struct AppleCatalogItemDetailView: View {
 
     private func detailHeroFrameChanged(_ frame: CGRect) {
         #if os(iOS)
-        if UIDevice.current.userInterfaceIdiom == .phone, frame != .zero {
+        if usesPhoneTitleChrome, frame != .zero {
             detailHeroIsOffscreen = frame.maxY <= AppleDesignTokens.minimumActionSize
         }
         #endif
@@ -6007,6 +6013,7 @@ struct AppleCatalogItemDetailView: View {
     }
 
     private var detailContentWidth: CGFloat {
+        if expandsPhoneLayout { return .infinity }
         if isLandscapeRegularLayout { return AppleDetailMetrics.regularContentWidth }
         if isLandscapeLayout {
             return max(
@@ -8775,9 +8782,6 @@ enum AppleTrailerPreviewLayout {
     static let minimumControlSide: CGFloat = 44
     static let pausedControlSide: CGFloat = 64
     static let controlInset: CGFloat = 4
-    /// At the top the control joins the round Back/Search/Refresh column,
-    /// which sits 16 pt in from the edge (ApplePhoneHeroChrome).
-    static let topControlInset: CGFloat = 16
 
     /// Where the trailer's one control sits in the `visible` part of its
     /// view: paused, centred; playing, in the bottom-right corner, or
@@ -8788,7 +8792,8 @@ enum AppleTrailerPreviewLayout {
             return CGRect(x: visible.midX - side / 2, y: visible.midY - side / 2, width: side, height: side)
         }
         let side = minimumControlSide
-        return CGRect(x: visible.maxX - (topInset == nil ? controlInset : topControlInset) - side,
+        let edgeInset = topInset == nil ? controlInset : AppleDesignTokens.phoneHeroControlInset
+        return CGRect(x: visible.maxX - edgeInset - side,
                       y: topInset.map { visible.minY + $0 } ?? (visible.maxY - controlInset - side),
                       width: side, height: side)
     }
@@ -9375,7 +9380,7 @@ struct AppleDetailMetrics {
     /// The narrowest viewport that is a tablet rather than a phone in portrait.
     /// Every iPad portrait width (744 mini, 834, 1024) is above it; every phone
     /// portrait width (320–440) is below.
-    static let portraitTabletWidthThreshold: CGFloat = 600
+    static let portraitTabletWidthThreshold = AppleLayoutClass.minimumShortSide
 
     /// How wide a featured-hero action button should be in portrait, or `nil`
     /// for "fill the column".
@@ -9689,6 +9694,17 @@ extension AppleCatalogItemDetailView {
     var usesPhoneTitlePage: Bool {
         #if os(iOS)
         horizontalSizeClass == .compact && !isLandscapeLayout
+        #else
+        false
+        #endif
+    }
+
+    /// The phone's back button, title and status-bar handling, in either
+    /// orientation: under a landscape player the page keeps the chrome it will
+    /// show when the player closes. Every iPad window is large.
+    var usesPhoneTitleChrome: Bool {
+        #if os(iOS)
+        !isLargeLayout
         #else
         false
         #endif

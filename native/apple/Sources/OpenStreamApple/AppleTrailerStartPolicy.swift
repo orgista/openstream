@@ -32,11 +32,15 @@ public enum AppleTrailerStartPolicy {
     /// dwell. Without it a stall with no error held the cycle for good.
     public static let homeStartupTimeout: TimeInterval = 8
 
-    @MainActor public static var current: Platform {
+    static func iOSPlatform(isPhone: Bool, isLargeLayout: Bool) -> Platform {
+        isPhone && !isLargeLayout ? .phone : .padOrMac
+    }
+
+    @MainActor public static func current(isLargeLayout: Bool = false) -> Platform {
         #if os(tvOS)
         .tv
         #elseif os(iOS)
-        UIDevice.current.userInterfaceIdiom == .phone ? .phone : .padOrMac
+        iOSPlatform(isPhone: UIDevice.current.userInterfaceIdiom == .phone, isLargeLayout: isLargeLayout)
         #else
         .padOrMac
         #endif

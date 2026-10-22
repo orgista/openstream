@@ -11,13 +11,21 @@ enum AppleLiveStagePolicy {
     static let phoneCategoryHeight: CGFloat = 52
     static let phoneGuideRowHeight: CGFloat = 64
 
-    /// Side by side only in a regular-width window wider than it is tall and
-    /// wide enough for both columns; stacked everywhere else. Decided by the
-    /// window, never the device, so a resized iPad window (or a foldable's
-    /// inner screen) follows its own shape.
-    static func sideBySide(isRegularWidth: Bool, size: CGSize) -> Bool {
-        isRegularWidth && size.width > size.height
-            && size.width >= minimumGuideWidth / 0.38
+    /// iPad windows split when wide enough in landscape. A large phone window
+    /// (an unfolded Duo; the root already checked its size class and size)
+    /// splits on its side and stacks upright, where the stage spans the width
+    /// and the list fills the height below it.
+    static func sideBySide(isRegularWidth: Bool, size: CGSize, expandsPhoneLayout: Bool = false) -> Bool {
+        guard size.width > size.height else { return false }
+        if expandsPhoneLayout { return true }
+        return isRegularWidth && size.width >= minimumGuideWidth / 0.38
+    }
+
+    /// Beside the list on a large phone window the stage's column continues
+    /// with the playing channel's schedule (`AppleLiveStageSchedule`). The
+    /// iPad keeps its stage alone.
+    static func showsSchedule(sideBySide: Bool, expandsPhoneLayout: Bool) -> Bool {
+        sideBySide && expandsPhoneLayout
     }
 
     /// The player column's width beside the guide: 62 %, leaving the guide

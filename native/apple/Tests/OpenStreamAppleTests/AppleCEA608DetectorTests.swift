@@ -242,11 +242,10 @@ struct AppleLiveChannelPickerTests {
                            end: Date(timeIntervalSince1970: 3_600), category: nil, isLive: true)
     }
 
-    /// The iPad browses in a strip along the bottom; the phone and the Apple TV
-    /// keep the leading panel.
-    @Test func onlyTheIPadGetsTheStrip() {
-        #expect(AppleLiveChannelPickerPresentation.choose(isPad: true) == .bottomStrip)
-        #expect(AppleLiveChannelPickerPresentation.choose(isPad: false) == .panel)
+    /// Large windows browse in a strip; small windows and Apple TV keep the panel.
+    @Test func onlyLargeLayoutsGetTheStrip() {
+        #expect(AppleLiveChannelPickerPresentation.choose(isLargeLayout: true) == .bottomStrip)
+        #expect(AppleLiveChannelPickerPresentation.choose(isLargeLayout: false) == .panel)
     }
 
     /// The programme line comes from the guide the Live tab already loaded.

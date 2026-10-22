@@ -32,6 +32,8 @@ final class AppleReloadGate {
 
 @MainActor
 struct AppleLiveTVView: View {
+    @Environment(\.appleIsLargeLayout) private var isLargeLayout
+    @Environment(\.appleExpandsPhoneLayout) private var expandsPhoneLayout
     @State private var channelIndex = AppleIPTVChannelIndex([])
     private var channels: [AppleIPTVChannel] { channelIndex.channels }
     @State private var channelGroups: [AppleIPTVChannelGroup] = []
@@ -1397,12 +1399,14 @@ struct AppleLiveTVView: View {
     /// reloads on rotation or resize.
     private var liveStage: some View {
         let sideBySide = AppleLiveStagePolicy.sideBySide(
-            isRegularWidth: horizontalSizeClass == .regular, size: viewportSize)
+            isRegularWidth: horizontalSizeClass == .regular, size: viewportSize,
+            expandsPhoneLayout: expandsPhoneLayout)
         let layout = sideBySide
             ? AnyLayout(HStackLayout(alignment: .top, spacing: 0))
             : AnyLayout(VStackLayout(spacing: 0))
         return layout {
-            liveStagePlayerColumn
+            liveStagePlayerColumn(showsSchedule: AppleLiveStagePolicy.showsSchedule(
+                sideBySide: sideBySide, expandsPhoneLayout: expandsPhoneLayout))
                 .frame(width: sideBySide ? AppleLiveStagePolicy.playerWidth(total: viewportSize.width) : nil)
                 .frame(maxHeight: sideBySide ? .infinity : nil, alignment: .top)
             liveStageGuideColumn
@@ -1425,7 +1429,7 @@ struct AppleLiveTVView: View {
 
     private var usesPhoneLiveLayout: Bool {
         #if os(iOS)
-        UIDevice.current.userInterfaceIdiom == .phone
+        !isLargeLayout
         #else
         false
         #endif
@@ -1464,7 +1468,7 @@ struct AppleLiveTVView: View {
         .presentationDragIndicator(.visible)
     }
 
-    private var liveStagePlayerColumn: some View {
+    private func liveStagePlayerColumn(showsSchedule: Bool) -> some View {
         let programme = selectedChannel.flatMap {
             guideStore.guide(for: [$0.id]).nowAndNext(channelID: $0.id).now
         }
@@ -1483,10 +1487,19 @@ struct AppleLiveTVView: View {
             .aspectRatio(16 / 9, contentMode: .fit)
             .frame(maxWidth: .infinity)
             .clipped()
+            // The schedule under it takes what is left, never the stage's 16:9.
+            .layoutPriority(1)
             .accessibilityIdentifier("live.stage.player")
             if !usesPhoneLiveLayout {
                 AppleLiveProgrammeLine(programme: programme)
             }
+            #if os(iOS)
+            if showsSchedule {
+                AppleLiveStageSchedule(channelName: selectedChannel?.name, channelID: selectedChannel?.id,
+                                       guide: guideStore.guide(for: selectedChannel.map { [$0.id] } ?? []))
+                    .frame(maxHeight: .infinity, alignment: .top)
+            }
+            #endif
         }
     }
 
@@ -2152,7 +2165,13 @@ private struct AppleLiveFullScreenControls: View {
     /// every path shares.
     @State private var lastChannelSwitch: ContinuousClock.Instant?
     @State private var pickerShowTask: Task<Void, Never>?
-    @State private var controlsHeight: CGFloat = 0
+    #if os(iOS)
+    /// Seeded from the window so the first body already picks the right picker.
+    @State private var controlsSize = AppleLayoutClass.keyWindow?.bounds.size ?? .zero
+    #else
+    @State private var controlsSize: CGSize = .zero
+    #endif
+    @Environment(\.horizontalSizeClass) private var pickerHorizontalSizeClass
     @State private var zapper = AppleLiveZapCoalescer()
     @Environment(\.scenePhase) private var scenePhase
 
@@ -2211,7 +2230,7 @@ private struct AppleLiveFullScreenControls: View {
         }
     }
 
-    /// The iPad browses channels in a strip along the bottom of the video;
+    /// Large windows browse channels in a strip along the bottom of the video;
     /// every other platform keeps the leading-edge panel.
     @ViewBuilder
     private var picker: some View {
@@ -2237,7 +2256,15 @@ private struct AppleLiveFullScreenControls: View {
             onClose()
         }
         #endif
-        switch AppleLiveChannelPickerPresentation.current {
+        #if os(iOS)
+        // Hosted in UIKit, outside the root's environment: the root's rule, from this view's own size.
+        let presentation = AppleLiveChannelPickerPresentation.choose(isLargeLayout: AppleLayoutClass.usesLargeLayout(
+            isPad: UIDevice.current.userInterfaceIdiom == .pad, size: controlsSize,
+            isRegularWidth: pickerHorizontalSizeClass == .regular))
+        #else
+        let presentation = AppleLiveChannelPickerPresentation.panel
+        #endif
+        switch presentation {
         case .bottomStrip:
             AppleLiveChannelStripOverlay(
                 channels: channels, guide: guide, currentChannelID: currentChannelID,
@@ -2379,13 +2406,13 @@ private struct AppleLiveFullScreenControls: View {
         // a channel swipe also opened the Channels list (DevPlus, 2026-10-06).
         // `swipeInProgress` is raised while the finger moves (before it
         // lifts) and the tap paths below ignore the touch while it is up.
-        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { controlsHeight = $0 }
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { controlsSize = $0 }
         .simultaneousGesture(DragGesture(minimumDistance: 60)
             .onChanged { gesture in
                 // Only the middle 60 % of the height zaps: the home-indicator
                 // swipe and the scrubber live outside it.
                 guard AppleLiveSystemChromePolicy.acceptsZapSwipe(startY: gesture.startLocation.y,
-                                                                  height: controlsHeight) else { return }
+                                                                  height: controlsSize.height) else { return }
                 if !swipeInProgress,
                    AppleLiveZappingPolicy.swipe(horizontal: gesture.translation.width,
                                                 vertical: gesture.translation.height) != nil {
@@ -2394,7 +2421,7 @@ private struct AppleLiveFullScreenControls: View {
                 }
             }
             .onEnded { gesture in
-                if AppleLiveSystemChromePolicy.acceptsZapSwipe(startY: gesture.startLocation.y, height: controlsHeight),
+                if AppleLiveSystemChromePolicy.acceptsZapSwipe(startY: gesture.startLocation.y, height: controlsSize.height),
                    let direction = AppleLiveZappingPolicy.swipe(horizontal: gesture.translation.width,
                     vertical: gesture.translation.height) { zap(direction) }
                 // The Button's action runs on the same lift, in either order.
@@ -3158,6 +3185,8 @@ private struct AppleLibrarySortButton: UIViewRepresentable {
 
 @MainActor
 struct AppleLibraryView: View {
+    @Environment(\.appleIsLargeLayout) private var isLargeLayout
+    @Environment(\.appleUsesPadLandingChrome) private var usesPadLandingChrome
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var phoneHeroLayout = AppleHomePhoneHeroLayout()
@@ -3231,7 +3260,7 @@ struct AppleLibraryView: View {
         // The same Search and Refresh as Discover, in the empty state too.
         .toolbar {
             #if os(iOS)
-            if UIDevice.current.userInterfaceIdiom != .phone { libraryToolbar }
+            if usesPadLandingChrome { libraryToolbar }
             #else
             libraryToolbar
             #endif
@@ -3275,7 +3304,8 @@ struct AppleLibraryView: View {
 
     private var heroPresentation: AppleHomePresentationPolicy.Hero {
         AppleHomeHeroCarousel<EmptyView>.presentation(viewport: viewportSize,
-            compact: horizontalSizeClass == .compact, accessibility: dynamicTypeSize.isAccessibilitySize)
+            compact: horizontalSizeClass == .compact, accessibility: dynamicTypeSize.isAccessibilitySize,
+            isLargeLayout: isLargeLayout)
     }
 
     private var rowStyle: AppleDiscoverRowStyle? {

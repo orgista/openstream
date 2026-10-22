@@ -23,6 +23,7 @@ struct AppleAlignedTabTitle: ViewModifier {
     /// shows its stock material over the hero from the start.
     let overArtwork: Bool
     var phoneHero = false
+    @Environment(\.appleUsesPadLandingChrome) private var usesPadLandingChrome
 
     static func style(for platform: AppleUIPlatform, isLive: Bool = false) -> AppleTabTitleStyle {
         switch platform {
@@ -34,7 +35,7 @@ struct AppleAlignedTabTitle: ViewModifier {
 
     func body(content: Content) -> some View {
         #if os(iOS)
-        if phoneHero && UIDevice.current.userInterfaceIdiom == .phone {
+        if phoneHero && !usesPadLandingChrome {
             content.navigationTitle("").navigationBarTitleDisplayMode(.inline)
         } else if isLive {
             legacyNavigationBackground(content)

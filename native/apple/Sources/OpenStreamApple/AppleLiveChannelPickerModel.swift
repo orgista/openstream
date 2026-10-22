@@ -1,11 +1,8 @@
 import Foundation
-#if os(iOS)
-import UIKit
-#endif
 
 /// Which shape the full-screen channel picker takes.
 ///
-/// The owner gave two references (2026-09-20). On the iPad the picker is a
+/// The owner gave two references (2026-09-20). On a large window the picker is a
 /// strip of logo tiles along the bottom of the video, so the picture stays
 /// whole while you browse; everywhere else it stays the leading-edge panel,
 /// which is the only thing that fits a phone in portrait and the only thing
@@ -14,17 +11,8 @@ public enum AppleLiveChannelPickerPresentation: Equatable, Sendable {
     case panel
     case bottomStrip
 
-    public static func choose(isPad: Bool) -> AppleLiveChannelPickerPresentation {
-        isPad ? .bottomStrip : .panel
-    }
-
-    @MainActor
-    public static var current: AppleLiveChannelPickerPresentation {
-        #if os(iOS)
-        choose(isPad: UIDevice.current.userInterfaceIdiom == .pad)
-        #else
-        .panel
-        #endif
+    public static func choose(isLargeLayout: Bool) -> AppleLiveChannelPickerPresentation {
+        isLargeLayout ? .bottomStrip : .panel
     }
 }
 

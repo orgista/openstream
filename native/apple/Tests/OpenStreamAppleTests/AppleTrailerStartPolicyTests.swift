@@ -14,6 +14,13 @@ import Testing
         #expect(AppleTrailerStartPolicy.delay(on: .padOrMac) == 2.0)
     }
 
+    @Test func largePhoneWindowsTakeThePadTrailerDelay() {
+        #expect(AppleTrailerStartPolicy.iOSPlatform(isPhone: true, isLargeLayout: false) == .phone)
+        #expect(AppleTrailerStartPolicy.iOSPlatform(isPhone: true, isLargeLayout: true) == .padOrMac)
+        #expect(AppleTrailerStartPolicy.iOSPlatform(isPhone: false, isLargeLayout: false) == .padOrMac)
+        #expect(AppleTrailerStartPolicy.iOSPlatform(isPhone: false, isLargeLayout: true) == .padOrMac)
+    }
+
     @Test func loadTimeCountsAgainstTheDelay() {
         #expect(AppleTrailerStartPolicy.remainingDelay(on: .padOrMac, pageShownAt: shown, now: shown) == 2)
         #expect(AppleTrailerStartPolicy.remainingDelay(on: .padOrMac, pageShownAt: shown,

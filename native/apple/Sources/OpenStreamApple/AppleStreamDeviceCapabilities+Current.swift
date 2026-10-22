@@ -12,16 +12,23 @@ extension AppleStreamDeviceCapabilities {
     /// HDR and Dolby Vision come from the engine's display snapshot, the one
     /// its own routing reads (`AetherEngine.displayCapabilities`), so the
     /// picker never prefers a stream the engine would then tone-map. Automatic
-    /// stops at 1080p on an iPhone, whose screen shows no more, and on a
-    /// cellular or Low Data connection; everywhere else it reaches for 4K.
+    /// stops at 1080p in a phone-sized window, whose screen shows no more, and
+    /// on a cellular or Low Data connection; an iPad or an unfolded Duo
+    /// reaches for 4K.
     @MainActor
     public static var current: AppleStreamDeviceCapabilities {
         let display = AetherEngine.displayCapabilities
-        var cap = AppleStreamQualityTier.uhd
         #if os(iOS)
-        if UIDevice.current.userInterfaceIdiom == .phone { cap = .fullHD }
+        let window = AppleLayoutClass.keyWindow
+        let isLargeLayout = AppleLayoutClass.usesLargeLayout(isPad: UIDevice.current.userInterfaceIdiom == .pad,
+            size: window?.bounds.size ?? .zero,
+            isRegularWidth: window?.traitCollection.horizontalSizeClass == .regular)
+        let cap = automaticTierCap(isLargeLayout: isLargeLayout,
+                                   nativePixelSize: window?.windowScene?.screen.nativeBounds.size ?? .zero,
+                                   isCostly: AppleNetworkCost.shared.isCostly)
+        #else
+        let cap: AppleStreamQualityTier = AppleNetworkCost.shared.isCostly ? .fullHD : .uhd
         #endif
-        if AppleNetworkCost.shared.isCostly { cap = min(cap, .fullHD) }
         return AppleStreamDeviceCapabilities(
             supportsHDR: display.supportsHDR,
             supportsDolbyVision: display.supportsDolbyVision,

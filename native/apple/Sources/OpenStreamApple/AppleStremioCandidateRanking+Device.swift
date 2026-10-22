@@ -51,6 +51,12 @@ public struct AppleStreamDeviceCapabilities: Equatable, Sendable {
         self.supportsDolbyVision = supportsDolbyVision
         self.automaticTierCap = automaticTierCap
     }
+
+    static func automaticTierCap(isLargeLayout: Bool, nativePixelSize: CGSize, isCostly: Bool) -> AppleStreamQualityTier {
+        let needsMoreThanFullHD = min(nativePixelSize.width, nativePixelSize.height)
+            > CGFloat(AppleStreamQualityTier.fullHD.rawValue)
+        return isLargeLayout && needsMoreThanFullHD && !isCostly ? .uhd : .fullHD
+    }
 }
 
 extension AppleStremioCandidateRanking {

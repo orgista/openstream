@@ -58,16 +58,20 @@ extension View {
 
 @MainActor
 struct AppleSettingsView: View {
+    @Environment(\.appleExpandsPhoneLayout) private var expandsPhoneLayout
     let settings: AppleSettingsStore
     let sourceStore: AppleSourceStore
     let webManagement: any AppleWebManagementServing
     var backupController: AppleConfigurationController? = nil
     var catalogStore: AppleCatalogStore? = nil
-    /// Set on a regular-width iPad in landscape: Settings draws its own split
-    /// view, sections on the left and the chosen page on the right, with this
+    /// Large phone windows and landscape iPads draw Settings as a split view,
+    /// sections on the left and the chosen page on the right, with this
     /// as the right column's stack. Nil pushes everything on one stack.
     var splitPath: Binding<NavigationPath>? = nil
     @State private var splitSelection: AppleSettingsRoute = .sources
+    @State private var splitVisibility: NavigationSplitViewVisibility = .automatic
+    private static let expandedPhoneColumnMinimumWidth: CGFloat = 240
+    private static let expandedPhoneColumnIdealWidth: CGFloat = 320
 
     var body: some View {
         settingsContent.modifier(AppleSettingsPINLock())
@@ -82,17 +86,26 @@ struct AppleSettingsView: View {
             }
         #else
         if let splitPath {
-            NavigationSplitView {
-                rootForm
+            NavigationSplitView(columnVisibility: $splitVisibility) {
+                if expandsPhoneLayout {
+                    rootForm.navigationSplitViewColumnWidth(min: Self.expandedPhoneColumnMinimumWidth,
+                        ideal: Self.expandedPhoneColumnIdealWidth, max: Self.expandedPhoneColumnIdealWidth)
+                } else {
+                    rootForm
+                }
             } detail: {
-                NavigationStack(path: splitPath) {
-                    destination(for: splitSelection)
-                        .navigationDestination(for: AppleSettingsRoute.self) { route in
-                            destination(for: route)
-                        }
+                if expandsPhoneLayout {
+                    splitDetail(path: splitPath)
+                        .navigationSplitViewColumnWidth(min: Self.expandedPhoneColumnMinimumWidth,
+                                                        ideal: Self.expandedPhoneColumnIdealWidth)
+                } else {
+                    splitDetail(path: splitPath)
                 }
             }
             .navigationSplitViewStyle(.balanced)
+            .onChange(of: expandsPhoneLayout, initial: true) {
+                if expandsPhoneLayout { splitVisibility = .all }
+            }
         } else {
             rootForm
                 .navigationDestination(for: AppleSettingsRoute.self) { route in
@@ -103,6 +116,15 @@ struct AppleSettingsView: View {
     }
 
     #if !os(tvOS)
+    private func splitDetail(path: Binding<NavigationPath>) -> some View {
+        NavigationStack(path: path) {
+            destination(for: splitSelection)
+                .navigationDestination(for: AppleSettingsRoute.self) { route in
+                    destination(for: route)
+                }
+        }
+    }
+
     /// A row that opens a settings page: pushed on the stack, or shown in the
     /// split view's right column with the row marked as the one showing.
     @ViewBuilder
