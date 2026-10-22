@@ -18,9 +18,15 @@ actor AppleLibraryMetadataResolver {
         var attempts: Int?
     }
 
-    /// Schema 2 carries genres. Schema 1 can still draw its known title and
-    /// artwork while the existing background refresh fills the missing fields.
-    private static let currentSchema = 2
+    /// Schema 2 carries genres. Schema 3 (2026-10-22) is TMDB-only: older
+    /// entries may hold artwork from the retired catalog fallback, so they
+    /// show their title without artwork while the background refresh runs.
+    private static let currentSchema = 3
+
+    private static func currentValue(_ entry: Entry?) -> AppleCatalogItem? {
+        guard let entry, let value = entry.value else { return nil }
+        return entry.schema == currentSchema ? value : value.withoutArtwork
+    }
 
     struct MatchRecord: Codable, Sendable {
         let candidate: AppleCatalogItem
@@ -115,9 +121,9 @@ actor AppleLibraryMetadataResolver {
             }
             guard let data = try? Data(contentsOf: cacheURL(item)),
                   let entry = try? JSONDecoder().decode(Entry.self, from: data) else { continue }
-            // Keep known artwork visible while an older entry refreshes.
-            if let value = entry.value {
-                if (1...Self.currentSchema).contains(entry.schema ?? 0) { metadata[group.id] = value }
+            // Keep a known title visible while an older entry refreshes.
+            if entry.value != nil {
+                if (1...Self.currentSchema).contains(entry.schema ?? 0) { metadata[group.id] = Self.currentValue(entry) }
             } else if entry.reason == .noMatch {
                 noMatch.insert(group.id)
             }
@@ -201,7 +207,7 @@ actor AppleLibraryMetadataResolver {
         let keepsPositive = evidence == nil && !refresh && reason == .noMatch && cached?.value != nil
             && cached?.reason == nil && (1...Self.currentSchema).contains(cached?.schema ?? 0)
         let value = evidence?.candidate
-            ?? ((reason == .providerUnreachable || reason == .configMissing || keepsPositive) ? cached?.value : nil)
+            ?? ((reason == .providerUnreachable || reason == .configMissing || keepsPositive) ? Self.currentValue(cached) : nil)
         try Task.checkCancellation()
         if let record = matchRecord(for: item), record.isManual { return record.candidate }
         if let evidence {

@@ -26,7 +26,7 @@ struct AppleDiscoverRowsSettingsView: View {
         var ids = [AppleDiscoverRowOrder.continueWatching, AppleDiscoverRowOrder.library]
         if enabled.contains(where: { $0.kind == .mediaServer }) { ids.append(AppleDiscoverRowOrder.mediaServers) }
         ids.append(AppleDiscoverRowOrder.topPicks)
-        if settings.top10ListsEnabled { ids += [AppleDiscoverRowOrder.top10Movies, AppleDiscoverRowOrder.top10Shows] }
+        if settings.top10ListsEnabled, settings.top10ListsAvailable { ids += [AppleDiscoverRowOrder.top10Movies, AppleDiscoverRowOrder.top10Shows] }
         let defaultRows = ids.compactMap { id in AppleDiscoverRowOrder.title(forBuiltIn: id).map { Row(id: id, title: $0) } }
         let byID = Dictionary(defaultRows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return AppleDiscoverRowOrder.resolve(available: defaultRows.map(\.id), custom: settings.discoverRowOrder)

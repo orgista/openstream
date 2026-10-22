@@ -434,12 +434,12 @@ func fallbackMediaRecordKeysKeepTheirPersistedNormalization(canonicalID: String?
     let onlyPicks = AppleTopShelfSnapshot(
         version: 1, generatedAt: .now, continueWatching: [], recentlyAdded: [], favorites: [], topPicks: picks
     )
-    #expect(AppleTopShelfContentBuilder.sections(for: onlyPicks).map(\.title) == ["Top Picks"])
+    #expect(AppleTopShelfContentBuilder.sections(for: onlyPicks).map(\.title) == ["Recently Added"])
 
     let both = AppleTopShelfSnapshot(
         version: 1, generatedAt: .now, continueWatching: watching, recentlyAdded: [], favorites: [], topPicks: picks
     )
-    #expect(AppleTopShelfContentBuilder.sections(for: both).map(\.title) == ["Continue Watching", "Top Picks"])
+    #expect(AppleTopShelfContentBuilder.sections(for: both).map(\.title) == ["Continue Watching", "Recently Added"])
 }
 
 @Test func systemArtworkPolicyRejectsCredentialBearingAndUntrustedURLs() {
@@ -712,4 +712,58 @@ func unloadedFavoriteWritesPreserveTheSavedIndex(upsertHero: Bool) async throws 
     let reloaded = try #require(await AppleMediaIndexRepository(fileURL: url).records().first)
     #expect(reloaded.progress == 0.2)
     #expect(store.record(id: record.id)?.progress == 0.2)
+}
+
+/// Indexes written before 2026-10-22 tagged MKV files with a capability no
+/// build reads any more; they load as direct files.
+@Test func aRetiredPlaybackCapabilityDecodesAsDirect() throws {
+    let json = Data(#"["gateway", "resolvable", "direct"]"#.utf8)
+    let decoded = try JSONDecoder().decode([AppleMediaPlaybackCapability].self, from: json)
+    #expect(decoded == [.direct, .resolvable, .direct])
+}
+
+/// A favourite added from a Top 10 or shared-link page belongs to the fixed
+/// metadata-only source, which is in no source list; the launch-time
+/// availability pass keeps it.
+@Test func aFavouriteFromAMetadataOnlyPageSurvivesTheLaunchAvailabilityPass() async throws {
+    let url = FileManager.default.temporaryDirectory.appending(path: "metadata-favourite-\(UUID()).json")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let item = AppleCatalogItem(mediaID: "tt7654321", type: "movie", name: "Fixture Film")
+    let source = AppleCatalogSearchMatch.metadataOnly(item).source
+    let record = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item)
+    let repository = AppleMediaIndexRepository(fileURL: url)
+    try await repository.upsert(record)
+    try await repository.setFavorite(true, recordID: record.id)
+
+    try await AppleMediaIndexRepository(fileURL: url).retainAvailability(for: [])
+
+    let reloaded = try #require(await AppleMediaIndexRepository(fileURL: url).records().first { $0.id == record.id })
+    #expect(reloaded.isFavorite)
+    #expect(reloaded.availability.map(\.instanceID) == [AppleMediaAvailability.metadataOnlyInstanceID])
+}
+
+/// Every launch upserts the servers' recently added titles; one already
+/// indexed with nothing new keeps its dates and the index is not rewritten.
+@Test func reloadingUnchangedRecentlyAddedTitlesWritesNothing() async throws {
+    let url = FileManager.default.temporaryDirectory.appending(path: "recently-added-\(UUID()).json")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let server = UUID()
+    let item = AppleCatalogItem(mediaID: "jf:movie-1", type: "movie", name: "Fixture Movie",
+                                posterURL: URL(string: "https://fixture.example/poster.jpg"))
+    let first = Date(timeIntervalSince1970: 1_000_000)
+    let repository = AppleMediaIndexRepository(fileURL: url)
+    try await repository.upsert([AppleMediaIngestion.catalogRecord(instanceID: server, item: item, verifiedAt: first)])
+    try FileManager.default.setAttributes([.modificationDate: first], ofItemAtPath: url.path)
+
+    try await repository.upsert([AppleMediaIngestion.catalogRecord(instanceID: server, item: item, verifiedAt: .now)])
+
+    #expect(try FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date == first)
+    let stored = try #require(await repository.records().first)
+    #expect(stored.lastVerified == first)
+    #expect(stored.availability.map(\.lastVerified) == [first])
+
+    let newPoster = AppleCatalogItem(mediaID: "jf:movie-1", type: "movie", name: "Fixture Movie",
+                                   posterURL: URL(string: "https://fixture.example/poster-2.jpg"))
+    try await repository.upsert([AppleMediaIngestion.catalogRecord(instanceID: server, item: newPoster, verifiedAt: .now)])
+    #expect(try #require(await repository.records().first).artworkURL?.lastPathComponent == "poster-2.jpg")
 }

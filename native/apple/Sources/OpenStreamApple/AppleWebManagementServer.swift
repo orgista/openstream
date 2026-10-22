@@ -584,7 +584,7 @@ public final class AppleWebManagementServer {
                 switch sourceType {
                 case "m3u":
                     source = try await addM3U(form: form, sourceStore: sourceStore)
-                case "xtream":
+                case "login":
                     source = try await addXtream(form: form, sourceStore: sourceStore)
                 default:
                     return (.plain(400, "Bad Request", "Unsupported source type."), false)
@@ -665,12 +665,12 @@ public final class AppleWebManagementServer {
     private static func sourceType(from form: [String: String]) -> String {
         switch form["sourceType"]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
         case "m3u": "m3u"
-        case "xtream": "xtream"
+        case "login": "login"
         default: "unsupported"
         }
     }
 
-    private static let draftFields = ["m3uName", "playlistURL", "epgURL", "xtreamName", "serverURL", "username"]
+    private static let draftFields = ["m3uName", "playlistURL", "epgURL", "loginName", "serverURL", "username"]
 
     private static func draft(from form: [String: String]) -> [String: String] {
         draftFields.reduce(into: [:]) { result, field in
@@ -718,14 +718,14 @@ public final class AppleWebManagementServer {
         try AppleIPTVEndpointPolicy.validateCredentials(username: username, password: password)
         let draft = AppleSource(
             kind: .liveTV,
-            name: form["xtreamName"] ?? "",
+            name: form["loginName"] ?? "",
             url: try AppleIPTVEndpointPolicy.normalize(endpoint),
             iptvType: .xtream
         )
         let credentials = AppleIPTVCredentials(username: username, password: password)
         let channels = try await iptvClient.validate(source: draft, credentials: credentials)
         return try sourceStore.addIPTV(
-            name: form["xtreamName"] ?? "",
+            name: form["loginName"] ?? "",
             type: .xtream,
             endpoint: endpoint,
             username: username,

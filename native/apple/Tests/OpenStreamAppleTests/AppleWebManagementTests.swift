@@ -360,8 +360,8 @@ func xtreamCredentialSanitizerRemovesWhitespace(_ input: String) {
     xtream.setValue(active.friendlyURL.absoluteString, forHTTPHeaderField: "Origin")
     xtream.setValue(cookie, forHTTPHeaderField: "Cookie")
     xtream.httpBody = encodedForm([
-        "sourceType": "xtream",
-        "xtreamName": "Wrong Account",
+        "sourceType": "login",
+        "loginName": "Wrong Account",
         "serverURL": "http://provider.example:8080",
         "username": "wrong",
         "password": "wrong"
@@ -706,7 +706,7 @@ private func occupiedLoopbackPort() throws -> (Int32, UInt16) {
 
 @Test func webManagementDecodesMultipartFormsAndIgnoresFileParts() {
     let boundary = "----WebKitFormBoundaryQ7x2"
-    var body = multipartForm(["sourceType": "xtream", "username": "a b&c=d", "password": "p\"q"], boundary: boundary)
+    var body = multipartForm(["sourceType": "login", "username": "a b&c=d", "password": "p\"q"], boundary: boundary)
     // Drop the closing delimiter, add a file part, then close again.
     body.removeLast("--\(boundary)--\r\n".utf8.count)
     body.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.mp4\"\r\nContent-Type: video/mp4\r\n\r\n\u{00}\u{01}\r\n--\(boundary)--\r\n".utf8))
@@ -715,7 +715,7 @@ private func occupiedLoopbackPort() throws -> (Int32, UInt16) {
         body: body,
         contentType: "multipart/form-data; boundary=\"\(boundary)\""
     )
-    #expect(fields["sourceType"] == "xtream")
+    #expect(fields["sourceType"] == "login")
     #expect(fields["username"] == "a b&c=d")
     #expect(fields["password"] == "p\"q")
     #expect(fields["file"] == nil)
@@ -828,12 +828,12 @@ private func occupiedLoopbackPort() throws -> (Int32, UInt16) {
     xtream.httpMethod = "POST"
     xtream.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
     xtream.setValue(cookie, forHTTPHeaderField: "Cookie")
-    xtream.httpBody = encodedForm(["sourceType": "xtream", "serverURL": "http://provider.example:8080"])
+    xtream.httpBody = encodedForm(["sourceType": "login", "serverURL": "http://provider.example:8080"])
     let (xtreamData, xtreamResponse) = try await dataResponse(for: xtream, using: session)
     #expect(xtreamResponse.statusCode == 400)
     let xtreamBody = String(decoding: xtreamData, as: UTF8.self)
     #expect(xtreamBody.contains("Username and password are required."))
-    #expect(xtreamBody.contains("id=\"type-xtream\" name=\"sourceType\" value=\"xtream\" checked"))
+    #expect(xtreamBody.contains("id=\"type-login\" name=\"sourceType\" value=\"login\" checked"))
     #expect(xtreamBody.contains("value=\"http://provider.example:8080\""))
     #expect(store.sources.isEmpty)
 }

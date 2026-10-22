@@ -163,7 +163,8 @@ struct AppleDiscoverView: View {
         let hasContent = AppleCatalogShelfPolicy.hasDiscoverContent(
             hasLocalLibrary: !library.groups.isEmpty,
             hasMediaServerItems: mediaServerLibrary.shelves.contains { !$0.items.isEmpty }
-                || !AppleXtreamLibraryStore.shared.continueWatching.isEmpty
+                || !AppleXtreamLibraryStore.shared.continueWatching.isEmpty,
+            hasTop10: !((shownTop10?.movies ?? []).isEmpty && (shownTop10?.shows ?? []).isEmpty)
         )
         Group {
             if !hasContent && !discoverIsLoading && !reviewLoadingState {
@@ -983,10 +984,8 @@ struct AppleDiscoverView: View {
         if !library.resolvedGroups.isEmpty { rails.append((.library, .poster)) }
         rails += mediaServerLibrary.shelves.map { (.mediaServer($0.id), .poster) }
         if !picks.isEmpty { rails.append((.topPicks, .still)) }
-        if settings.top10ListsEnabled {
-            if !(top10?.movies ?? []).isEmpty { rails.append((.top10("movie"), .still)) }
-            if !(top10?.shows ?? []).isEmpty { rails.append((.top10("series"), .still)) }
-        }
+        if !(shownTop10?.movies ?? []).isEmpty { rails.append((.top10("movie"), .still)) }
+        if !(shownTop10?.shows ?? []).isEmpty { rails.append((.top10("series"), .still)) }
         let ordered: [DiscoverRail]
         if let custom = customRowOrder {
             // The viewer's order wins over the A4 rhythm. Media-server
@@ -1140,19 +1139,32 @@ struct AppleDiscoverView: View {
             top10 = nil
             return
         }
-        if top10 == nil { top10 = await AppleTop10Store.shared.stored() }
+        if top10 == nil {
+            let stored = await AppleTop10Store.shared.stored()
+            guard !Task.isCancelled else { return }
+            top10 = stored
+        }
         do { try await Task.sleep(for: AppleLaunchWorkPolicy.remainingLaunchWindow(processAge: AppleLaunchMarks.launchAge())) }
         catch { return }
         do {
-            top10 = try await AppleTop10Store.shared.latest(configuration: metadataConfiguration)
+            let latest = try await AppleTop10Store.shared.latest(configuration: metadataConfiguration)
+            // The rows were turned off or the key removed meanwhile.
+            guard !Task.isCancelled else { return }
+            top10 = latest
             appleTrace("discover top 10 loaded")
         } catch {
             AppleInteractionTrace.record(.network, "discover top 10 failed \(appleErrorLabel(error))")
         }
     }
 
+    /// The chart Discover draws: none while the rows are off or TMDB is not
+    /// set up, whatever a load in flight kept.
+    private var shownTop10: AppleTop10Store.Chart? {
+        settings.top10ListsEnabled && settings.top10ListsAvailable ? top10 : nil
+    }
+
     private func top10Items(_ type: String) -> [AppleCatalogItem] {
-        (type == "movie" ? top10?.movies : top10?.shows) ?? []
+        (type == "movie" ? shownTop10?.movies : shownTop10?.shows) ?? []
     }
 
     @ViewBuilder
@@ -1502,6 +1514,11 @@ struct AppleSearchView: View {
     @State private var showsSharedLinkError = false
     @State private var sharedLinkLoading = false
     @State private var sharedLinkGeneration = 0
+    /// The query the search task last started a generation for. The live
+    /// library's reloads restart that task with the same query; a new
+    /// generation then would orphan a shared link the route task is still
+    /// resolving (its result dropped, the spinner up for good).
+    @State private var sharedLinkGenerationQuery = ""
     @State private var sharedPlayer: AppleMediaPlayerPresentation?
     @State private var pendingSharedPlayer: AppleMediaPlayerPresentation?
     #if os(iOS)
@@ -1680,7 +1697,10 @@ struct AppleSearchView: View {
         }
         .task(id: query + ":" + String(AppleXtreamLibraryStore.shared.revision)) {
             pendingSharedPlayer = nil
-            sharedLinkGeneration &+= 1
+            if query != sharedLinkGenerationQuery {
+                sharedLinkGenerationQuery = query
+                sharedLinkGeneration &+= 1
+            }
             let revision = router.revision
             if let link = AppleSharedLinkResolver.link(in: query) {
                 await openSharedLink(link, revision: revision)
@@ -1756,8 +1776,10 @@ struct AppleSearchView: View {
         do {
             await mediaIndex.load()
             try Task.checkCancellation()
+            let configuration = await settings.loadedTMDBConfiguration()
+            try Task.checkCancellation()
             let resolution = try await AppleSharedLinkResolution.resolve(link, records: mediaIndex.records,
-                                                                         configuration: metadataConfiguration)
+                                                                         configuration: configuration)
             try Task.checkCancellation()
             guard revision == router.revision, generation == sharedLinkGeneration else { return }
             if case .sharedLink = router.route { deliveredRouteRevision = revision }
@@ -1776,7 +1798,7 @@ struct AppleSearchView: View {
         } catch {
             guard !Task.isCancelled, revision == router.revision, generation == sharedLinkGeneration else { return }
             if case .sharedLink = router.route { deliveredRouteRevision = revision }
-            sharedLinkError = AppleSharedLinkError.unreadable.errorDescription ?? ""
+            sharedLinkError = ((error as? AppleSharedLinkError) ?? .unreadable).errorDescription ?? ""
             showsSharedLinkError = true
             appleTrace("shared link resolution failed \(link.provider)")
         }

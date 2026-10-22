@@ -73,7 +73,8 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
     /// Adding the provider again creates a new UUID; edits never clear a deletion.
     public var sourceTombstones: [UUID: Date]
     /// Retired sources (`AppleRetiredSource`) this copy carried and dropped
-    /// on reading; more than none means the copy should be written again.
+    /// on reading, tombstoning their ids; more than none means the copy
+    /// should be written again.
     private(set) var retiredSourceCount = 0
     public var settings: [String: Data]
     public var playbackProgress: [String: ApplePlaybackProgress]
@@ -139,7 +140,8 @@ public struct AppleConfigurationSnapshot: Codable, Equatable, Sendable {
             if let source = try? JSONDecoder().decode(AppleSource.self, from: data) { sources.append(source) }
             else {
                 guard let fields = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      AppleRetiredSource(fields: fields) != nil else { throw AppleConfigurationError.invalidFile }
+                      let retired = AppleRetiredSource(fields: fields) else { throw AppleConfigurationError.invalidFile }
+                if sourceTombstones[retired.id] == nil { sourceTombstones[retired.id] = savedAt }
                 retiredSourceCount += 1
             }
         }

@@ -23,15 +23,15 @@ public struct AppleIPTVChannel: Identifiable, Equatable, Sendable, Codable {
     /// playlist shape before asking the proxy for a declaring master.
     public var wrapsInCaptionMaster: Bool? = nil
 
-    /// Days of catch-up the panel keeps for this channel (Xtream
+    /// Days of catch-up the provider keeps for this channel (Xtream
     /// `tv_archive` + `tv_archive_duration`); nil when it reports none.
     /// Optional so cached channels written before it decode unchanged.
     public var catchUpDays: Int? = nil
-    /// The panel's clock (Xtream `server_info.timezone`), which is the zone
+    /// The provider's clock (Xtream `server_info.timezone`), which is the zone
     /// its catch-up start times are written in; nil reads as UTC.
     public var catchUpTimeZoneID: String? = nil
     /// How the playlist says the archive is reached (M3U `catchup` /
-    /// `catchup-source`); nil for Xtream panels, whose shape is derived.
+    /// `catchup-source`); nil for provider logins, whose shape is derived.
     public var catchUp: AppleIPTVCatchUpSpec? = nil
     /// The playlist's own channel number (M3U `tvg-chno`, Xtream `num`);
     /// nil when it gives none. Optional so cached channels decode unchanged.

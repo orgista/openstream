@@ -226,6 +226,18 @@ public final class AppleMediaServerLibraryStore {
         self.outbox = AppleRemoteProgressOutbox(defaults: progressDefaults)
     }
     
+    /// The servers' recently added movies and shows (Jellyfin and Emby
+    /// "Latest", Plex "Recently added"), newest first per shelf, as index
+    /// records: the Top Shelf's Recently Added row opens their pages.
+    public func recentlyAddedRecords(verifiedAt: Date = .now) -> [AppleMediaRecord] {
+        shelves.filter { $0.id.hasSuffix(":latest") || $0.id.hasSuffix(":recent") }.flatMap { shelf in
+            shelf.items.enumerated().map { offset, item in
+                AppleMediaIngestion.catalogRecord(instanceID: shelf.sourceID, item: item,
+                                                  verifiedAt: verifiedAt.addingTimeInterval(-Double(offset)))
+            }
+        }
+    }
+
     public func plexItem(for reference: AppleMediaServerItemReference) -> ApplePlexItem? {
         plexIndex[reference]
     }

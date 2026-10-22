@@ -69,7 +69,17 @@ enum AppleTopShelfArtworkLayout {
                               color: CGColor(gray: 0, alpha: wordmarkShadowOpacity))
             context.draw(wordmark, in: wordmarkRect(for: CGSize(width: wordmark.width, height: wordmark.height)))
         }
-        guard let image = context.makeImage() else { return nil }
+        return context.makeImage().flatMap(jpeg)
+    }
+
+    /// A row poster saved from the viewer's own server; named by its address,
+    /// which never leaves the app.
+    static func posterFileName(_ url: URL) -> String {
+        let hex = SHA256.hash(data: Data("poster|\(url.absoluteString)".utf8)).map { String(format: "%02x", $0) }.joined()
+        return "poster-\(hex).jpg"
+    }
+
+    static func jpeg(_ image: CGImage) -> Data? {
         let buffer = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(buffer, UTType.jpeg.identifier as CFString, 1, nil)
         else { return nil }
@@ -103,21 +113,60 @@ public struct AppleTopShelfArtworkStore: Sendable {
     /// The file name of each page's picture, by item id. A page whose
     /// backdrop cannot be fetched is absent and keeps the remote backdrop.
     func pictures(for pages: [(id: String, backdrop: URL, wordmark: URL?)], in directory: URL) async -> [String: String] {
+        await files(for: pages.map { page in (page.id, { await picture(backdrop: page.backdrop, wordmark: page.wordmark, in: directory) }) },
+                    in: directory)
+    }
+
+    /// The rows' posters whose art lives on the viewer's own server (a LAN
+    /// host or plain http, which a system surface must not be handed): a copy
+    /// saved here, by item id, so the snapshot names a file and never the
+    /// address. An item whose poster cannot be fetched is absent.
+    func posters(for items: [(id: String, url: URL)], in directory: URL) async -> [String: String] {
+        await files(for: items.map { item in (item.id, { await poster(item.url, in: directory) }) }, in: directory)
+    }
+
+    /// The pictures and posters already saved, by item id, found without
+    /// fetching anything: what a publish can show before any server answers.
+    func saved(pages: [(id: String, backdrop: URL, wordmark: URL?)], posters: [(id: String, url: URL)],
+               in directory: URL) -> (pictures: [String: String], posters: [String: String]) {
+        func existing(_ id: String, _ names: [String]) -> (String, String)? {
+            names.first { FileManager.default.fileExists(atPath: directory.appending(path: $0).path) }.map { (id, $0) }
+        }
+        let pictures = pages.compactMap { page in
+            existing(page.id, [AppleTopShelfArtworkLayout.fileName(backdrop: page.backdrop, wordmark: page.wordmark),
+                               AppleTopShelfArtworkLayout.fileName(backdrop: page.backdrop, wordmark: nil)])
+        }
+        let saved = posters.compactMap { existing($0.id, [AppleTopShelfArtworkLayout.posterFileName($0.url)]) }
+        return (Dictionary(pictures, uniquingKeysWith: { first, _ in first }),
+                Dictionary(saved, uniquingKeysWith: { first, _ in first }))
+    }
+
+    private func files(for jobs: [(id: String, make: @Sendable () async -> String?)], in directory: URL) async -> [String: String] {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         var names: [String: String] = [:]
         await withTaskGroup(of: (String, String?).self) { group in
             var running = 0
-            for page in pages {
+            for job in jobs {
                 if running >= Self.maximumConcurrent, let (id, name) = await group.next() {
                     running -= 1
                     names[id] = name
                 }
                 running += 1
-                group.addTask { (page.id, await picture(backdrop: page.backdrop, wordmark: page.wordmark, in: directory)) }
+                group.addTask { (job.id, await job.make()) }
             }
             for await (id, name) in group { names[id] = name }
         }
         return names
+    }
+
+    private func poster(_ url: URL, in directory: URL) async -> String? {
+        let name = AppleTopShelfArtworkLayout.posterFileName(url)
+        if FileManager.default.fileExists(atPath: directory.appending(path: name).path) { return name }
+        guard let data = try? await fetch(url),
+              let image = try? AppleRemoteImageDecoder.downsample(data: data, maximumPixelDimension: 800),
+              let jpeg = AppleTopShelfArtworkLayout.jpeg(image),
+              (try? jpeg.write(to: directory.appending(path: name), options: .atomic)) != nil else { return nil }
+        return name
     }
 
     /// Deletes every picture no page uses any more.

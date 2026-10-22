@@ -4733,3 +4733,12 @@ Discover now shows its saved hero and rows while the full index loads, then refr
 Saved watch status and My List flags are checked before reuse. Opening Continue Watching immediately can finish its own loading work. Serial tests passed (3632/447), and both iOS and tvOS builds passed. Comparison screenshots are in `design/2026-10-21-front-load/`.
 
 The Discover crawl, both standard smoke tests and the jank check passed on iOS 18.6. The hero was laid out once. The simulator's original app, data and Keychain were restored and verified.
+
+## 2026-10-22 — No add-ons: notes for the release
+- **Release notes:** TrueHD and DTS soundtracks now play as uncompressed multichannel PCM (LPCM) over HDMI. A TV or
+  receiver that takes only stereo PCM gets stereo for those soundtracks instead of 5.1. AC-3 and E-AC-3 soundtracks
+  are unchanged.
+- **Decision:** "Netflix" stays in the app only as the name of a TMDB watch-provider link ("Watch on Netflix" on a
+  title TMDB lists there). The app reads nothing from Netflix.
+- The audio menu names codecs (AC-3, E-AC-3, TrueHD, DTS) with the channel layout, never a licensed format brand.
+- The Share sheet now also works from a message or note that holds an IMDb or TMDB link.

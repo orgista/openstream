@@ -159,4 +159,28 @@ extension AppleSettingsStore {
         guard metadataEnabled else { return nil }
         return try? AppleTMDBConfiguration(credential: tmdbAPIKey)
     }
+
+    /// The Top 10 rows are TMDB's charts: with no configuration the toggle
+    /// is off limits and Discover draws none.
+    var top10ListsAvailable: Bool { tmdbConfiguration != nil }
+
+    /// The TMDB configuration for a shared link, which can arrive before the
+    /// Keychain gives the key (a launch before first unlock): an unreadable
+    /// key is read again, a few times a second apart. Nil at once when the
+    /// key is simply not set.
+    func loadedTMDBConfiguration(attempts: Int = 4, interval: Duration = .seconds(1)) async -> AppleTMDBConfiguration? {
+        for attempt in 1...max(attempts, 1) {
+            if let tmdbConfiguration { return tmdbConfiguration }
+            guard retryUnreadableSecrets(), attempt < attempts else { break }
+            try? await Task.sleep(for: interval)
+        }
+        return tmdbConfiguration
+    }
+
+    /// The one line under the Top 10 toggle while it is off limits
+    /// (`top10ListsAvailable`): what is missing, the key first.
+    var top10ListsFooter: String? {
+        guard !top10ListsAvailable else { return nil }
+        return (try? AppleTMDBConfiguration(credential: tmdbAPIKey)) == nil ? "Needs a TMDB API key" : "Needs Use Metadata APIs"
+    }
 }

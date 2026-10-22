@@ -1,7 +1,8 @@
 #!/bin/bash
 # App Store compliance gate (audits of 2026-10-22). Fails when a built product carries anything Apple must not see:
 # add-on, Stremio, torrent or debrid words; Netflix chart scraping; Radarr, Sonarr or the transcode gateway; Dolby
-# logo art; the old origin domain; the IPTV-panel brand as a visible word; and, in Release, test fixtures.
+# logo art; Trakt or Letterboxd; the old origin domain; the IPTV-panel brand as a visible word; and, in Release,
+# test fixtures. There are no exemptions: a retired service's settings key is a word like any other.
 #
 #   scripts/check-appstore-compliance.sh <product.app|product.xcarchive> [more…]
 #       scans the given products (any platform, any configuration);
@@ -18,23 +19,11 @@ dd_root="${OPENSTREAM_CHECK_DD:-$HOME/Developer/openstream-build}"
 mkdir -p "$dd_root"
 
 # Case-insensitive, in every file of every product. Keep in sync with the app-store-review-hardening skill.
-words='stremio|strem\.io|torrent|magnet|debrid|premiumize|torbox|infohash|cinemeta|metahub|add-?on|manifest\.json|openstream_addons|netflix\.com/tudum|radarr|sonarr|gateway\.url|dolby-[a-z-]*\.png|openstream\.app'
+words='stremio|strem\.io|torrent|magnet|debrid|premiumize|torbox|infohash|cinemeta|metahub|add-?on|manifest\.json|openstream_addons|netflix\.com/tudum|radarr|sonarr|trakt|letterboxd|gateway|dolby-[a-z-]*\.png|openstream\.app'
 # Case-sensitive: the IPTV-panel brand as a word a viewer can read (type names such as AppleXtreamLibrary are not).
 visible_words='\bXtream\b|IPTV panel'
 # Release only: fixtures and test plumbing that Debug builds carry on purpose.
 release_words='fixture\.example|network stub'
-# Exact strings that may ship: the settings keys the retired services left behind, which the app deletes on
-# upgrade (AppleSettingsStore.RetiredKey).
-allowed=(
-    openstream.settings.radarr.url.v1 openstream.settings.radarr.rootFolderPath.v1
-    openstream.settings.radarr.qualityProfileID.v1 openstream.settings.sonarr.url.v1
-    openstream.settings.sonarr.rootFolderPath.v1 openstream.settings.sonarr.qualityProfileID.v1
-    openstream.settings.gateway.enabled.v1 openstream.settings.gateway.url.v1
-    downloads.radarr.apiKey downloads.sonarr.apiKey
-    backup.url.openstream.settings.radarr.url.v1 backup.url.openstream.settings.sonarr.url.v1
-    backup.url.openstream.settings.gateway.url.v1
-)
-allowed_pattern="$(printf '%s\n' "${allowed[@]}" | sed 's/\./\\./g' | paste -sd '|' -)"
 failed=0
 
 # 1. Nothing in the sources or the project can turn the old compilation condition back on.
@@ -66,7 +55,7 @@ scan() {
         if printf '%s' "$rel" | LC_ALL=C grep -Eiq "$words"; then
             echo "  file name $rel"; hits=$((hits + 1))
         fi
-        text="$(file_text "$file" | LC_ALL=C grep -Ev "^($allowed_pattern)$" || true)"
+        text="$(file_text "$file")"
         [[ -n "$text" ]] || continue
         found="$( { LC_ALL=C grep -Eio "$words" <<< "$text" | tr '[:upper:]' '[:lower:]'
                     LC_ALL=C grep -Eo "$visible_words" <<< "$text"

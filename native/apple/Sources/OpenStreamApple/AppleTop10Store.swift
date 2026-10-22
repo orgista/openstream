@@ -15,6 +15,8 @@ actor AppleTop10Store {
 
     static let shared = AppleTop10Store()
     static let refreshInterval: TimeInterval = 6 * 3600
+    /// The kept chart, in `Caches/OpenStream`.
+    static let fileName = "top10-tmdb-v1.json"
 
     private let fileURL: URL
     private let fetch: Fetch
@@ -22,7 +24,7 @@ actor AppleTop10Store {
     private var isLoaded = false
 
     init(fileURL: URL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appending(path: "OpenStream", directoryHint: .isDirectory).appending(path: "top10-tmdb-v1.json"),
+            .appending(path: "OpenStream", directoryHint: .isDirectory).appending(path: fileName),
          fetch: @escaping Fetch = { try await AppleTMDBClient().weeklyTop10(type: $0, configuration: $1) }) {
         self.fileURL = fileURL
         self.fetch = fetch

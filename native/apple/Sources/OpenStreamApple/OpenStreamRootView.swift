@@ -550,6 +550,7 @@ public struct OpenStreamRootView: View {
                 mediaServerLibrary.clear(sourceID: id)
             }
             await mediaServerLibrary.reload(sources: sourceStore.sources) { try sourceStore.mediaServerSession(for: $0) }
+            try? await mediaIndex.upsert(mediaServerLibrary.recentlyAddedRecords())
         }
         .task(id: sourceAvailabilityIdentity) {
             await AppleXtreamLibraryStore.shared.reload(sourceStore: sourceStore)

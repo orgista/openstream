@@ -13,7 +13,13 @@ public enum AppleMediaKind: String, Codable, CaseIterable, Sendable {
 public enum AppleMediaPlaybackCapability: String, Codable, Sendable {
     case direct
     case resolvable
-    case gateway
+
+    /// Older indexes tagged MKV files with a value no build reads any more;
+    /// any unknown value decodes as `direct`.
+    public init(from decoder: any Decoder) throws {
+        let rawValue = try decoder.singleValueContainer().decode(String.self)
+        self = Self(rawValue: rawValue) ?? .direct
+    }
 }
 
 public enum AppleMediaIndexError: Error, Equatable, LocalizedError, Sendable {
@@ -28,6 +34,12 @@ public enum AppleMediaIndexError: Error, Equatable, LocalizedError, Sendable {
 }
 
 public struct AppleMediaAvailability: Codable, Equatable, Sendable {
+    /// The one fixed source of titles known only from TMDB (a Top 10 row, a
+    /// shared link). It is in no source list, and `retainAvailability` keeps
+    /// it, so a favourite added from such a page survives the next launch.
+    static let metadataOnlyInstanceID = UUID(uuid: (0x6F, 0x53, 0x74, 0x72, 0x65, 0x61, 0x6D, 0x00,
+                                                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01))
+
     public let instanceID: AppleSource.ID
     public let capability: AppleMediaPlaybackCapability
     /// Opaque lookup key only. It is never a URL, SMB path, or credential.
@@ -111,6 +123,17 @@ public struct AppleMediaRecord: Identifiable, Codable, Equatable, Sendable {
         result.progress = lhs.progress ?? rhs.progress
         result.isPrivate = lhs.isPrivate || rhs.isPrivate
         return result
+    }
+
+    /// Equal apart from when it was last verified.
+    fileprivate func hasSameContent(as other: AppleMediaRecord) -> Bool {
+        func undated(_ value: AppleMediaAvailability) -> String {
+            "\(value.instanceID)|\(value.capability.rawValue)|\(value.itemReference)|\(value.isStale.map(String.init) ?? "")"
+        }
+        var dated = self
+        dated.lastVerified = other.lastVerified
+        dated.availability = other.availability
+        return dated == other && availability.map(undated) == other.availability.map(undated)
     }
 
     private static func deduplicate(_ values: [AppleMediaAvailability]) -> [AppleMediaAvailability] {
@@ -208,9 +231,27 @@ public actor AppleMediaIndexRepository {
 
     /// A visited search result may not occur in a provider's bounded shelves.
     public func upsert(_ record: AppleMediaRecord) throws {
+        try upsert([record], refreshesVerification: true)
+    }
+
+    /// A record already indexed with the same content keeps its stored
+    /// dates, so a reload that finds nothing new writes nothing.
+    public func upsert(_ records: [AppleMediaRecord]) throws {
+        try upsert(records, refreshesVerification: false)
+    }
+
+    private func upsert(_ records: [AppleMediaRecord], refreshesVerification: Bool) throws {
         loadIfNeeded()
         var next = recordsByID
-        next[record.id] = next[record.id].map { AppleMediaRecord.merged($0, record) } ?? record
+        for record in records {
+            guard let current = next[record.id] else {
+                next[record.id] = record
+                continue
+            }
+            let merged = AppleMediaRecord.merged(current, record)
+            if refreshesVerification || !merged.hasSameContent(as: current) { next[record.id] = merged }
+        }
+        guard next != recordsByID else { return }
         try persist(next)
         recordsByID = next
         searchTextByID = Self.makeSearchTextByID(next)
@@ -276,12 +317,14 @@ public actor AppleMediaIndexRepository {
     /// Removes availability owned by instances that are no longer enabled.
     /// This is intentionally repository-wide so a disabled or deleted source
     /// cannot leave stale Search, Siri, Spotlight, or Top Shelf results behind.
+    /// The metadata-only source is never removed.
     public func retainAvailability(for activeInstanceIDs: Set<AppleSource.ID>) throws {
         loadIfNeeded()
+        let kept = activeInstanceIDs.union([AppleMediaAvailability.metadataOnlyInstanceID])
         var next: [String: AppleMediaRecord] = [:]
         for (id, record) in recordsByID {
             var updated = record
-            updated.availability.removeAll { !activeInstanceIDs.contains($0.instanceID) }
+            updated.availability.removeAll { !kept.contains($0.instanceID) }
             if !updated.availability.isEmpty { next[id] = updated }
         }
         guard next != recordsByID else { return }
@@ -533,7 +576,7 @@ public enum AppleMediaIngestion {
             year: parsed.year,
             availability: [.init(
                 instanceID: source.id,
-                capability: item.url.pathExtension.lowercased() == "mkv" ? .gateway : .direct,
+                capability: .direct,
                 itemReference: item.id,
                 lastVerified: verifiedAt
             )],
@@ -633,6 +676,12 @@ public final class AppleMediaIndexStore {
 
     public func upsert(_ record: AppleMediaRecord) async throws {
         try await repository.upsert(record)
+        setRecords(await repository.records())
+    }
+
+    public func upsert(_ records: [AppleMediaRecord]) async throws {
+        guard !records.isEmpty else { return }
+        try await repository.upsert(records)
         setRecords(await repository.records())
     }
 

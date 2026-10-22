@@ -32,14 +32,18 @@ final class TopShelfProvider: TVTopShelfContentProvider {
             /// file in Library/Caches/topshelf-trailers. Absent in older
             /// snapshots.
             let shelfVideo: String?
+            /// The row poster the app saved from the viewer's own server: a
+            /// file in Library/Caches/topshelf-art. Absent in older snapshots.
+            let shelfPoster: String?
         }
 
         let version: Int
         let continueWatching: [Item]
         // Decoded for forward compatibility with the app's snapshot writer,
-        // but no longer rendered — Top Picks replaced them on the shelf.
+        // but not rendered.
         let recentlyAdded: [Item]
         let favorites: [Item]
+        /// The servers' recently added titles: the "Recently Added" row.
         let topPicks: [Item]
         let favoriteChannels: [Item]
         /// The Home hero's pages, in its order. Absent in older snapshots.
@@ -96,20 +100,21 @@ final class TopShelfProvider: TVTopShelfContentProvider {
         if !carousel.isEmpty {
             let drawn = carousel.filter { $0.imageURL(for: .screenScale2x)?.isFileURL == true }.count
             let videos = carousel.filter { $0.previewVideoURL != nil }.count
-            log.info("serving carousel of \(carousel.count) (\(drawn) drawn, \(videos) with trailers): heroes=\(snapshot.heroes.count) continueWatching=\(snapshot.continueWatching.count) topPicks=\(snapshot.topPicks.count)")
+            log.info("serving carousel of \(carousel.count) (\(drawn) drawn, \(videos) with trailers): heroes=\(snapshot.heroes.count) continueWatching=\(snapshot.continueWatching.count) recentlyAdded=\(snapshot.topPicks.count)")
             completionHandler(TVTopShelfCarouselContent(style: .details, items: carousel))
             return
         }
 
         // No title has a backdrop to fill the screen: the rows, as before —
-        // mirrors AppleTopShelfContentBuilder.sections(for:).
+        // mirrors AppleTopShelfContentBuilder.sections(for:) and
+        // AppleTopShelfSection.imageURL(for:art:).
         let sections = [
-            collection(title: "Continue Watching", values: snapshot.continueWatching),
-            collection(title: "Favorite channels", values: snapshot.favoriteChannels),
-            collection(title: "Top Picks", values: snapshot.topPicks),
+            collection(title: "Continue Watching", values: snapshot.continueWatching, art: art),
+            collection(title: "Favorite channels", values: snapshot.favoriteChannels, art: art),
+            collection(title: "Recently Added", values: snapshot.topPicks, art: art),
         ].compactMap { $0 }
         let shapes = sections.map { $0.items.first?.imageShape == .hdtv ? "hdtv" : "poster" }.joined(separator: ",")
-        log.info("serving \(sections.count) section(s): continueWatching=\(snapshot.continueWatching.count) topPicks=\(snapshot.topPicks.count) shapes=\(shapes, privacy: .public)")
+        log.info("serving \(sections.count) section(s): continueWatching=\(snapshot.continueWatching.count) recentlyAdded=\(snapshot.topPicks.count) shapes=\(shapes, privacy: .public)")
         completionHandler(sections.isEmpty ? nil : TVTopShelfSectionedContent(sections: sections))
     }
 
@@ -118,12 +123,14 @@ final class TopShelfProvider: TVTopShelfContentProvider {
         let resumed = Set(snapshot.continueWatching.map(\.id))
         let continued: [(String?, Snapshot.Item)] = snapshot.continueWatching.map { ("Continue Watching", $0) }
         let pages: [(String?, Snapshot.Item)] = snapshot.heroes.isEmpty
-            ? continued + snapshot.topPicks.map { ("Top Picks", $0) }
+            ? continued + snapshot.topPicks.map { ("Recently Added", $0) }
             : snapshot.heroes.map { (resumed.contains($0.id) ? "Continue Watching" : nil, $0) } + continued
         return Array(pages.compactMap { context, value -> TVTopShelfCarouselItem? in
-            guard let remote = value.landscapeArtworkURL.flatMap(Self.systemImageURL),
+            // The picture the app drew (from the viewer's own server too),
+            // else a public backdrop.
+            guard let imageURL = Self.drawnImageURL(value.shelfImage, in: art)
+                    ?? value.landscapeArtworkURL.flatMap(Self.systemImageURL),
                   seen.insert(value.id).inserted else { return nil }
-            let imageURL = Self.drawnImageURL(value.shelfImage, in: art) ?? remote
             let item = TVTopShelfCarouselItem(identifier: value.id)
             item.contextTitle = context
             item.title = String(value.title.prefix(200))
@@ -165,7 +172,7 @@ final class TopShelfProvider: TVTopShelfContentProvider {
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
-    private func collection(title: String, values: [Snapshot.Item]) -> TVTopShelfItemCollection<TVTopShelfSectionedItem>? {
+    private func collection(title: String, values: [Snapshot.Item], art: URL) -> TVTopShelfItemCollection<TVTopShelfSectionedItem>? {
         let values = values.prefix(20)
         // 16:9 tiles like the Apple TV app's, but only when every tile has a
         // backdrop — a row takes one shape, and a poster stretched to 16:9 is
@@ -177,8 +184,11 @@ final class TopShelfProvider: TVTopShelfContentProvider {
             item.imageShape = landscape ? .hdtv : .poster
             item.displayAction = TVTopShelfAction(url: value.displayURL)
             if let playURL = value.playURL { item.playAction = TVTopShelfAction(url: playURL) }
-            if let imageURL = (landscape ? value.landscapeArtworkURL : (value.artworkURL ?? value.landscapeArtworkURL))
-                .flatMap(Self.systemImageURL) {
+            // In a poster row the poster the app saved comes first: its art is
+            // on the viewer's own server, which the shelf may not fetch.
+            if let imageURL = landscape ? value.landscapeArtworkURL.flatMap(Self.systemImageURL)
+                : Self.drawnImageURL(value.shelfPoster, in: art)
+                    ?? (value.artworkURL ?? value.landscapeArtworkURL).flatMap(Self.systemImageURL) {
                 item.setImageURL(imageURL, for: [.screenScale1x, .screenScale2x])
             }
             return item

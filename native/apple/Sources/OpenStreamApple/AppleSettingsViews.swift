@@ -208,16 +208,20 @@ struct AppleSettingsView: View {
                 }
             }
 
-            Section("Discover") {
+            Section {
                 Toggle("Show Discover tab", isOn: $settings.discoverEnabled)
                     .disabled(!appleCanToggleTab(.home, settings: settings))
                     .accessibilityIdentifier("settings.discover.enabled")
-                Toggle("Top 10 lists", isOn: $settings.top10ListsEnabled)
+                AppleTop10ListsToggle(settings: settings)
                 settingsLink(AppleSettingsRoute.discoverRows) {
                     AppleTVNavigationLabel("Discover Rows")
                 }
                 .appleTVReadableFocus()
                 .accessibilityIdentifier("settings.discover.rows")
+            } header: {
+                Text("Discover")
+            } footer: {
+                if let footer = settings.top10ListsFooter { Text(footer) }
             }
 
             Section("Library") {
@@ -509,16 +513,20 @@ private struct AppleTVDiscoverPane: View {
         @Bindable var settings = settings
 
         return Form {
-            Section("Discover") {
+            Section {
                 Toggle("Show Discover tab", isOn: $settings.discoverEnabled)
                     .disabled(!appleCanToggleTab(.home, settings: settings))
                     .accessibilityIdentifier("settings.discover.enabled")
-                Toggle("Top 10 lists", isOn: $settings.top10ListsEnabled)
+                AppleTop10ListsToggle(settings: settings)
                 NavigationLink(value: AppleSettingsRoute.discoverRows) {
                     AppleTVNavigationLabel("Discover Rows")
                 }
                 .appleTVReadableFocus()
                 .accessibilityIdentifier("settings.discover.rows")
+            } header: {
+                Text("Discover")
+            } footer: {
+                if let footer = settings.top10ListsFooter { Text(footer) }
             }
 
             Section("Library") {
@@ -1347,5 +1355,18 @@ enum AppleChannelManagerLoad {
             guard let value = try await group.next() else { throw CancellationError() }
             return value
         }
+    }
+}
+
+/// Off limits until TMDB is set up: the rows are TMDB's charts.
+@MainActor
+private struct AppleTop10ListsToggle: View {
+    let settings: AppleSettingsStore
+
+    var body: some View {
+        @Bindable var settings = settings
+        Toggle("Top 10 lists", isOn: $settings.top10ListsEnabled)
+            .disabled(!settings.top10ListsAvailable)
+            .accessibilityIdentifier("settings.discover.top10")
     }
 }

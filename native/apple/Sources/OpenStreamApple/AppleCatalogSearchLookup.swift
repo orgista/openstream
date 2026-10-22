@@ -11,8 +11,8 @@ struct AppleCatalogSearchMatch: Equatable, Sendable {
         Self(item: item, source: metadataSource)
     }
 
-    private static let metadataSource = AppleSource(kind: .library, name: "oStream",
-                                                    url: URL(string: "openstream://metadata")!)
+    private static let metadataSource = AppleSource(id: AppleMediaAvailability.metadataOnlyInstanceID, kind: .library,
+                                                    name: "oStream", url: URL(string: "openstream://metadata")!)
 }
 
 struct AppleCatalogSearchMetrics: Equatable, Sendable {

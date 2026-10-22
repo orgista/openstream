@@ -283,18 +283,20 @@ public struct AppleSource: Identifiable, Codable, Equatable, Sendable {
     }
 }
 
-/// A saved source of a kind this app no longer has (builds before 2026-10-22
-/// could add one). It is deleted with its Keychain entries wherever
-/// it turns up (this device's list, an iCloud copy, a backup, a transfer) and
-/// never kept or passed on.
+/// A saved source of a kind this app no longer has: builds before 2026-10-22
+/// could add a trailer channel (`youtube`) or a catalog source, which always
+/// carried a `manifestID`. It is deleted with its Keychain entries wherever
+/// it turns up (this device's list, an iCloud copy, a backup, a transfer),
+/// its id is tombstoned so an older build stops sending it back, and it is
+/// never kept or passed on. A kind a later build adds is not retired.
 struct AppleRetiredSource: Equatable, Sendable {
     let id: UUID
     let keychainReferences: [String]
 
-    /// `fields` is one source as stored: retired when it names an id and a
-    /// kind that `AppleSourceKind` does not have.
+    /// `fields` is one source as stored.
     init?(fields: [String: Any]) {
         guard let kind = fields["kind"] as? String, AppleSourceKind(rawValue: kind) == nil,
+              kind == "youtube" || fields["manifestID"] is String,
               let id = (fields["id"] as? String).flatMap(UUID.init(uuidString:)) else { return nil }
         self.id = id
         let reference = id.uuidString.lowercased()
@@ -302,11 +304,16 @@ struct AppleRetiredSource: Equatable, Sendable {
                               reference, "transport.\(reference)", "guide.\(reference)"].compactMap { $0 }
     }
 
-    /// The shelf cache those sources filled (`Caches/OpenStream/catalogs-v2.json`).
+    /// Caches the retired sources and the old chart rows filled in
+    /// `Caches/OpenStream`: the shelf cache, the chart and its artwork.
+    /// Cheap, so it runs on every launch.
     static func removeLeftoverFiles(fileManager: FileManager = .default) {
         guard let caches = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first else { return }
-        try? fileManager.removeItem(at: caches.appending(path: "OpenStream", directoryHint: .isDirectory)
-            .appending(path: "catalogs-v2.json"))
+        let folder = caches.appending(path: "OpenStream", directoryHint: .isDirectory)
+        let names = (try? fileManager.contentsOfDirectory(atPath: folder.path)) ?? []
+        for name in names where name == "catalogs-v2.json" || name == "top10-artwork-v1.json" || name.hasSuffix("-top10-v1.json") {
+            try? fileManager.removeItem(at: folder.appending(path: name))
+        }
     }
 }
 
@@ -383,15 +390,15 @@ public final class AppleSourceStore {
             protectsStoredBlobWhenEmpty = false
         }
         if !sourceTombstones.isEmpty { mergeSourceTombstones([:]) }
-        if !retired.isEmpty {
-            deleteRetiredSources(retired)
-            AppleRetiredSource.removeLeftoverFiles()
-        }
         retryPendingCredentialCleanup()
         hydrateProtectedTransportURLs()
         hydrateGuideAddresses()
         migrateLegacyIPTVCredentials()
         relocateManagedImports()
+        // After the migrations above, so the save that drops them is not
+        // refused for a source still holding inline credentials.
+        if !retired.isEmpty { deleteRetiredSources(retired) }
+        AppleRetiredSource.removeLeftoverFiles()
     }
 
     public func setEnabled(_ enabled: Bool, id: AppleSource.ID) {
@@ -988,13 +995,14 @@ public final class AppleSourceStore {
         if changed { persist() }
     }
 
-    /// Drops retired sources from the stored list and queues their Keychain
-    /// entries for removal. Their ids are not tombstoned: the list just stops
-    /// carrying them.
+    /// Drops retired sources from the stored list, queues their Keychain
+    /// entries for removal and tombstones their ids, so a device on an older
+    /// build deletes them too instead of sending them back through iCloud.
     private func deleteRetiredSources(_ retired: [AppleRetiredSource]) {
         pendingCredentialCleanupReferences = Array(Set(pendingCredentialCleanupReferences
             + retired.flatMap(\.keychainReferences))).sorted()
-        persistPendingCredentialCleanup()
+        retryPendingCredentialCleanup()
+        for source in retired where sourceTombstones[source.id] == nil { sourceTombstones[source.id] = .now }
         persist()
         appleTrace("sources: deleted \(retired.count) retired")
     }

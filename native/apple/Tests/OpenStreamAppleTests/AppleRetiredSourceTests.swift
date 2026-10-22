@@ -5,12 +5,12 @@ import Testing
 
 /// Sources of a kind this app no longer has (saved by builds before
 /// 2026-10-22) are deleted wherever they turn up — this device's list, a backup, an iCloud copy, a setup transfer —
-/// with their Keychain entries, and the other sources stay as they were.
+/// with their Keychain entries and a tombstone, and the other sources stay as they were.
 @MainActor
 @Suite struct AppleRetiredSourceTests {
     private static let retiredID = UUID()
     private static let retired: [String: Any] = [
-        "id": retiredID.uuidString, "kind": "retired-kind", "name": "Old Source",
+        "id": retiredID.uuidString, "kind": "retired-kind", "manifestID": "org.fixture.old", "name": "Old Source",
         "url": "https://fixture.example/old/source.json", "isEnabled": true,
         "credentialReference": "old-account", "transportReference": "old-transport",
         "resources": ["catalog", "stream"], "catalogs": [["type": "movie", "id": "top"]],
@@ -36,33 +36,71 @@ import Testing
             #expect(try device.keychain.string(for: account) == nil)
         }
         #expect(device.defaults.stringArray(forKey: device.storageKey + ".pending-keychain-removals") == nil)
+        #expect(device.makeStore().sourceTombstones[Self.retiredID] != nil)
     }
 
-    @Test func aListOfOnlyRetiredSourcesIsEmptiedAndTheNextSourceSaves() throws {
+    /// Only the kinds older builds had are retired; a kind a later build adds
+    /// is left alone rather than deleted from every device.
+    @Test func onlyTheOldKindsAreRetired() {
+        let id = UUID().uuidString
+        #expect(AppleRetiredSource(fields: ["id": id, "kind": "youtube"]) != nil)
+        #expect(AppleRetiredSource(fields: ["id": id, "kind": "retired-kind", "manifestID": "org.fixture.old"]) != nil)
+        #expect(AppleRetiredSource(fields: ["id": id, "kind": "laterKind"]) == nil)
+        #expect(AppleRetiredSource(fields: ["id": id, "kind": AppleSourceKind.nas.rawValue, "manifestID": "x"]) == nil)
+    }
+
+    /// A list whose other source still needs its inline sign-in moved to the
+    /// Keychain is saved without the retired source on the same launch.
+    @Test func aRetiredSourceIsDroppedOnTheLaunchThatMovesInlineCredentials() throws {
         let device = try RetiredSourceDevice()
         defer { device.tearDown() }
-        device.defaults.set(try JSONSerialization.data(withJSONObject: [Self.retired]), forKey: device.storageKey)
+        let kept = try device.keepSource()
+        let data = try #require(device.defaults.data(forKey: device.storageKey))
+        let stored = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        var legacy = try #require(stored.first)
+        legacy["iptvType"] = AppleIPTVSourceType.xtream.rawValue
+        legacy["username"] = "fixture-user"
+        legacy["password"] = "fixture-password"
+        legacy["credentialReference"] = nil
+        device.defaults.set(try JSONSerialization.data(withJSONObject: [legacy, Self.retired]), forKey: device.storageKey)
 
         let store = device.makeStore()
-        #expect(store.sources.isEmpty)
-        #expect(String(decoding: try #require(device.defaults.data(forKey: device.storageKey)), as: UTF8.self) == "[]")
 
-        _ = try store.addIPTV(name: "Live", type: .m3u, endpoint: "https://fixture.example/live.m3u")
-        #expect(device.makeStore().sources.map(\.name) == ["Live"])
+        #expect(store.sources.map(\.id) == [kept.id])
+        let saved = String(decoding: try #require(device.defaults.data(forKey: device.storageKey)), as: UTF8.self)
+        #expect(!saved.contains(Self.retiredID.uuidString))
+        #expect(!saved.contains("fixture-password"))
     }
 
-    @Test func theRetiredSourcesShelfCacheIsDeleted() throws {
-        let caches = try #require(FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first)
-        let cache = caches.appending(path: "OpenStream", directoryHint: .isDirectory).appending(path: "catalogs-v2.json")
-        try FileManager.default.createDirectory(at: cache.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data("{}".utf8).write(to: cache)
+    /// An older build still lists the source as its own; the copy this
+    /// device sends carries the tombstone, which that build applies by
+    /// deleting it, so the two never send it back and forth.
+    @Test func theNextCopySentCarriesTheRetiredSourcesTombstone() throws {
         let device = try RetiredSourceDevice()
         defer { device.tearDown() }
         device.defaults.set(try JSONSerialization.data(withJSONObject: [Self.retired]), forKey: device.storageKey)
+        let store = device.makeStore()
 
-        _ = device.makeStore()
+        let sent = AppleConfigurationSnapshot(sources: store.sources, sourceTombstones: store.sourceTombstones)
+        let received = try JSONDecoder().decode(AppleConfigurationSnapshot.self, from: JSONEncoder().encode(sent))
 
-        #expect(!FileManager.default.fileExists(atPath: cache.path))
+        #expect(received.sourceTombstones.keys.contains(Self.retiredID))
+    }
+
+    @Test func theOldShelfAndChartCachesAreDeletedAndTheCurrentChartIsKept() throws {
+        let caches = try #require(FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first)
+        let folder = caches.appending(path: "OpenStream", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let old = ["catalogs-v2.json", "top10-artwork-v1.json", "netflix-top10-v1.json"].map { folder.appending(path: $0) }
+        let current = folder.appending(path: AppleTop10Store.fileName)
+        let hadCurrent = FileManager.default.fileExists(atPath: current.path)
+        for file in old + (hadCurrent ? [] : [current]) { try Data("{}".utf8).write(to: file) }
+        defer { if !hadCurrent { try? FileManager.default.removeItem(at: current) } }
+
+        AppleRetiredSource.removeLeftoverFiles()
+
+        #expect(old.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) })
+        #expect(FileManager.default.fileExists(atPath: current.path))
     }
 
     @Test func aSnapshotDropsRetiredSourcesAndKeepsTheRest() throws {
@@ -73,9 +111,11 @@ import Testing
 
         #expect(snapshot.sources.map(\.id) == [kept.id])
         #expect(snapshot.retiredSourceCount == 1)
+        #expect(snapshot.sourceTombstones[Self.retiredID] == snapshot.savedAt)
         #expect(throws: Never.self) { try snapshot.validate() }
-        let reencoded = String(decoding: try JSONEncoder().encode(snapshot), as: UTF8.self)
-        #expect(!reencoded.contains(Self.retiredID.uuidString))
+        let reencoded = try JSONDecoder().decode(AppleConfigurationSnapshot.self, from: JSONEncoder().encode(snapshot))
+        #expect(reencoded.sources.map(\.id) == [kept.id])
+        #expect(reencoded.retiredSourceCount == 0)
     }
 
     @Test func aBrokenSourceOfAKnownKindStillFailsTheFile() throws {
@@ -118,6 +158,7 @@ import Testing
         await device.controller.restoreFromCloud()
 
         #expect(device.sources.sources.map(\.id) == [kept.id])
+        #expect(device.sources.sourceTombstones[Self.retiredID] != nil)
         #expect(device.controller.status.lastError == nil)
     }
 

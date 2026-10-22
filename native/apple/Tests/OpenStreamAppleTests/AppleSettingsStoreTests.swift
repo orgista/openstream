@@ -465,7 +465,55 @@ func topTenListsRequireAnOptInAndRememberIt() {
     #expect(!AppleSettingsStore(defaults: defaults, keychain: StubCredentialStore()).top10ListsEnabled)
 }
 
-/// Records what is stored, so the retired services' cleanup can be seen.
+/// Top 10 rows are TMDB's charts: with no key, or with metadata off, the
+/// toggle is unavailable and says in one line what is missing; with both it
+/// works and says nothing.
+@MainActor
+@Test
+func topTenListsNeedATMDBKeyAndMetadata() {
+    let store = AppleSettingsStore(defaults: makeIsolatedDefaults(), keychain: StubCredentialStore())
+    store.metadataEnabled = true
+    store.tmdbAPIKey = ""
+    #expect(!store.top10ListsAvailable)
+    #expect(store.top10ListsFooter == "Needs a TMDB API key")
+    store.tmdbAPIKey = "fixture-tmdb"
+    #expect(store.top10ListsAvailable)
+    #expect(store.top10ListsFooter == nil)
+    store.metadataEnabled = false
+    #expect(!store.top10ListsAvailable)
+    #expect(store.top10ListsFooter == "Needs Use Metadata APIs")
+}
+
+/// A link shared before the Keychain gives the TMDB key (a launch before
+/// first unlock) waits for it instead of failing.
+@MainActor
+@Test
+func aSharedLinkWaitsForAKeyTheKeychainRefusedAtLaunch() async {
+    let keychain = LateCredentialStore()
+    let store = AppleSettingsStore(defaults: makeIsolatedDefaults(), keychain: keychain)
+    store.metadataEnabled = true
+    #expect(store.tmdbConfiguration == nil)
+    keychain.unlocked.withLock { $0 = true }
+    #expect(await store.loadedTMDBConfiguration(interval: .milliseconds(1)) != nil)
+    #expect(store.tmdbAPIKey == "fixture-tmdb")
+
+    let noKey = AppleSettingsStore(defaults: makeIsolatedDefaults(), keychain: StubCredentialStore())
+    noKey.metadataEnabled = true
+    #expect(await noKey.loadedTMDBConfiguration(interval: .seconds(60)) == nil)
+}
+
+/// Locked until `unlocked`, then holds a TMDB key.
+private final class LateCredentialStore: AppleCredentialStoring {
+    let unlocked = Mutex(false)
+    func string(for account: String) throws -> String? {
+        guard unlocked.withLock({ $0 }) else { throw CocoaError(.fileReadNoPermission) }
+        return account == "metadata.tmdb.apiKey" ? "fixture-tmdb" : nil
+    }
+    func set(_ value: String, for account: String) throws {}
+    func remove(_ account: String) throws {}
+}
+
+/// Records what is stored, so what the store keeps can be seen.
 private final class RecordingCredentialStore: AppleCredentialStoring {
     let stored = Mutex<[String: String]>([:])
     var values: [String: String] { stored.withLock { $0 } }
@@ -474,25 +522,25 @@ private final class RecordingCredentialStore: AppleCredentialStoring {
     func remove(_ account: String) throws { stored.withLock { $0[account] = nil } }
 }
 
-/// Radarr, Sonarr, Trakt and the transcode gateway left the app (2026-10-22):
-/// what they saved is deleted once, and a restore cannot bring it back.
+/// Radarr, Sonarr, Trakt and the transcode gateway left the app (2026-10-22).
+/// The app names none of their keys any more: what an old build saved stays
+/// unread, and neither a backup nor a restore carries it.
 @MainActor
 @Test
-func retiredServiceSettingsAreDeletedAndNeverRestored() throws {
+func retiredServiceSettingsAreNeitherBackedUpNorRestored() throws {
     let defaults = makeIsolatedDefaults()
     let keychain = RecordingCredentialStore()
-    for key in AppleSettingsStore.RetiredKey.defaults { defaults.set("https://fixture.example/retired", forKey: key) }
-    for account in AppleSettingsStore.RetiredKey.secrets { try keychain.set("fixture-secret", for: account) }
-    try keychain.set("fixture-tmdb", for: "metadata.tmdb.apiKey")
+    defaults.set("https://fixture.example/radarr", forKey: "openstream.settings.radarr.url.v1")
+    try keychain.set("fixture-secret", for: "downloads.radarr.apiKey")
 
     let store = AppleSettingsStore(defaults: defaults, keychain: keychain)
-    #expect(AppleSettingsStore.RetiredKey.defaults.allSatisfy { defaults.object(forKey: $0) == nil })
-    #expect(keychain.values == ["metadata.tmdb.apiKey": "fixture-tmdb"])
+    #expect(try store.configurationValues()["openstream.settings.radarr.url.v1"] == nil)
+    #expect(try store.configurationCredentials()["downloads.radarr.apiKey"] == nil)
 
-    let old = try PropertyListSerialization.data(fromPropertyList: ["https://fixture.example/radarr"], format: .binary, options: 0)
-    try store.restoreConfiguration(["openstream.settings.radarr.url.v1": old])
-    try store.restoreConfigurationCredentials(["downloads.radarr.apiKey": "fixture-radarr", "metadata.tmdb.apiKey": "fixture-tmdb-2"])
-    #expect(defaults.object(forKey: "openstream.settings.radarr.url.v1") == nil)
-    #expect(keychain.values["downloads.radarr.apiKey"] == nil)
+    let old = try PropertyListSerialization.data(fromPropertyList: ["https://fixture.example/sonarr"], format: .binary, options: 0)
+    try store.restoreConfiguration(["openstream.settings.sonarr.url.v1": old])
+    try store.restoreConfigurationCredentials(["downloads.sonarr.apiKey": "fixture-sonarr", "metadata.tmdb.apiKey": "fixture-tmdb-2"])
+    #expect(defaults.object(forKey: "openstream.settings.sonarr.url.v1") == nil)
+    #expect(keychain.values["downloads.sonarr.apiKey"] == nil)
     #expect(store.tmdbAPIKey == "fixture-tmdb-2")
 }

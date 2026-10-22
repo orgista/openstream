@@ -58,8 +58,8 @@ enum AppleCatalogShelfPolicy {
         return words.joined(separator: " ")
     }
 
-    static func hasDiscoverContent(hasLocalLibrary: Bool, hasMediaServerItems: Bool) -> Bool {
-        hasLocalLibrary || hasMediaServerItems
+    static func hasDiscoverContent(hasLocalLibrary: Bool, hasMediaServerItems: Bool, hasTop10: Bool = false) -> Bool {
+        hasLocalLibrary || hasMediaServerItems || hasTop10
     }
 
     static func rankedSubtitle(for item: AppleCatalogItem) -> String {

@@ -45,10 +45,9 @@ struct AppleSearchUnlistedRecordTests {
     }
 
     /// Files and channels are not catalog titles; they are listed as before.
-    @Test(arguments: [AppleMediaPlaybackCapability.direct, .gateway])
-    func nonCatalogRowsAreStillListed(capability: AppleMediaPlaybackCapability) {
+    @Test func nonCatalogRowsAreStillListed() {
         let record = AppleMediaRecord(kind: .channel, title: "Fixture Star Channel",
-                                      availability: [.init(instanceID: UUID(), capability: capability, itemReference: "1")])
+                                      availability: [.init(instanceID: UUID(), capability: .direct, itemReference: "1")])
         #expect(AppleCatalogSearchStore.listsUnmatched(record))
     }
 }

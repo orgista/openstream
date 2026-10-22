@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import ImageIO
+import Synchronization
 import Testing
 import UniformTypeIdentifiers
 @testable import OpenStreamApple
@@ -98,6 +99,77 @@ struct AppleTopShelfArtworkTests {
 
         try await writer.write(records: [], enabled: false)
         #expect(!FileManager.default.fileExists(atPath: directory.path))
+    }
+
+    /// A server-only Apple TV with nothing in progress still gets a shelf:
+    /// the servers' recently added titles, with the posters the app saved
+    /// from the server over plain http; the snapshot names files, never the
+    /// server's address.
+    @Test("Recently Added fills the shelf from media servers, with the app's copies of LAN art")
+    func recentlyAddedFromAServerOverHTTP() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: "openstream-topshelf-recent-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let server = AppleSource(kind: .mediaServer, name: "Fixture Jellyfin", url: URL(string: "http://192.168.1.20:8096")!)
+        let share = AppleSource(kind: .nas, name: "Share", url: URL(string: "smb://fixture.example/share")!)
+        let posterData = Self.png(width: 400, height: 600)
+        let store = AppleTopShelfArtworkStore { url in
+            guard url.host == "192.168.1.20" else { throw URLError(.cannotFindHost) }
+            return posterData
+        }
+        let movie = AppleCatalogItem(mediaID: "jf:movie-1", type: "movie", name: "Fixture Movie",
+                                     posterURL: URL(string: "http://192.168.1.20:8096/Items/movie-1/Images/Primary"),
+                                     backgroundURL: URL(string: "http://192.168.1.20:8096/Items/movie-1/Images/Backdrop"))
+        let fromServer = AppleMediaIngestion.catalogRecord(instanceID: server.id, item: movie)
+        let fromShare = AppleMediaIngestion.catalogRecord(instanceID: share.id,
+            item: AppleCatalogItem(mediaID: "share-1", type: "movie", name: "Share Movie"))
+        let writer = AppleTopShelfSnapshotWriter(containerProvider: { root }, artwork: store)
+
+        try await writer.write(records: [fromServer, fromShare], sources: [server, share], enabled: true)
+
+        let written = try #require(AppleTopShelfSnapshotReader(containerProvider: { root }).read())
+        #expect(written.continueWatching.isEmpty)
+        let row = try #require(AppleTopShelfContentBuilder.sections(for: written).first)
+        #expect(row.title == "Recently Added")
+        #expect(row.items.map(\.id) == [fromServer.id])
+        let directory = AppleTopShelfArtworkStore.directory(in: root)
+        let poster = try #require(row.imageURL(for: row.items[0], art: directory))
+        #expect(poster.isFileURL)
+        #expect(FileManager.default.fileExists(atPath: poster.path))
+        let page = try #require(AppleTopShelfContentBuilder.carouselItems(for: written).first)
+        #expect(page.item.id == fromServer.id && page.contextTitle == "Recently Added")
+        let picture = try #require(page.item.shelfImage)
+        #expect(FileManager.default.fileExists(atPath: directory.appending(path: picture).path))
+        let json = String(decoding: try JSONEncoder().encode(written), as: UTF8.self)
+        #expect(!json.contains("192.168.1.20"))
+    }
+
+    /// The shelf is written before any server art is fetched, so a slow or
+    /// offline server delays only its own pictures.
+    @Test("The snapshot is on disk before the server's art is fetched")
+    func snapshotBeforeServerArt() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: "openstream-topshelf-first-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let server = AppleSource(kind: .mediaServer, name: "Fixture Jellyfin", url: URL(string: "http://192.168.1.20:8096")!)
+        let movie = AppleCatalogItem(mediaID: "jf:movie-1", type: "movie", name: "Fixture Movie",
+                                     posterURL: URL(string: "http://192.168.1.20:8096/Items/movie-1/Images/Primary"))
+        let record = AppleMediaIngestion.catalogRecord(instanceID: server.id, item: movie)
+        let reader = AppleTopShelfSnapshotReader(containerProvider: { root })
+        let posterData = Self.png(width: 400, height: 600)
+        let shownWhileFetching = Mutex<[String]?>(nil)
+        let store = AppleTopShelfArtworkStore { _ in
+            shownWhileFetching.withLock { $0 = reader.read()?.topPicks.map(\.id) }
+            return posterData
+        }
+        let writer = AppleTopShelfSnapshotWriter(containerProvider: { root }, artwork: store)
+
+        try await writer.write(records: [record], sources: [server], enabled: true)
+
+        #expect(shownWhileFetching.withLock { $0 } == [record.id])
+        #expect(try #require(reader.read()).topPicks.first?.shelfPoster != nil)
     }
 
     @Test("A trailer is a direct https video file, never YouTube")

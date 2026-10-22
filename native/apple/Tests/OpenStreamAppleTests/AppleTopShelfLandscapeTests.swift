@@ -49,7 +49,7 @@ struct AppleTopShelfLandscapeTests {
         let section = AppleTopShelfSection(title: "Top Picks",
                                            items: [item("a", poster: "a", backdrop: "a-wide"), item("b", backdrop: "b-wide")])
         #expect(section.imageShape == .hdtv)
-        #expect(section.items.map(section.imageURL(for:)) == section.items.map(\.landscapeArtworkURL))
+        #expect(section.items.map { section.imageURL(for: $0) } == section.items.map(\.landscapeArtworkURL))
     }
 
     @Test func aMixedRowStaysPostersAndFallsBackToTheBackdropOnlyWithoutAPoster() {

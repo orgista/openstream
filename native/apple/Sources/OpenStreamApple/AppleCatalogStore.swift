@@ -135,6 +135,13 @@ public struct AppleCatalogItem: Identifiable, Codable, Equatable, Sendable {
         )
     }
 
+    /// The same item with no poster, backdrop or wordmark.
+    var withoutArtwork: Self {
+        Self(mediaID: mediaID, type: type, name: name, summary: summary, releaseInfo: releaseInfo, rating: rating,
+             contentRating: contentRating, formatBadges: formatBadges, genres: genres, cast: cast, director: director,
+             writers: writers, year: year, imdbID: imdbID, runtimeMinutes: runtimeMinutes, popularity: popularity)
+    }
+
     /// What VoiceOver reads for the item: its name, or for a poster-only
     /// entry that came without one, its type and id.
     public var accessibilityTitle: String {

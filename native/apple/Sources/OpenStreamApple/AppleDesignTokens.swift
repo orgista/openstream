@@ -138,8 +138,8 @@ public struct AppleSettingsContentModifier: ViewModifier {
         // No width cap. Wrapping the list in a fixed frame stops it being the
         // scroll view the navigation bar tracks, and the bar then keeps the
         // large title expanded while the list lays its own content out from the
-        // top of that frame — which is why "RADARR" was drawn *underneath*
-        // "Radarr & Sonarr" on the phone (measured 2026-09-17). The same cap was
+        // top of that frame — which is why a section header was drawn
+        // *underneath* the large title on the phone (measured 2026-09-17). The same cap was
         // also what centred the list in a 560 pt column on iPad while the large
         // title stayed flush left. tvOS moved off 560 for the same reason: it is
         // a phone column, and a phone does not need it.
@@ -170,7 +170,7 @@ public struct AppleSettingsContentModifier: ViewModifier {
         #elseif os(macOS)
         // This branch is the whole macOS Settings bug, and it is one bug, not
         // six (macOS sweep, 2026-09-21: About, Privacy, Backup, Metadata,
-        // Storage, Watch Providers, Trakt, Add Catalog and Web Management all
+        // Storage, Watch Providers, Web Management and two panes since removed all
         // failed, and they fail here).
         //
         // A macOS `Form` defaults to `.columns`: a grid that right-aligns
@@ -180,7 +180,7 @@ public struct AppleSettingsContentModifier: ViewModifier {
         // two `maxWidth` frames below cap the width and pass the height
         // proposal straight through, so the form stayed as short as its own
         // rows and SwiftUI placed that short block in a tall window from the
-        // bottom up. A Trakt pane is two fields tall: at the 900x450 default it
+        // bottom up. A pane two fields tall: at the 900x450 default it
         // sat entirely below the window edge and read as a blank page.
         //
         // `.grouped` is the style Apple's own macOS settings panes use — a
@@ -529,8 +529,8 @@ public enum AppleProgressVisibility {
 
 extension View {
     /// A hairline outline around a tvOS text field. Unfocused, the stock
-    /// field draws nothing behind its placeholder, so Add Catalog, Add Live
-    /// TV, Media Server and Network Share showed a line of grey text with
+    /// field draws nothing behind its placeholder, so Add Live TV, Media
+    /// Server and Network Share showed a line of grey text with
     /// nowhere to click (full test 2026-10-01). A no-op elsewhere.
     @ViewBuilder
     func appleTVFieldOutline() -> some View {

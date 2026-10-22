@@ -15,7 +15,7 @@ public enum AppleWebManagementPage {
     </svg>
     """
 
-    static let sourceTypes: [(value: String, label: String)] = [("m3u", "M3U Playlist"), ("xtream", "Provider Login")]
+    static let sourceTypes: [(value: String, label: String)] = [("m3u", "M3U Playlist"), ("login", "Provider Login")]
 
     public static var defaultSourceType: String { sourceTypes[0].value }
 
@@ -131,10 +131,10 @@ public enum AppleWebManagementPage {
                     value="\(escape(draft["epgURL"] ?? ""))"
                     autocapitalize="none" autocomplete="url" spellcheck="false">
                 </div>
-                <div class="fields xtream">
-                  <label for="xtreamName">Name</label>
-                  <input id="xtreamName" name="xtreamName" type="text" autocapitalize="words" spellcheck="false"
-                    value="\(escape(draft["xtreamName"] ?? ""))">
+                <div class="fields login">
+                  <label for="loginName">Name</label>
+                  <input id="loginName" name="loginName" type="text" autocapitalize="words" spellcheck="false"
+                    value="\(escape(draft["loginName"] ?? ""))">
                   <label for="serverURL">Server URL</label>
                   <input id="serverURL" name="serverURL" type="url" inputmode="url"
                     value="\(escape(draft["serverURL"] ?? ""))"
@@ -325,10 +325,10 @@ public enum AppleWebManagementPage {
     .type{position:absolute;width:1px;height:1px;margin:-1px;opacity:0;pointer-events:none}\
     .types{display:grid;grid-template-columns:repeat(\(sourceTypes.count),1fr);gap:4px;margin-bottom:6px;padding:1px;border:1px solid #3a3a3c;border-radius:10px}\
     .types label{min-height:44px;display:grid;place-items:center;border-radius:7px;color:#f5f5f7;font-size:14px;font-weight:500;text-align:center;cursor:pointer}\
-    #type-m3u:checked~.types label[for=type-m3u],#type-xtream:checked~.types label[for=type-xtream]{background:#f5f5f7;color:#000}\
-    #type-m3u:focus-visible~.types label[for=type-m3u],#type-xtream:focus-visible~.types label[for=type-xtream]{outline:2px solid #FF3366;outline-offset:2px}\
+    #type-m3u:checked~.types label[for=type-m3u],#type-login:checked~.types label[for=type-login]{background:#f5f5f7;color:#000}\
+    #type-m3u:focus-visible~.types label[for=type-m3u],#type-login:focus-visible~.types label[for=type-login]{outline:2px solid #FF3366;outline-offset:2px}\
     .fields{display:none;gap:8px}\
-    #type-m3u:checked~.fields.m3u,#type-xtream:checked~.fields.xtream{display:grid}\
+    #type-m3u:checked~.fields.m3u,#type-login:checked~.fields.login{display:grid}\
     .address{margin:0;font-size:22px;font-weight:600;font-variant-numeric:tabular-nums;word-break:break-all}\
     .lead{margin:-18px 0 22px 2px}\
     .lead .address{font-size:13px;font-weight:400;color:#98989d}\

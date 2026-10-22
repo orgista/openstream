@@ -6,7 +6,7 @@ import Foundation
 /// The engine names tracks the way the container does ("ENG (ac3)", "SPA
 /// (aac)") and the menu used to append the language code again, so a row read
 /// "ENG (ac3) (eng)" with no check mark on the track playing (full test
-/// 2026-10-01). A row now reads "English · Dolby Digital 5.1", "Spanish · AAC
+/// 2026-10-01). A row now reads "English · AC-3 5.1", "Spanish · AAC
 /// Stereo", or "Commentary" when the track is one.
 public enum AppleAudioTrackMenu {
     public struct Entry: Equatable, Identifiable, Sendable {
@@ -43,7 +43,7 @@ public enum AppleAudioTrackMenu {
         }
     }
 
-    /// "English · Dolby Digital 5.1"; "Commentary" for a commentary track.
+    /// "English · AC-3 5.1"; "Commentary" for a commentary track.
     public static func label(for track: ApplePlaybackTrack) -> String {
         let languageCode = AppleSubtitleTrackFilter.languageKey(of: track)
         let language = languageCode.isEmpty ? nil : AppleSubtitleTrackFilter.languageName(languageCode)

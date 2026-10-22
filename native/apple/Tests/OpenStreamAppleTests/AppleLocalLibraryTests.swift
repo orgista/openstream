@@ -117,7 +117,7 @@ func matchingGroupsKeepsItsSnapshotUntilTheNewRevisionIsPublished(hasIMDb: Bool)
     defer { try? FileManager.default.removeItem(at: folder) }
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     let item = AppleCatalogItem(mediaID: "tt0000001", type: "movie", name: "Example Film", releaseInfo: "2020")
-    try JSONEncoder().encode(SeededMetadataEntry(value: item, checkedAt: Date(), addedAt: Date(), schema: 2))
+    try JSONEncoder().encode(SeededMetadataEntry(value: item, checkedAt: Date(), addedAt: Date(), schema: 3))
         .write(to: folder.appendingPathComponent(AppleLibraryMetadataResolver.cacheKey(file) + ".json"))
     let suite = "memoised-sort-\(UUID())"
     let defaults = try #require(UserDefaults(suiteName: suite))

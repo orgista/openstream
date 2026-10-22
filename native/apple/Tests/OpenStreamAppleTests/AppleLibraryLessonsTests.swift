@@ -67,7 +67,7 @@ struct AppleLibraryLessonsTests {
     }
 
     @Test(arguments: [true, false])
-    func genreBackfillKeepsCachedArtworkAndTheAddedDate(lookupHasGenres: Bool) async throws {
+    func olderCacheEntriesKeepTheirTitleAndAddedDateButNotTheirArtwork(lookupHasGenres: Bool) async throws {
         struct Seed: Codable {
             let value: AppleCatalogItem
             let checkedAt: Date
@@ -88,13 +88,13 @@ struct AppleLibraryLessonsTests {
         let cache = folder.appendingPathComponent(AppleLibraryMetadataResolver.cacheKey(item) + ".json")
         let addedAt = Date(timeIntervalSince1970: 1_700_000_000)
         try JSONEncoder().encode(Seed(value: old, checkedAt: .now, addedAt: addedAt, schema: 1)).write(to: cache)
-        #expect(await resolver.cachedLookups(for: [group]).metadata[group.id] == old)
+        #expect(await resolver.cachedLookups(for: [group]).metadata[group.id] == old.withoutArtwork)
         #expect(await resolver.needsRevalidation(item, tmdbKey: "", omdbKey: ""))
-        let expected = lookupHasGenres ? enriched : old
+        let expected = lookupHasGenres ? enriched : old.withoutArtwork
         #expect(try await resolver.resolve(item, tmdbKey: "", omdbKey: "") == expected)
         let saved = try JSONDecoder().decode(Seed.self, from: Data(contentsOf: cache))
         #expect(saved.addedAt == addedAt)
-        #expect(saved.value.posterURL == poster)
+        #expect(saved.value.posterURL == expected.posterURL)
         #expect(saved.value.genres == expected.genres)
         #expect(!(await resolver.needsRevalidation(item, tmdbKey: "", omdbKey: "")))
     }

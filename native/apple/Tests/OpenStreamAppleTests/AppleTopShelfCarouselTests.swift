@@ -24,13 +24,13 @@ struct AppleTopShelfCarouselTests {
                               recentlyAdded: [], favorites: [], topPicks: topPicks)
     }
 
-    @Test("Continue Watching comes first, then Top Picks, each title once, only titles with a backdrop")
+    @Test("Continue Watching comes first, then Recently Added, each title once, only titles with a backdrop")
     func mapping() {
         let pages = AppleTopShelfContentBuilder.carouselItems(for: snapshot(
             continueWatching: [item("a", progress: 0.4), item("b", backdrop: false, progress: 0.7)],
             topPicks: [item("a"), item("c"), item("d")]))
         #expect(pages.map(\.item.id) == ["a", "c", "d"])
-        #expect(pages.map(\.contextTitle) == ["Continue Watching", "Top Picks", "Top Picks"])
+        #expect(pages.map(\.contextTitle) == ["Continue Watching", "Recently Added", "Recently Added"])
         #expect(pages.map(\.imageURL) == pages.map(\.item.landscapeArtworkURL))
         #expect(pages.allSatisfy { $0.imageURL?.absoluteString.hasSuffix("-wide.jpg") == true })
         #expect(pages[0].item.playURL?.absoluteString == "openstream://media/a?action=play")
@@ -41,7 +41,7 @@ struct AppleTopShelfCarouselTests {
     func fallsBackToRows() {
         let value = snapshot(continueWatching: [item("a", backdrop: false)], topPicks: [item("b", backdrop: false)])
         #expect(AppleTopShelfContentBuilder.carouselItems(for: value).isEmpty)
-        #expect(AppleTopShelfContentBuilder.sections(for: value).map(\.title) == ["Continue Watching", "Top Picks"])
+        #expect(AppleTopShelfContentBuilder.sections(for: value).map(\.title) == ["Continue Watching", "Recently Added"])
     }
 
     @Test("The carousel stays short")

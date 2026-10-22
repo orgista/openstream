@@ -18,6 +18,17 @@ public enum AppleSharedLinkHandoff {
         return components?.url
     }
 
+    /// The app link for what a share sheet handed over: a URL, or text that
+    /// holds exactly one supported link.
+    public static func deepLink(inShared text: String) -> URL? {
+        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !clean.contains(where: \.isWhitespace), let url = URL(string: clean), let link = deepLink(for: url) { return link }
+        guard clean.count <= 8_192, let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return nil }
+        let links = detector.matches(in: clean, range: NSRange(clean.startIndex..., in: clean)).compactMap(\.url)
+            .compactMap(deepLink(for:))
+        return links.count == 1 ? links.first : nil
+    }
+
     public static func save(_ url: URL) {
         UserDefaults(suiteName: group)?.set(url.absoluteString, forKey: key)
     }

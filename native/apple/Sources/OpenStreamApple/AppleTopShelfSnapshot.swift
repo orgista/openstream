@@ -46,11 +46,17 @@ public struct AppleTopShelfSnapshot: Codable, Equatable, Sendable {
         /// Library/Caches/topshelf-trailers. Its URL carries a token, so the
         /// file goes on the shelf and the URL never does.
         public let shelfVideo: String?
+        /// The row poster the app saved from the viewer's own server
+        /// (`AppleTopShelfArtworkStore.posters`): a file name in the group's
+        /// Library/Caches/topshelf-art, for art `artworkURL` may not carry
+        /// (a LAN host or plain http). Absent in older snapshots.
+        public let shelfPoster: String?
 
         public init(id: String, title: String, kind: String, artworkURL: URL?, displayURL: URL, playURL: URL?,
                     progress: Double? = nil, landscapeArtworkURL: URL? = nil,
                     summary: String? = nil, genre: String? = nil, year: Int? = nil, durationSeconds: Double? = nil,
-                    shelfImage: String? = nil, previewVideoURL: URL? = nil, shelfVideo: String? = nil) {
+                    shelfImage: String? = nil, previewVideoURL: URL? = nil, shelfVideo: String? = nil,
+                    shelfPoster: String? = nil) {
             self.id = id
             self.title = title
             self.kind = kind
@@ -66,6 +72,7 @@ public struct AppleTopShelfSnapshot: Codable, Equatable, Sendable {
             self.shelfImage = shelfImage
             self.previewVideoURL = AppleTopShelfTrailerPolicy.previewVideoURL(previewVideoURL)
             self.shelfVideo = AppleTopShelfTrailerPolicy.shelfVideo(shelfVideo)
+            self.shelfPoster = shelfPoster
         }
 
         public var remainingMinutes: Int? {
@@ -78,14 +85,21 @@ public struct AppleTopShelfSnapshot: Codable, Equatable, Sendable {
             .init(id: id, title: title, kind: kind, artworkURL: artworkURL, displayURL: displayURL, playURL: playURL,
                   progress: progress, landscapeArtworkURL: landscapeArtworkURL, summary: summary, genre: genre,
                   year: year, durationSeconds: durationSeconds, shelfImage: name, previewVideoURL: previewVideoURL,
-                  shelfVideo: shelfVideo)
+                  shelfVideo: shelfVideo, shelfPoster: shelfPoster)
         }
 
         func withShelfVideo(_ name: String?) -> Item {
             .init(id: id, title: title, kind: kind, artworkURL: artworkURL, displayURL: displayURL, playURL: playURL,
                   progress: progress, landscapeArtworkURL: landscapeArtworkURL, summary: summary, genre: genre,
                   year: year, durationSeconds: durationSeconds, shelfImage: shelfImage, previewVideoURL: previewVideoURL,
-                  shelfVideo: name)
+                  shelfVideo: name, shelfPoster: shelfPoster)
+        }
+
+        func withShelfPoster(_ name: String?) -> Item {
+            .init(id: id, title: title, kind: kind, artworkURL: artworkURL, displayURL: displayURL, playURL: playURL,
+                  progress: progress, landscapeArtworkURL: landscapeArtworkURL, summary: summary, genre: genre,
+                  year: year, durationSeconds: durationSeconds, shelfImage: shelfImage, previewVideoURL: previewVideoURL,
+                  shelfVideo: shelfVideo, shelfPoster: name)
         }
     }
 
@@ -96,9 +110,10 @@ public struct AppleTopShelfSnapshot: Codable, Equatable, Sendable {
     public let continueWatching: [Item]
     public let recentlyAdded: [Item]
     public let favorites: [Item]
-    /// Older snapshots carried up to 10 shelf items here for Top Shelf when
-    /// nothing was in progress; current ones write none. Defaults to empty so
-    /// snapshots written before this field existed still decode.
+    /// The Top Shelf's second row, "Recently Added": the titles media
+    /// servers added last, so a server-only Apple TV with nothing in progress
+    /// still has a shelf. Defaults to empty so snapshots written before this
+    /// field existed still decode.
     public let topPicks: [Item]
     public let favoriteChannels: [Item]
     public let recentChannels: [Item]
@@ -153,6 +168,11 @@ public struct AppleTopShelfSnapshot: Codable, Equatable, Sendable {
     /// The same snapshot with each listed item's carousel picture, by item id.
     func withShelfImages(_ names: [String: String]) -> AppleTopShelfSnapshot {
         carouselPages { $0.withShelfImage(names[$0.id]) }
+    }
+
+    /// The same snapshot with each row item's saved poster, by item id.
+    func withShelfPosters(_ names: [String: String]) -> AppleTopShelfSnapshot {
+        carouselPages { $0.withShelfPoster(names[$0.id]) }
     }
 
     /// The same snapshot with each carousel page's saved trailer, by item id.
@@ -275,11 +295,12 @@ public struct AppleTopShelfSection: Equatable, Sendable {
         items.allSatisfy { $0.landscapeArtworkURL != nil } ? .hdtv : .poster
     }
 
-    /// The picture a tile shows in this row's shape.
-    public func imageURL(for item: AppleTopShelfSnapshot.Item) -> URL? {
+    /// The picture a tile shows in this row's shape; in a poster row, the
+    /// poster the app saved (`shelfPoster`, in `art`) comes first.
+    public func imageURL(for item: AppleTopShelfSnapshot.Item, art: URL? = nil) -> URL? {
         switch imageShape {
         case .hdtv: item.landscapeArtworkURL
-        case .poster: item.artworkURL ?? item.landscapeArtworkURL
+        case .poster: item.shelfPoster.flatMap { art?.appending(path: $0) } ?? item.artworkURL ?? item.landscapeArtworkURL
         }
     }
 }
@@ -303,25 +324,34 @@ public enum AppleTopShelfContentBuilder {
     /// The carousel holds this many pages at most.
     public static let carouselLimit = 12
     static let continueWatchingTitle = "Continue Watching"
+    static let recentlyAddedTitle = "Recently Added"
 
     /// The Home hero's pages in its order, then Continue Watching (owner
     /// 2026-10-16: "sync through heros"); before Home has drawn, Continue
-    /// Watching then Top Picks. Each title once, only titles with a backdrop
-    /// to fill the screen. Empty when no title has one: the provider then
+    /// Watching then Recently Added. Each title once, only titles with a
+    /// picture to fill the screen. Empty when no title has one: the provider then
     /// serves the rows (`sections(for:)`).
     public static func carouselItems(for snapshot: AppleTopShelfSnapshot) -> [AppleTopShelfCarouselItem] {
+        carouselItems(for: snapshot) { $0.landscapeArtworkURL != nil || $0.shelfImage != nil }
+    }
+
+    /// The same pages, each kept when `drawable` says it has a picture: a
+    /// public backdrop, or one the app drew from the viewer's own server
+    /// (`shelfImage`), whose address the snapshot never carries.
+    static func carouselItems(for snapshot: AppleTopShelfSnapshot,
+                              drawable: (AppleTopShelfSnapshot.Item) -> Bool) -> [AppleTopShelfCarouselItem] {
         var seen = Set<String>()
         let resumed = Set(snapshot.continueWatching.map(\.id))
         let continued = snapshot.continueWatching.map { AppleTopShelfCarouselItem(contextTitle: continueWatchingTitle, item: $0) }
         let pages = snapshot.heroes.isEmpty
-            ? continued + snapshot.topPicks.map { AppleTopShelfCarouselItem(contextTitle: "Top Picks", item: $0) }
+            ? continued + snapshot.topPicks.map { AppleTopShelfCarouselItem(contextTitle: recentlyAddedTitle, item: $0) }
             : snapshot.heroes.map {
                 AppleTopShelfCarouselItem(contextTitle: resumed.contains($0.id) ? continueWatchingTitle : nil, item: $0)
             } + continued
-        return Array(pages.filter { $0.imageURL != nil && seen.insert($0.item.id).inserted }.prefix(carouselLimit))
+        return Array(pages.filter { drawable($0.item) && seen.insert($0.item.id).inserted }.prefix(carouselLimit))
     }
 
-    /// Continue Watching first (when non-empty), then Top Picks. Returns an
+    /// Continue Watching first (when non-empty), then Recently Added. Returns an
     /// empty array when there is nothing to show at all — the provider
     /// should return `nil` for that result.
     public static func sections(for snapshot: AppleTopShelfSnapshot) -> [AppleTopShelfSection] {
@@ -333,7 +363,7 @@ public enum AppleTopShelfContentBuilder {
                 title: "Favorite channels", items: snapshot.favoriteChannels
             ),
             snapshot.topPicks.isEmpty ? nil : AppleTopShelfSection(
-                title: "Top Picks", items: snapshot.topPicks
+                title: recentlyAddedTitle, items: snapshot.topPicks
             ),
         ].compactMap { $0 }
     }
@@ -565,6 +595,8 @@ public actor AppleTopShelfSnapshotWriter {
         let recent = eligible.sorted { $0.lastVerified > $1.lastVerified }
         let shownContinued = Array(continued.filter { sources == nil || AppleContinueWatchingResolver.isOpenable($0) }
             .prefix(AppleContinueWatchingResolver.maximumCount))
+        let shownRecent = Self.recentlyAddedFromServers(recent, sources: sources,
+                                                        excluding: Set(shownContinued.map(\.id)))
         var snapshot = AppleTopShelfSnapshot(
             version: 1,
             generatedAt: .now,
@@ -577,7 +609,7 @@ public actor AppleTopShelfSnapshotWriter {
             },
             recentlyAdded: Array(recent.prefix(20)).map { Self.item($0) },
             favorites: Array(favorites.prefix(12)).map { Self.item($0) },
-            topPicks: [],
+            topPicks: shownRecent.map { Self.item($0) },
             favoriteChannels: favoriteChannels, recentChannels: recentChannels,
             heroes: heroes.map(\.item)
         )
@@ -608,19 +640,35 @@ public actor AppleTopShelfSnapshotWriter {
             // Each carousel page's art: the hero's as the billboard draws it,
             // else the page's own backdrop.
             var art: [String: (backdrop: URL?, wordmark: URL?)] = [:]
+            for record in shownContinued + shownRecent {
+                guard let backdrop = record.backdropURL, ["http", "https"].contains(backdrop.scheme?.lowercased() ?? "")
+                else { continue }
+                art[record.id] = (backdrop, nil)
+            }
             for hero in heroes { art[hero.item.id] = (hero.backdropURL, hero.wordmarkURL) }
-            let pages = AppleTopShelfContentBuilder.carouselItems(for: snapshot)
+            let pages = AppleTopShelfContentBuilder.carouselItems(for: snapshot) {
+                $0.landscapeArtworkURL != nil || art[$0.id]?.backdrop != nil
+            }
                 .compactMap { page -> (id: String, backdrop: URL, wordmark: URL?)? in
                     let source = art[page.item.id]
                     guard let backdrop = source?.backdrop ?? page.imageURL else { return nil }
                     return (page.item.id, backdrop, source.flatMap(\.wordmark))
                 }
             let directory = AppleTopShelfArtworkStore.directory(in: root)
+            let posterItems = Self.serverPosters(shownContinued + shownRecent)
+            let saved = artwork.saved(pages: pages, posters: posterItems, in: directory)
+            if saved.pictures.count < pages.count || saved.posters.count < posterItems.count {
+                // The shelf goes out now with the art already saved; a slow or
+                // offline server must not hold Continue Watching back.
+                try Task.checkCancellation()
+                try save(snapshot.withShelfImages(saved.pictures).withShelfPosters(saved.posters), to: url)
+            }
             let names = await artwork.pictures(for: pages, in: directory)
+            let posters = await artwork.posters(for: posterItems, in: directory)
             // A newer publish is already on its way and will draw the rest.
             try Task.checkCancellation()
-            artwork.removeAll(in: directory, except: Set(names.values))
-            snapshot = snapshot.withShelfImages(names)
+            artwork.removeAll(in: directory, except: Set(names.values).union(posters.values))
+            snapshot = snapshot.withShelfImages(names).withShelfPosters(posters)
         }
         // The trailers already saved go out with this snapshot; the rest are
         // fetched apart from it (`AppleTopShelfTrailerDownloads`) and added to
@@ -659,6 +707,28 @@ public actor AppleTopShelfSnapshotWriter {
         try data.write(to: url, options: .atomic)
         #endif
         if notify { didChange() }
+    }
+
+    /// The Top Shelf's "Recently Added" row: movies and shows from media
+    /// servers, newest first, minus what Continue Watching already shows.
+    /// Without `sources` every record counts as a server's.
+    static func recentlyAddedFromServers(_ recent: [AppleMediaRecord], sources: [AppleSource]?,
+                                         excluding shown: Set<String>) -> [AppleMediaRecord] {
+        let servers = sources.map { Set($0.filter { $0.kind == .mediaServer }.map(\.id)) }
+        return Array(recent.filter { record in
+            [.movie, .series].contains(record.kind) && !shown.contains(record.id)
+                && (servers.map { ids in record.availability.contains { ids.contains($0.instanceID) } } ?? true)
+        }.prefix(20))
+    }
+
+    /// Posters a system surface may not fetch itself (a LAN host or plain
+    /// http, often the viewer's own server): the app saves a copy instead.
+    static func serverPosters(_ records: [AppleMediaRecord]) -> [(id: String, url: URL)] {
+        records.compactMap { record in
+            guard let url = record.artworkURL, AppleSystemArtworkPolicy.publicURL(url) == nil,
+                  ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return nil }
+            return (record.id, url)
+        }
     }
 
     /// A title's page, for the Home hero.

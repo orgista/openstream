@@ -74,6 +74,8 @@ import Testing
     @Test func serverOnlyLibraryIsVisibleInDiscover() {
         #expect(AppleCatalogShelfPolicy.hasDiscoverContent(hasLocalLibrary: false, hasMediaServerItems: true))
         #expect(!AppleCatalogShelfPolicy.hasDiscoverContent(hasLocalLibrary: false, hasMediaServerItems: false))
+        // Top 10 rows alone are something to show, not "Nothing to Show".
+        #expect(AppleCatalogShelfPolicy.hasDiscoverContent(hasLocalLibrary: false, hasMediaServerItems: false, hasTop10: true))
     }
 
     @Test func offlineRequestUsesOnlySavedFileAndNoServerCredentials() throws {

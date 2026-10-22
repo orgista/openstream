@@ -17,7 +17,15 @@ public enum SharedLink: Equatable, Sendable {
 
 public enum AppleSharedLinkError: Error, Equatable, LocalizedError {
     case unreadable
-    public var errorDescription: String? { "Couldn't read that link" }
+    /// The title is not in the viewer's sources and TMDB is not set up
+    /// (no key, or Settings › Metadata off).
+    case metadataUnavailable
+    public var errorDescription: String? {
+        switch self {
+        case .unreadable: "Couldn't read that link"
+        case .metadataUnavailable: "Metadata unavailable"
+        }
+    }
 }
 
 /// URL parsing only. No UI, networking or provider credentials.

@@ -693,18 +693,7 @@ public final class AppleSettingsStore {
         omdbAPIKey = load(SecretKey.omdbAPIKey)
         unreadableSecretAccounts = unreadable
         persistenceError = firstReadError
-        Self.removeRetiredServiceSettings(defaults: defaults, keychain: keychain)
         observeSystemCaptions()
-    }
-
-    /// Radarr, Sonarr, Trakt and the transcode gateway left the app
-    /// (2026-10-22). Their saved addresses and keys are deleted once, so
-    /// nothing of them stays on the device or reaches a backup.
-    static func removeRetiredServiceSettings(defaults: UserDefaults, keychain: any AppleCredentialStoring) {
-        guard !defaults.bool(forKey: DefaultsKey.retiredServicesRemoved) else { return }
-        for key in RetiredKey.defaults { defaults.removeObject(forKey: key) }
-        for account in RetiredKey.secrets { try? keychain.remove(account) }
-        defaults.set(true, forKey: DefaultsKey.retiredServicesRemoved)
     }
 
     private func observeSystemCaptions() {
@@ -725,6 +714,22 @@ public final class AppleSettingsStore {
         for observer in captionObservers {
             captionNotificationCenter.removeObserver(observer)
         }
+    }
+
+    /// Reads again the keys the Keychain refused at launch. True while one
+    /// is still unreadable.
+    func retryUnreadableSecrets() -> Bool {
+        for account in unreadableSecretAccounts {
+            let value: String
+            do { value = try keychain.string(for: account) ?? "" } catch { continue }
+            unreadableSecretAccounts.remove(account)
+            switch account {
+            case SecretKey.tmdbAPIKey: tmdbAPIKey = value
+            case SecretKey.omdbAPIKey: omdbAPIKey = value
+            default: break
+            }
+        }
+        return !unreadableSecretAccounts.isEmpty
     }
 
     public func clearPersistenceError() {
@@ -862,7 +867,6 @@ public final class AppleSettingsStore {
 
     private enum DefaultsKey {
         static let metadataEnabled = "openstream.settings.metadata.enabled.v1"
-        static let retiredServicesRemoved = "openstream.settings.retiredServicesRemoved.v1"
         static let captionsAutoOn = "openstream.settings.captions.autoOn.v1"
         static let captionsPreference = "openstream.settings.captions.preference.v1"
         static let autoPlayTrailer = "openstream.settings.trailer.autoplay.v1"
@@ -899,22 +903,6 @@ public final class AppleSettingsStore {
     private enum SecretKey {
         static let tmdbAPIKey = "metadata.tmdb.apiKey"
         static let omdbAPIKey = "metadata.omdb.apiKey"
-    }
-
-    /// What Radarr, Sonarr, Trakt and the transcode gateway kept.
-    enum RetiredKey {
-        static let defaults = [
-            "openstream.settings.radarr.url.v1", "openstream.settings.radarr.rootFolderPath.v1",
-            "openstream.settings.radarr.qualityProfileID.v1", "openstream.settings.sonarr.url.v1",
-            "openstream.settings.sonarr.rootFolderPath.v1", "openstream.settings.sonarr.qualityProfileID.v1",
-            "openstream.settings.gateway.enabled.v1", "openstream.settings.gateway.url.v1",
-        ]
-        static let secrets = [
-            "downloads.radarr.apiKey", "downloads.sonarr.apiKey", "transcode.gateway.token",
-            "trakt.client.id", "trakt.client.secret",
-            "backup.url.openstream.settings.radarr.url.v1", "backup.url.openstream.settings.sonarr.url.v1",
-            "backup.url.openstream.settings.gateway.url.v1",
-        ]
     }
 }
 

@@ -15,11 +15,12 @@ struct AppleSharedLinkResolution {
         switch link {
         case .imdb(let id):
             record = records.first { $0.canonicalID == id }
-            if record == nil, let configuration {
+            if record == nil {
+                guard let configuration else { throw AppleSharedLinkError.metadataUnavailable }
                 item = try? await tmdb.sharedLinkDetails(imdbID: id, configuration: configuration)
             }
         case .tmdb(let kind, let id):
-            guard let configuration else { throw AppleSharedLinkError.unreadable }
+            guard let configuration else { throw AppleSharedLinkError.metadataUnavailable }
             item = try await tmdb.sharedLinkDetails(id: id, kind: kind, configuration: configuration)
         }
         if item == nil, let record {

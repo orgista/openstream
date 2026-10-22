@@ -39,6 +39,16 @@ struct AppleSharedLinkResolverTests {
         #expect(AppleSharedLinkHandoff.deepLink(for: try #require(URL(string: "file:///tmp/movie"))) == nil)
     }
 
+    /// The Share extension saves a link only for one IMDb or TMDB title;
+    /// anything else leaves it showing its one-line "IMDb and TMDB" answer.
+    @Test func theShareSheetTakesOneTitleLinkFromURLOrText() {
+        #expect(AppleSharedLinkHandoff.deepLink(inShared: " https://www.themoviedb.org/movie/603 ") != nil)
+        #expect(AppleSharedLinkHandoff.deepLink(inShared: "Watch this https://m.imdb.com/title/tt1234567/") != nil)
+        #expect(AppleSharedLinkHandoff.deepLink(inShared: "https://imdb.com/title/tt1 and https://themoviedb.org/tv/2") == nil)
+        #expect(AppleSharedLinkHandoff.deepLink(inShared: "https://fixture.example/title/1") == nil)
+        #expect(AppleSharedLinkHandoff.deepLink(inShared: "no link here") == nil)
+    }
+
     @Test @MainActor func imdbIdentifierOpensTheViewersOwnTitle() async throws {
         let record = AppleMediaRecord(canonicalID: "tt1234567", kind: .series, title: "A Show", availability: [])
         let result = try await AppleSharedLinkResolution.resolve(.imdb("tt1234567"), records: [record], configuration: nil)
@@ -46,10 +56,16 @@ struct AppleSharedLinkResolverTests {
         #expect(result.item?.type == "series")
     }
 
-    @Test @MainActor func tmdbLinkWithoutAKeyIsUnreadable() async {
-        await #expect(throws: AppleSharedLinkError.unreadable) {
+    /// With no TMDB key a link to a title the viewer does not have says what
+    /// is missing instead of "Couldn't read that link".
+    @Test @MainActor func aLinkThatNeedsTMDBWithoutAKeySaysSo() async {
+        await #expect(throws: AppleSharedLinkError.metadataUnavailable) {
             try await AppleSharedLinkResolution.resolve(.tmdb(.movie, 123), records: [], configuration: nil)
         }
+        await #expect(throws: AppleSharedLinkError.metadataUnavailable) {
+            try await AppleSharedLinkResolution.resolve(.imdb("tt7654321"), records: [], configuration: nil)
+        }
+        #expect(AppleSharedLinkError.metadataUnavailable.errorDescription != AppleSharedLinkError.unreadable.errorDescription)
     }
 
     @Test @MainActor func sharedRouteClearsPreviousSearchPrefill() {
