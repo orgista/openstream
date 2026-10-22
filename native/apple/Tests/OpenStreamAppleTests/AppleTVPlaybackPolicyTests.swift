@@ -4,13 +4,13 @@ import Testing
 
 @Suite("Apple TV playback presentation policy")
 struct AppleTVPlaybackPolicyTests {
-    private func request(_ url: String, filename: String? = nil, notWebReady: Bool = false, isLive: Bool = false) -> ApplePlaybackRequest {
+    private func request(_ url: String, filename: String? = nil, isLive: Bool = false) -> ApplePlaybackRequest {
         ApplePlaybackRequest(
             url: URL(string: url)!,
             isLive: isLive,
             mediaID: "tt0111161",
             sourceKind: .mediaServer,
-            hints: ApplePlaybackRequest.Hints(notWebReady: notWebReady, filename: filename)
+            hints: ApplePlaybackRequest.Hints(filename: filename)
         )
     }
 
@@ -35,11 +35,6 @@ struct AppleTVPlaybackPolicyTests {
         #expect(AppleTVPlaybackPresentationPolicy.engineKind(for: mp4Hint, preferred: .openStream, isTV: true) == .native)
         #expect(AppleTVPlaybackPresentationPolicy.containerExtension(url: URL(string: "https://x/y.mp4")!, filename: "z.mkv") == "mkv")
         #expect(AppleTVPlaybackPresentationPolicy.containerExtension(url: URL(string: "https://x/y")!, filename: nil) == nil)
-    }
-
-    @Test func notWebReadyStreamsKeepTheDemuxer() {
-        let flagged = request("https://cdn.example/movie.mp4", notWebReady: true)
-        #expect(AppleTVPlaybackPresentationPolicy.engineKind(for: flagged, preferred: .openStream, isTV: true) == .openStream)
     }
 
     @Test func viewerChoiceOfNativeEngineIsKept() {
@@ -137,9 +132,8 @@ struct AppleTVPlaybackPolicyTests {
     }
 
     @Test func signatureIsDerivedFromTheRequest() {
-        let hinted = Policy.StreamSignature(request: request("https://server.example/dl/abc123", filename: "Movie.2024.2160p.mkv", notWebReady: true))
+        let hinted = Policy.StreamSignature(request: request("https://server.example/dl/abc123", filename: "Movie.2024.2160p.mkv"))
         #expect(hinted.container == "mkv")
-        #expect(hinted.notWebReady)
         #expect(!hinted.isNativeContainer)
         let mp4 = Policy.StreamSignature(request: request("https://cdn.example/movie.mp4"), videoCodec: "HEVC")
         #expect(mp4.container == "mp4")

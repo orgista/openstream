@@ -4,6 +4,15 @@ import Observation
 struct AppleCatalogSearchMatch: Equatable, Sendable {
     let item: AppleCatalogItem
     let source: AppleSource
+
+    /// A title known only from TMDB (a Top 10 row, a shared link) opens its
+    /// page with no source of its own.
+    static func metadataOnly(_ item: AppleCatalogItem) -> Self {
+        Self(item: item, source: metadataSource)
+    }
+
+    private static let metadataSource = AppleSource(kind: .library, name: "oStream",
+                                                    url: URL(string: "openstream://metadata")!)
 }
 
 struct AppleCatalogSearchMetrics: Equatable, Sendable {

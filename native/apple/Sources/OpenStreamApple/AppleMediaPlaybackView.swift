@@ -12,7 +12,8 @@ struct AppleMediaPlayerPresentation: Identifiable {
     let coordinator: ApplePlaybackCoordinator
     let securityScopedURL: URL?
     var sourceID: URL?
-    var sourceOptionsLoader: (() async throws -> ApplePlaybackSourceOptions)?
+    /// The title's other playable files, walked in order after a failure.
+    var sourceOptionsLoader: (() async throws -> [ApplePlaybackSourceOption])?
     /// Set when the thing being played is an episode with a successor.
     var nextEpisode: AppleNextEpisodeContext?
     /// The engine this one play uses instead of `settings.playbackEngine`
@@ -102,21 +103,9 @@ struct AppleMediaPlayerView: View {
     /// Rows of the More menu on screen: the auto-hide removed the open menu
     /// after three seconds (full test 2026-09-30), so it waits while > 0.
     @State private var nativeMenuOpenItems = 0
-    @State private var showsOtherSources = false
     @State private var sleepTimerMenu = false
-    /// What the fallback loop walks after a failure: Automatic's order, or
-    /// the picked resolution's once one is picked.
-    @State private var otherSources: [ApplePlaybackSourceOption] = []
-    @State private var sourceOptions: ApplePlaybackSourceOptions?
-    @State private var quality = AppleStreamQualityChoice.automatic
-    /// The quality switch in flight: replaced by a newer choice and cancelled
-    /// when the player goes away, so a slow `prepare` can never start
-    /// playback after the viewer closed it (review of f555eaa).
-    @State private var qualitySwitch: Task<Void, Never>?
-    /// The source on screen, so picking the quality already playing is a no-op.
-    @State private var playingSource: URL?
-    @State private var sourceError: String?
-    @State private var isLoadingSources = false
+    /// What the fallback loop walks after a failure; nil until first loaded.
+    @State private var otherSources: [ApplePlaybackSourceOption]?
     @State private var sourceIdentities: [URL: URL] = [:]
     @State private var triedSources = Set<URL>()
     /// Set once the engine has picked a route. From then on the route's own
@@ -142,7 +131,7 @@ struct AppleMediaPlayerView: View {
     private let request: ApplePlaybackRequest
     private let fallbackCandidates: [ApplePlaybackRequest]
     private let sourceID: URL
-    private let sourceOptionsLoader: (() async throws -> ApplePlaybackSourceOptions)?
+    private let sourceOptionsLoader: (() async throws -> [ApplePlaybackSourceOption])?
     private let securityScopedURL: URL?
     private let nextEpisode: AppleNextEpisodeContext?
     private let presentationID: UUID
@@ -219,20 +208,20 @@ struct AppleMediaPlayerView: View {
             if usesTransportOverlay, !discMenuIsVisible {
                 #if os(visionOS)
                 AppleTransportOverlay(coordinator: coordinator, request: request,
-                    otherSources: qualityPickerAction, onClose: closePlayer,
+                    onClose: closePlayer,
                     nextEpisode: nextEpisode)
                 #elseif os(tvOS)
                 AppleTransportOverlay(coordinator: coordinator, request: request,
-                    otherSources: qualityPickerAction, onClose: closeFromRemote,
+                    onClose: closeFromRemote,
                     nextEpisode: nextEpisode)
                 #elseif os(macOS)
                 // Its top bar keeps to the safe area, under the traffic lights.
                 AppleTransportOverlay(coordinator: coordinator, request: request,
-                    otherSources: qualityPickerAction, onClose: closePlayer,
+                    onClose: closePlayer,
                     nextEpisode: nextEpisode)
                 #else
                 AppleTransportOverlay(coordinator: coordinator, request: request,
-                    otherSources: qualityPickerAction, onClose: closePlayer,
+                    onClose: closePlayer,
                     nextEpisode: nextEpisode, onPictureInPicture: pictureInPictureAction)
                 #endif
             }
@@ -355,11 +344,6 @@ struct AppleMediaPlayerView: View {
             if coordinator.route == .avPlayer && nativeMenuVisible {
                 Menu {
                     AppleSleepTimerMenu(coordinator: coordinator)
-                    if sourceOptionsLoader != nil {
-                        Button("Quality", systemImage: "slider.horizontal.3") { showsOtherSources = true }
-                            .onAppear { nativeMenuOpenItems += 1 }
-                            .onDisappear { nativeMenuOpenItems = max(0, nativeMenuOpenItems - 1) }
-                    }
                     if showsAppSubtitleMenu {
                         Menu("Subtitles", systemImage: "captions.bubble") {
                             ForEach(stockSubtitles.menuEntries) { entry in
@@ -451,16 +435,6 @@ struct AppleMediaPlayerView: View {
                 Text("Trying another source").foregroundStyle(.white).shadow(color: .black, radius: 2).padding()
             }
         }
-        .sheet(isPresented: $showsOtherSources) {
-            otherSourcesSheet
-                #if os(visionOS)
-                .frame(width: 720, height: 540)
-                #elseif os(macOS)
-                // A list in a Mac sheet has no height of its own; it came up
-                // one row tall.
-                .frame(width: 360, height: 300)
-                #endif
-        }
         .task(id: coordinator.fallbackNoticeGeneration) {
             guard coordinator.fallbackNoticeGeneration > 0 else { return }
             showsFallbackNotice = true
@@ -506,17 +480,16 @@ struct AppleMediaPlayerView: View {
             }
             coordinator.nextAutomaticSource = {
                 try await loadOtherSources()
-                for option in otherSources
+                for option in otherSources ?? []
                 where !triedSources.contains(option.id) && !ApplePlaybackFailureHistory.shared.contains(option.id) {
                     triedSources.insert(option.id)
                     do {
-                        let next = try await option.prepare(nil)
+                        let next = try await option.prepare()
                         sourceIdentities[next.request.url] = option.id
-                        playingSource = option.id
                         securityAccess = next.securityScopedURL.map(AppleSecurityScopedAccess.init(url:))
                         return next.request
                     } catch is CancellationError { throw CancellationError() }
-                    catch { ApplePlaybackFailureHistory.shared.record(option.id); sourceError = error.localizedDescription }
+                    catch { ApplePlaybackFailureHistory.shared.record(option.id) }
                 }
                 return nil
             }
@@ -545,7 +518,6 @@ struct AppleMediaPlayerView: View {
             if AppleTVPictureInPicture.shared.holds(host) { return }
             AppleTVPictureInPicture.shared.unregister(host)
             #endif
-            qualitySwitch?.cancel()
             coordinator.nextAutomaticSource = nil
             coordinator.onSourceFailure = nil
             #if os(tvOS)
@@ -726,12 +698,6 @@ struct AppleMediaPlayerView: View {
     }
     #endif
 
-    /// Opens the Quality sheet; nil (no entry at all) when the source has
-    /// no alternatives to offer, such as a file opened directly.
-    private var qualityPickerAction: (() -> Void)? {
-        sourceOptionsLoader == nil ? nil : { showsOtherSources = true }
-    }
-
     #if os(iOS)
     private var pictureInPictureAction: (() -> Void)? {
         guard coordinator.route == .avPlayer, AVPictureInPictureController.isPictureInPictureSupported() else { return nil }
@@ -746,10 +712,7 @@ struct AppleMediaPlayerView: View {
 
     private func installSourceMenu() {
         #if os(tvOS)
-        var items: [UIMenuElement] = sourceOptionsLoader == nil ? [] : [
-            UIAction(title: "Quality", image: UIImage(systemName: "slider.horizontal.3")) { _ in
-                showsOtherSources = true
-            }]
+        var items: [UIMenuElement] = []
         if drawsStockPlayerCues {
             // One captions control for embedded and sidecar tracks. The app's
             // menu drives selection; AVKit draws native embedded tracks and
@@ -792,70 +755,10 @@ struct AppleMediaPlayerView: View {
     }
 
     private func loadOtherSources() async throws {
-        guard sourceOptions == nil, let sourceOptionsLoader else { return }
-        isLoadingSources = true
-        defer { isLoadingSources = false }
-        let options = try await sourceOptionsLoader()
-        sourceOptions = options
-        otherSources = options.order(for: quality)
+        guard otherSources == nil, let sourceOptionsLoader else { return }
+        otherSources = try await sourceOptionsLoader()
     }
 
-    /// Automatic and one row per resolution this device can play; the
-    /// backend picks the candidate (`AppleMediaCandidateRanking.playbackOrder`).
-    private var otherSourcesSheet: some View {
-        NavigationStack {
-            List {
-                if isLoadingSources { ProgressView().tint(.white) }
-                if let sourceError { Text(sourceError) }
-                qualityRow(.automatic, title: "Automatic", badges: sourceOptions?.rowBadges(for: .automatic) ?? [])
-                ForEach(sourceOptions?.tiers ?? [], id: \.self) { tier in
-                    qualityRow(.tier(tier), title: tier.title, badges: sourceOptions?.rowBadges(for: .tier(tier)) ?? [])
-                }
-            }
-            .scrollIndicators(.hidden)
-            .navigationTitle("Quality")
-            #if os(macOS)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Done") { showsOtherSources = false } }
-            }
-            #elseif os(iOS) || os(visionOS)
-            // A way out besides swiping the sheet down (iPhone 27 v2 re-run).
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { showsOtherSources = false }
-                        .accessibilityIdentifier("player.quality.done")
-                }
-            }
-            #endif
-            .task {
-                do { try await loadOtherSources() }
-                catch { sourceError = error.localizedDescription }
-            }
-        }
-        .tint(.primary)
-    }
-
-    private func qualityRow(_ choice: AppleStreamQualityChoice, title: String,
-                            badges: [AppleStreamFormatBadge] = []) -> some View {
-        Button {
-            qualitySwitch?.cancel()
-            qualitySwitch = Task { await switchQuality(to: choice) }
-        } label: {
-            HStack {
-                Text(title)
-                if !badges.isEmpty { AppleStreamFormatBadgeInline(badges: badges) }
-                Spacer()
-                if quality == choice { Image(systemName: "checkmark").accessibilityHidden(true) }
-            }
-            .contentShape(.rect)
-        }
-        .accessibilityAddTraits(quality == choice ? .isSelected : [])
-        .accessibilityIdentifier("player.quality.\(title)")
-    }
-
-    /// Plays the best candidate for `choice` from where the viewer is, and
-    /// makes its order the fallback for a later failure. Nothing restarts
-    /// when that candidate is the one already playing.
     /// The stock player has no Next Episode card, so its end hands over the
     /// way the custom overlay's countdown does: the title page starts the
     /// next episode and swaps this player for it (tvOS stock route never
@@ -882,31 +785,6 @@ struct AppleMediaPlayerView: View {
         return true
     }
 
-    private func switchQuality(to choice: AppleStreamQualityChoice) async {
-        guard let options = sourceOptions else { return }
-        let order = options.order(for: choice)
-        let playing = playingSource ?? sourceID
-        let position = coordinator.engine.position
-        quality = choice
-        otherSources = order
-        showsOtherSources = false
-        guard order.first?.id != playing else { return }
-        triedSources = []
-        for option in order where !triedSources.contains(option.id) {
-            triedSources.insert(option.id)
-            do {
-                let next = try await option.prepare(position > 1 ? position : nil)
-                guard !Task.isCancelled else { return }
-                sourceIdentities[next.request.url] = option.id
-                securityAccess = next.securityScopedURL.map(AppleSecurityScopedAccess.init(url:))
-                playingSource = option.id
-                await coordinator.begin(next.request, fallbackCandidates: [])
-                return
-            } catch is CancellationError { return }
-            catch { sourceError = error.localizedDescription }
-        }
-    }
-
     @ViewBuilder
     private var platformPlayer: some View {
         #if os(macOS)
@@ -925,8 +803,7 @@ struct AppleMediaPlayerView: View {
                 stockSubtitles.refresh(from: coordinator.engine)
             },
             subtitleTiming: coordinator.subtitleTiming,
-            onChangeSubtitleTiming: { coordinator.subtitleTiming.apply($0) },
-            onOtherSources: qualityPickerAction
+            onChangeSubtitleTiming: { coordinator.subtitleTiming.apply($0) }
         )
         #elseif os(visionOS)
         if let visionHost {

@@ -295,48 +295,6 @@ struct AppleChannelHealthTests {
         #expect(entry.outcomes.first?.checkedAt == Date(timeIntervalSince1970: 2))
     }
 
-    @Test func exportOnlyOnlinePreservesOriginalEXTINFAndHeaders() throws {
-        let original = "#EXTINF:-1 tvg-id=\"fixture\" custom=\"keep exactly\",Fixture  Name"
-        let input = "#EXTM3U\n\(original)\n#EXTVLCOPT:http-user-agent=FixtureAgent\nhttps://fixture.example/online\n#EXTINF:-1,Other\nhttps://fixture.example/offline\n"
-        let lineup = try AppleIPTVClient.parseM3U(Data(input.utf8), sourceID: UUID(), baseURL: URL(string: "https://fixture.example/")!)
-        let first = try #require(lineup.first)
-        let last = try #require(lineup.last)
-        let health = [first.id: AppleChannelHealthResult(channelID: first.id, bucket: .online),
-                      last.id: AppleChannelHealthResult(channelID: last.id, bucket: .reachable)]
-        let exported = AppleWorkingM3UExport.text(lineup: lineup, health: health, includesCredentials: true)
-        #expect(exported.contains(original + "\n"))
-        #expect(exported.contains("#EXTVLCOPT:http-user-agent=FixtureAgent"))
-        #expect(exported.contains("https://fixture.example/online"))
-        #expect(exported.contains("https://fixture.example/offline") == false)
-        #expect(first.withGuideURL(nil).originalEXTINF == original)
-    }
-
-    @Test func exportRequiresExplicitCredentialChoice() {
-        let channel = AppleIPTVChannel(id: "fixture", sourceID: UUID(), name: "Fixture",
-            streamURL: URL(string: "https://fixture.example/live/fixture-user/fixture-password/1.ts?token=fixture-token")!,
-            referer: "https://fixture.example/private?token=fixture-secret",
-            originalEXTINF: "#EXTINF:-1 opaque=\"fixture-metadata-secret\",Fixture")
-        let health = ["fixture": AppleChannelHealthResult(channelID: "fixture", bucket: .online)]
-        let safe = AppleWorkingM3UExport.text(lineup: [channel], health: health)
-        for secret in ["fixture-user", "fixture-password", "fixture-token", "fixture-secret", "fixture-metadata-secret"] {
-            #expect(safe.contains(secret) == false)
-        }
-        let full = AppleWorkingM3UExport.text(lineup: [channel], health: health, includesCredentials: true)
-        #expect(full.contains(channel.streamURL.absoluteString))
-        #expect(full.contains("https://fixture.example/private?token=fixture-secret"))
-    }
-
-    @Test func redactedExportRemovesOpaqueURLSuffixesAndHeaders() {
-        let channel = AppleIPTVChannel(id: "opaque", sourceID: UUID(), name: "Fixture",
-            streamURL: URL(string: "https://fixture.example/public'opaque-private-secret")!,
-            referer: "https://fixture.example/public'header-private-secret")
-        let output = AppleWorkingM3UExport.text(lineup: [channel],
-            health: ["opaque": .init(channelID: "opaque", bucket: .online)])
-        #expect(output.contains("opaque-private-secret") == false)
-        #expect(output.contains("header-private-secret") == false)
-        #expect(output.contains("#EXTINF:-1,Fixture"))
-    }
-
     /// The body stalls after the headers and its first byte, so the request
     /// only ends when its resource timeout runs out, counted from the request.
     /// The answer started before that (status 200), so a first byte timed at

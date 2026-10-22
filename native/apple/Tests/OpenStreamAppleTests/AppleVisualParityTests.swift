@@ -81,11 +81,6 @@ struct AppleVisualParityTests {
         #expect(caption.contains(".multilineTextAlignment(.leading)"))
     }
 
-    @Test func unresolvedTop10CardHasNoSpinnerBesideItsTitle() throws {
-        let card = try Self.declaration("private struct AppleTop10SearchCard", in: Self.source("AppleDiscoverView.swift"))
-        #expect(!card.contains("ProgressView"))
-    }
-
     @Test func tabEmptyStatesCarryTheTabSymbol() throws {
         #expect(try Self.source("AppleMediaSourceViews.swift").contains("systemImage: OpenStreamTab.library.systemImage"))
         #expect(try Self.source("AppleMediaSourceViews.swift").contains("systemImage: OpenStreamTab.live.systemImage"))

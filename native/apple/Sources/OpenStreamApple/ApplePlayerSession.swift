@@ -79,8 +79,7 @@ public final class ApplePlayerSession {
         #endif
     }
 
-    /// Consumes the result of `ApplePlaybackPreparer` directly. Gateway
-    /// preparation returns a scoped bearer URL, never global auth headers.
+    /// Consumes the result of `ApplePlaybackPreparer` directly.
     public convenience init(
         preparedPlayback: ApplePreparedPlayback,
         resumeAt seconds: Double = 0,

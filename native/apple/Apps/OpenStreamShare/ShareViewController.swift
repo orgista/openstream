@@ -23,10 +23,8 @@ final class ShareViewController: UIViewController {
                         }
                         guard !Task.isCancelled else { return }
                         guard let text, let url = Self.webURL(in: text), let deepLink = AppleSharedLinkHandoff.deepLink(for: url) else { continue }
-                        // Persist before attempting to open: a Share extension has no supported app-opening API.
+                        // The app opens it the next time it comes to the front.
                         AppleSharedLinkHandoff.save(deepLink)
-                        ShareAppOpener.open(deepLink, from: self)
-                        try? await Task.sleep(for: .milliseconds(250))
                         extensionContext?.completeRequest(returningItems: nil)
                         return
                     }

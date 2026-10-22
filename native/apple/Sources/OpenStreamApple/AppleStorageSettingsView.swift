@@ -122,7 +122,6 @@ struct AppleStorageSettingsView: View {
     var body: some View {
         Form {
             Section("Usage") {
-                LabeledContent("Download Quality", value: "Automatic")
                 LabeledContent("Cache", value: format(snapshot.cacheBytes))
                 LabeledContent("Metadata", value: format(snapshot.metadataBytes))
                 LabeledContent("Downloads", value: format(snapshot.downloadBytes))

@@ -62,7 +62,7 @@ for platform in iOS tvOS visionOS macOS; do
     app="$(find "$archive/Products/Applications" -mindepth 1 -maxdepth 1 -type d -name '*.app')"
     [[ -d "$app" ]] || { echo "FAIL: missing $platform app"; exit 1; }
     python3 "$root/scripts/release/release-metadata.py" verify-app "$app" "$version" "$build"
-    bash "$root/scripts/check-no-addons-in-release.sh" "$app" > "$release/no-addons-$platform.log" 2>&1 || { echo "FAIL: $platform ships add-on words"; exit 1; }
+    bash "$root/scripts/check-appstore-compliance.sh" "$app" > "$release/compliance-$platform.log" 2>&1 || { echo "FAIL: $platform fails the App Store compliance check"; exit 1; }
     stage="$(mktemp -d /tmp/openstream-package.XXXXXX)"
     if [[ "$platform" == macOS ]]; then
         ditto "$app" "$stage/oStream.app"

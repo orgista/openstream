@@ -7,6 +7,8 @@ public struct AppleConfigurationSecrets: Codable, Equatable, Sendable {
     public var sourceAddresses: [UUID: URL] = [:]
     public var guideAddresses: [UUID: URL] = [:]
     public var settingsCredentials: [String: String] = [:]
+    /// Always empty since the retired services left (2026-10-22); written so
+    /// builds before that still read a new backup.
     public var privateSettings: [String: Data] = [:]
 
     public init(sourceCredentials: [UUID: String] = [:], sourceAddresses: [UUID: URL] = [:],

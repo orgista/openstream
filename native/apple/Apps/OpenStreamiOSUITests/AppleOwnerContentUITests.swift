@@ -86,7 +86,7 @@ final class AppleOwnerContentUITests: OpenStreamUITestCase {
         launch([])
         tab("Library")
         let title = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ OR identifier BEGINSWITH %@",
-                                                     "library.title.", "home.media.")).firstMatch
+                                                     "library.title.", "home.ms.")).firstMatch
         // The first scan of a large share takes a while.
         guard check(title.waitForExistence(timeout: 240), "b-no-library-titles", "Library shows no titles from the share") else { return }
         Thread.sleep(forTimeInterval: 3)
@@ -96,7 +96,6 @@ final class AppleOwnerContentUITests: OpenStreamUITestCase {
         guard check(play.waitForExistence(timeout: 30), "b-no-title-page", "the Library title page has no Play") else { return }
         attach("b-library-title")
         play.tap()
-        chooseFirstSourceIfAsked()
         Thread.sleep(forTimeInterval: 15)
         attach("b-library-playing-15s")
         check(!playbackFailed(), "b-playback-failed", "Library playback failed: \(alertText())")
@@ -143,7 +142,7 @@ final class AppleOwnerContentUITests: OpenStreamUITestCase {
     func testDDiscoverRowsAndTrailer() {
         launch([])
         tab("Discover")
-        let poster = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "home.media.")).firstMatch
+        let poster = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "home.ms.")).firstMatch
         guard check(poster.waitForExistence(timeout: 90), "d-no-rows", "Discover shows no posters") else { return }
         Thread.sleep(forTimeInterval: 5)
         let shelves = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "discover.shelf.")).count
@@ -425,12 +424,6 @@ final class AppleOwnerContentUITests: OpenStreamUITestCase {
     private func tab(_ name: String) {
         let button = app.tabBars.buttons[name].firstMatch
         if button.waitForExistence(timeout: 20) { button.tap() } else { XCTFail("no \(name) tab") }
-    }
-
-    /// A title with several files or sources may ask which one to play.
-    private func chooseFirstSourceIfAsked() {
-        let quality = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "detail.quality.")).firstMatch
-        if quality.waitForExistence(timeout: 4), quality.isHittable { quality.tap() }
     }
 
     /// Swipes the page up until `element`'s row is on screen (at most 8

@@ -5,8 +5,13 @@ public enum AppleSharedLinkHandoff {
     private static let group = "group.com.orgista.openstream"
     private static let key = "OpenStreamPendingSharedLink"
 
+    /// IMDb and TMDB title pages, which the app resolves through TMDB's API.
+    static let supportedHosts: Set<String> = ["imdb.com", "www.imdb.com", "m.imdb.com",
+                                              "themoviedb.org", "www.themoviedb.org"]
+
     public static func deepLink(for url: URL) -> URL? {
         guard ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
+              supportedHosts.contains(url.host?.lowercased() ?? ""),
               url.user == nil, url.password == nil, url.absoluteString.count <= 8_192 else { return nil }
         var components = URLComponents(string: "openstream://open")
         components?.queryItems = [URLQueryItem(name: "url", value: url.absoluteString)]

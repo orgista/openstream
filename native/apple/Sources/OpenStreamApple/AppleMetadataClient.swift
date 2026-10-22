@@ -227,6 +227,10 @@ public enum AppleTrailerPreviewPolicy {
         displayScale < 2 ? 2 : 1
     }
 
+    /// The page that hosts YouTube's player: the publisher's own domain, as
+    /// the IFrame API asks (`origin`), never YouTube's frame itself.
+    static let embedOrigin = URL(string: "https://orgista.com")!
+
     public static func embedURL(for key: String?, quality: String = "hd2160") -> URL? {
         guard let key = validYouTubeKey(key),
               var components = URLComponents(string: "https://www.youtube-nocookie.com/embed/\(key)") else {
@@ -244,7 +248,7 @@ public enum AppleTrailerPreviewPolicy {
             URLQueryItem(name: "rel", value: "0"),
             URLQueryItem(name: "fs", value: "0"),
             URLQueryItem(name: "vq", value: quality),
-            URLQueryItem(name: "origin", value: "https://openstream.app"),
+            URLQueryItem(name: "origin", value: embedOrigin.absoluteString),
         ]
         return components.url
     }
@@ -482,29 +486,25 @@ public struct AppleTMDBClient: Sendable {
         return nil
     }
 
-    /// A chart title (Netflix Top 10) to one TMDB title with its art. Only an exact name (or original
-    /// name) counts, "The" aside; between equal names the newest release wins, since a chart lists
-    /// what is new. A series title that TMDB only knows as a film (stand-up, specials) is tried as one.
-    func top10Search(title: String, type: String, configuration: AppleTMDBConfiguration) async throws -> AppleCatalogItem? {
-        let kinds: [SharedLink.Kind] = type == "movie" ? [.movie] : [.show, .movie]
-        let names = [title, AppleTop10ArtworkLookup.anthologySeries(of: title, type: type)].compactMap { $0 }
-        for kind in kinds {
-            for name in names {
-                let result = try await load(path: "/3/search/\(kind == .movie ? "movie" : "tv")",
-                                            queryItems: [.init(name: "query", value: name)],
-                                            configuration: configuration, as: SharedSearchEnvelope.self)
-                let wanted = AppleTop10ArtworkLookup.chartKey(name)
-                let exact = result.results.filter { value in
-                    [value.title, value.name, value.originalTitle, value.originalName].contains {
-                        $0.map(AppleTop10ArtworkLookup.chartKey) == wanted
-                    }
+    /// TMDB's ten most popular titles of the week for `type` ("movie" or
+    /// "series"), in chart order, each with its full details (external ids,
+    /// art); a title whose details fail keeps the chart's own entry.
+    func weeklyTop10(type: String, configuration: AppleTMDBConfiguration) async throws -> [AppleCatalogItem] {
+        let kind: SharedLink.Kind = type == "movie" ? .movie : .show
+        let chart = try await load(path: "/3/trending/\(kind == .movie ? "movie" : "tv")/week", queryItems: [],
+                                   configuration: configuration, as: SharedSearchEnvelope.self)
+        let entries = Array(chart.results.prefix(10))
+        return await withTaskGroup(of: (Int, AppleCatalogItem?).self) { group in
+            for (rank, entry) in entries.enumerated() {
+                group.addTask {
+                    let details = try? await sharedLinkDetails(id: entry.id, kind: kind, configuration: configuration)
+                    return (rank, details ?? entry.item(kind: kind))
                 }
-                guard let newest = exact.max(by: { ($0.releaseDate ?? $0.firstAirDate ?? "") < ($1.releaseDate ?? $1.firstAirDate ?? "") })
-                else { continue }
-                return try await sharedLinkDetails(id: newest.id, kind: kind, configuration: configuration)
             }
+            var ranked = [AppleCatalogItem?](repeating: nil, count: entries.count)
+            for await (rank, item) in group { ranked[rank] = item }
+            return ranked.compactMap { $0 }
         }
-        return nil
     }
 
     private struct SharedSearchEnvelope: Decodable, Sendable { let results: [SharedTitleEnvelope] }
@@ -889,9 +889,11 @@ public struct AppleTMDBClient: Sendable {
     }
 
     public static func liveLoader(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        #if DEBUG
         if let root = AppleNetworkStub.root {
             return try AppleNetworkStub.response(for: request, root: root)
         }
+        #endif
         return try await credentialSafeSession.data(for: request)
     }
 }

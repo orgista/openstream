@@ -16,7 +16,7 @@ import UIKit
 final class AppleDeviceSmokeUITests: OpenStreamUITestCase {
     private var app: XCUIApplication!
     private let environment = ProcessInfo.processInfo.environment
-    private static let maydayURL = "https://tv.apple.com/us/movie/mayday/umc.cmc.shin43vzfoz3h4ggx41z8rf"
+    private static let titleLinkURL = "https://www.imdb.com/title/tt0111161/"
     private static let playlistName = "Device Smoke Playlist"
 
     override func setUpWithError() throws {
@@ -43,7 +43,7 @@ final class AppleDeviceSmokeUITests: OpenStreamUITestCase {
     // MARK: a. Trailer
 
     /// Adds the demo server and watches the Discover billboard for 10 s, then
-    /// opens a title that has a trailer (Mayday, through the app's own shared
+    /// opens a title that has a trailer (an IMDb link, through the app's own shared
     /// link URL) and waits 10 s on its page. The demo server's open movies
     /// carry no trailer, so the title page is the one that proves the device
     /// path. The run script asserts `trailer native reveal: live viewport
@@ -53,9 +53,9 @@ final class AppleDeviceSmokeUITests: OpenStreamUITestCase {
         app.tabBars.buttons["Discover"].firstMatch.tap()
         Thread.sleep(forTimeInterval: 10)
         attach("a-trailer-discover-hero")
-        app.open(Self.sharedLinkURL(Self.maydayURL))
+        app.open(Self.sharedLinkURL(Self.titleLinkURL))
         let page = app.buttons["detail.play"].firstMatch
-        check(page.waitForExistence(timeout: 30), "a-no-title-page", "Mayday's title page never opened")
+        check(page.waitForExistence(timeout: 30), "a-no-title-page", "the linked title page never opened")
         Thread.sleep(forTimeInterval: 10)
         attach("a-trailer-title-page-10s")
     }
@@ -134,12 +134,12 @@ final class AppleDeviceSmokeUITests: OpenStreamUITestCase {
         safari.terminate()
         launch(["-OpenStreamVisionScreen", "search"])
         let button = app.descendants(matching: .any).matching(identifier: "search.openCopiedLink").firstMatch
-        check(button.waitForExistence(timeout: 15), "c-no-button", "no Open Copied Link with a tv.apple.com URL copied")
+        check(button.waitForExistence(timeout: 15), "c-no-button", "no Open Copied Link with an IMDb URL copied")
         attach("c-copied-link-button")
         button.tap()
         let outcome = waitForSharedLinkOutcome()
         attach("c-copied-link-\(outcome)")
-        XCTAssertNotEqual(outcome, "nothing", "Open Copied Link opened neither a title page nor Search")
+        XCTAssertNotEqual(outcome, "nothing", "Open Copied Link opened no title page")
     }
 
     // MARK: d. Share sheet
@@ -189,7 +189,7 @@ final class AppleDeviceSmokeUITests: OpenStreamUITestCase {
         }
         let outcome = waitForSharedLinkOutcome()
         attach("d-handoff-\(path)-\(outcome)")
-        XCTAssertNotEqual(outcome, "nothing", "the shared link opened neither a title page nor Search (\(path) path)")
+        XCTAssertNotEqual(outcome, "nothing", "the shared link opened no title page (\(path) path)")
     }
 
     // MARK: Helpers
@@ -208,7 +208,7 @@ final class AppleDeviceSmokeUITests: OpenStreamUITestCase {
         XCTFail(message)
     }
 
-    /// Safari on the Mayday page with its share sheet open.
+    /// Safari on an IMDb title page with its share sheet open.
     private func shareFromSafari() -> XCUIApplication {
         XCUIDevice.shared.press(.home)
         let safari = XCUIApplication(bundleIdentifier: "com.apple.mobilesafari")
@@ -217,7 +217,7 @@ final class AppleDeviceSmokeUITests: OpenStreamUITestCase {
             ["TabBarItemTitle", "URL", "Address", "UnifiedTabBarItemView"])).firstMatch
         if address.waitForExistence(timeout: 10) { address.tap() }
         else { safari.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.93)).tap() }
-        safari.typeText(Self.maydayURL + "\n")
+        safari.typeText(Self.titleLinkURL + "\n")
         Thread.sleep(forTimeInterval: 6)
         attach("safari-page")
         let share = safari.buttons["ShareButton"].exists ? safari.buttons["ShareButton"] : safari.buttons["Share"].firstMatch
@@ -249,24 +249,19 @@ final class AppleDeviceSmokeUITests: OpenStreamUITestCase {
         add(shot)
     }
 
-    /// "title" (a title page), "search" (Search prefilled with the title) or "nothing".
+    /// "title" (a title page) or "nothing".
     private func waitForSharedLinkOutcome() -> String {
-        let any = app.descendants(matching: .any)
-        let title = any.matching(NSPredicate(format: "identifier IN %@", ["detail.play", "detail.about", "detail.watchOn"])).firstMatch
-        let field = app.searchFields.firstMatch
-        let deadline = Date().addingTimeInterval(30)
-        while Date() < deadline {
-            if title.exists { Thread.sleep(forTimeInterval: 2); return "title" }
-            Thread.sleep(forTimeInterval: 0.5)
-        }
-        if field.exists, (field.value as? String)?.localizedCaseInsensitiveContains("Mayday") == true { return "search" }
-        return "nothing"
+        let title = app.descendants(matching: .any).matching(NSPredicate(format: "identifier IN %@",
+            ["detail.play", "detail.about", "detail.watchOn"])).firstMatch
+        guard title.waitForExistence(timeout: 30) else { return "nothing" }
+        Thread.sleep(forTimeInterval: 2)
+        return "title"
     }
 
     /// Settings › Sources › Add Live TV › M3U Playlist › name + URL › Save.
     private func addPlaylist(_ playlist: String) {
         launch(["-OpenStreamVisionScreen", "add-live"])
-        let picker = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Xtream Account")).firstMatch
+        let picker = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Provider Login")).firstMatch
         XCTAssertTrue(picker.waitForExistence(timeout: 20), "no Type picker")
         picker.tap()
         let m3u = app.buttons["M3U Playlist"].firstMatch

@@ -3,7 +3,7 @@ import Testing
 @testable import OpenStreamApple
 
 /// Owner decisions of 2026-10-01 from the App Store compliance audit (B4–B6):
-/// no service brands on Discover rows, Netflix Top 10 off by default, and no
+/// no service brands on Discover rows, Top 10 lists off by default, and no
 /// channel lineup in the shipped app.
 @Suite("App Store compliance policy")
 struct AppleStoreCompliancePolicyTests {
@@ -30,7 +30,7 @@ struct AppleStoreCompliancePolicyTests {
         // Disk paths, wire identifiers and log output retain compatibility.
         let compatibilityLiterals: Set<String> = [
             "OpenStream", "OpenStream/BackgroundDownloads", "OpenStream Diagnostics.txt",
-            "OpenStream Working Channels.m3u", "OpenStream/1.0 Apple",
+            "OpenStream/1.0 Apple",
             "OpenStream/", "OpenStream/ (+https://orgista.com/support)",
             "OpenStream/Offline", "OpenStream/Metadata", "OpenStream/LiveChannels",
             "OpenStream/Playlists", "OpenStream/ChannelHealth",
@@ -70,7 +70,7 @@ struct AppleStoreCompliancePolicyTests {
         #expect(offenders.isEmpty, "Old app name: \(offenders.joined(separator: "; "))")
     }
 
-    // MARK: B5 — Netflix Top 10 off by default
+    // MARK: B5 — Top 10 lists off by default
 
     @MainActor
     @Test("Top 10 lists are off until the viewer turns them on")

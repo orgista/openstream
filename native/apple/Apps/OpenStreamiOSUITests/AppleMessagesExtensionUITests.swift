@@ -33,9 +33,8 @@ final class AppleMessagesExtensionUITests: OpenStreamUITestCase {
         let host = XCUIApplication(bundleIdentifier: "com.orgista.openstream")
         defer { if fixtureRun { host.terminate() } }
         if fixtureRun {
-            host.launchArguments = Self.stubbedLaunchArguments + [
-                "-OpenStreamStubContinueWatching", "YES", "-OpenStreamVisionScreen", "discover",
-            ]
+            // The fixture Jellyfin resumes Stub Movie Six (`Tests/Fixtures/serve.py`).
+            host.launchArguments = Self.stubbedLaunchArguments + ["-OpenStreamVisionScreen", "discover"]
             configureFixtureLaunch(host)
             host.launch()
             let continued = host.descendants(matching: .any).matching(NSPredicate(format:

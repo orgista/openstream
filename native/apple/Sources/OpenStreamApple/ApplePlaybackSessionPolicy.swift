@@ -19,36 +19,6 @@ enum ApplePlaybackSessionPolicy: Equatable, Sendable {
         self == .playback && hasPlaybackRequest
     }
 
-    /// Installed at document start in every frame, including the provider iframe.
-    /// WebKit's automatic audio behavior is separately constrained by ambient audio.
-    var webMediaSessionSuppressionScript: String {
-        guard !publishesNowPlaying, !registersRemoteCommands else { return "" }
-        return """
-        (() => {
-          const session = navigator.mediaSession;
-          if (!session) return;
-          const attempt = (action) => { try { action(); } catch (_) {} };
-          const setActionHandler = session.setActionHandler?.bind(session);
-          const actions = ['play', 'pause', 'stop', 'seekbackward', 'seekforward',
-                           'seekto', 'previoustrack', 'nexttrack'];
-          const clear = () => {
-            attempt(() => { session.metadata = null; });
-            attempt(() => { session.playbackState = 'none'; });
-            for (const action of actions) attempt(() => setActionHandler?.(action, null));
-          };
-          clear();
-          attempt(() => Object.defineProperty(session, 'metadata', {get: () => null, set: () => {}}));
-          attempt(() => Object.defineProperty(session, 'playbackState', {get: () => 'none', set: () => {}}));
-          attempt(() => Object.defineProperty(session, 'setActionHandler', {
-            value: (action) => { attempt(() => setActionHandler?.(action, null)); }
-          }));
-          attempt(() => Object.defineProperty(session, 'setPositionState', {value: () => {}}));
-          document.addEventListener('play', clear, true);
-          document.addEventListener('playing', clear, true);
-        })();
-        """
-    }
-
     @MainActor static var activeAudioPolicy: Self? {
         didSet { audioPolicyGeneration &+= 1 }
     }

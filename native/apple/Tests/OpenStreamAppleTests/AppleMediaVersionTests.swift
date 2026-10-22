@@ -5,8 +5,8 @@ import Testing
 @Suite struct AppleMediaVersionTests {
     @Test func versionMenuIncludesProbedFormatWithoutDuplicatingResolution() throws {
         var version = AppleMediaVersion(id: "v", itemID: "film", sourceID: UUID(), label: "2160P · MKV", parts: [])
-        version.formatBadges = [.uhd, .dolbyVision, .atmos, .surround71]
-        #expect(version.menuLabel == "2160P · MKV · Dolby Vision · Atmos · 7.1")
+        version.formatBadges = [.uhd, .dolbyVision, .surround71]
+        #expect(version.menuLabel == "2160P · MKV · HDR · 7.1")
         let restored = try JSONDecoder().decode(AppleMediaVersion.self, from: JSONEncoder().encode(version))
         #expect(restored.formatBadges == version.formatBadges)
         #expect(restored.menuLabel == version.menuLabel)

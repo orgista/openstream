@@ -462,8 +462,7 @@ public final class AppleWebManagementServer {
         session activeSession: AppleWebManagementSession,
         remoteHost: String
     ) async -> (response: AppleWebManagementHTTPResponse, stopAfterSending: Bool) {
-        guard request.path == "/" || request.path == "/openstream" || request.path == "/diagnostics"
-                || request.path == AppleWorkingM3UExportRoute.path else {
+        guard request.path == "/" || request.path == "/openstream" || request.path == "/diagnostics" else {
             return (.plain(404, "Not Found", "Not found."), false)
         }
         refreshLifetimes()
@@ -504,36 +503,6 @@ public final class AppleWebManagementServer {
             traceWeb("diagnostics served (\(log.utf8.count) bytes)")
             return (.plain(200, "OK", log.isEmpty ? "No trace recorded yet." : log, cookies: browserToken.map(pairingCookies) ?? []), false)
         }
-
-        // Apple TV's Export Working M3U: no share sheet there, so the file is
-        // downloaded from the portal. It carries the playlist's own stream
-        // addresses, so it sits behind pairing like everything else; the
-        // address Settings shows includes the pairing code, so one visit on
-        // a computer both pairs and downloads.
-        if request.path == AppleWorkingM3UExportRoute.path {
-            guard request.method == "GET" else {
-                return (.plain(405, "Method Not Allowed", "Use GET.", headers: ["Allow": "GET"]), false)
-            }
-            guard let token = browserToken ?? pair(code: request.query["pair"], headers: request.headers, remoteHost: remoteHost) else {
-                traceWeb("working m3u refused: not paired")
-                return (.plain(401, "Session Ended", "Session ended — scan the code again"), false)
-            }
-            guard let choice = request.query["credentials"], ["omit", "include"].contains(choice) else {
-                return (.html(200, "OK", """
-                    <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
-                    <title>Export Playlist</title></head><body><h1>Export Playlist</h1>
-                    <p><a href="?credentials=omit">Download Redacted Playlist</a></p>
-                    <p><a href="?credentials=include">Download Playlist With Provider Credentials</a></p>
-                    </body></html>
-                    """, cookies: pairingCookies(token)), false)
-            }
-            let playlist = AppleChannelHealthStore.shared.workingM3U(includesCredentials: choice == "include")
-            traceWeb("working m3u served (\(playlist.utf8.count) bytes)")
-            return (.plain(200, "OK", playlist,
-                headers: ["Content-Disposition": "attachment; filename=\"\(AppleWorkingM3UExportRoute.fileName)\""],
-                cookies: pairingCookies(token)), false)
-        }
-
 
         switch request.method {
         case "GET":

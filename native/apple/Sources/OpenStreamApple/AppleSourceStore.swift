@@ -3,7 +3,6 @@ import Observation
 
 public enum AppleSourceKind: String, Codable, CaseIterable, Sendable {
     case library
-    case youtube
     case liveTV
     case nas
     case mediaServer
@@ -11,7 +10,6 @@ public enum AppleSourceKind: String, Codable, CaseIterable, Sendable {
     public var title: String {
         switch self {
         case .library: "Library"
-        case .youtube: "YouTube"
         case .liveTV: "Live TV"
         case .nas: "Network share"
         case .mediaServer: "Media Server"
@@ -26,7 +24,7 @@ public enum AppleIPTVSourceType: String, Codable, CaseIterable, Sendable {
     public var title: String {
         switch self {
         case .m3u: "M3U Playlist"
-        case .xtream: "Xtream Account"
+        case .xtream: "Provider Login"
         }
     }
 }

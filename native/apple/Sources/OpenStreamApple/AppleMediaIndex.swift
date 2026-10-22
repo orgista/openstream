@@ -573,31 +573,6 @@ public enum AppleMediaIngestion {
             lastVerified: verifiedAt
         )
     }
-
-    public static func arrRecords(
-        instanceID: AppleSource.ID,
-        values: [AppleArrLibraryRecord],
-        verifiedAt: Date = .now
-    ) -> [AppleMediaRecord] {
-        values.map { value in
-            AppleMediaRecord(
-                canonicalID: value.canonicalID,
-                kind: value.kind,
-                title: value.title,
-                year: value.year,
-                summary: value.summary,
-                artworkURL: value.artworkURL,
-                availability: [.init(
-                    instanceID: instanceID,
-                    capability: .gateway,
-                    itemReference: value.id,
-                    lastVerified: verifiedAt
-                )],
-                isPrivate: true,
-                lastVerified: verifiedAt
-            )
-        }
-    }
 }
 
 @MainActor

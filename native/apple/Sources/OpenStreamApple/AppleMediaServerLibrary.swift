@@ -338,8 +338,7 @@ public struct AppleMediaServerPlaybackInfo: Codable, Equatable, Sendable {
             else if rawRange.contains("hdr") { range = .hdr10 }
             else { range = .sdr }
             let probed = AppleStreamFormatBadge.badges(for: .init(width: video?.width ?? 0, height: video?.height ?? 0,
-                dynamicRange: range, audioChannels: audio?.channels ?? 0,
-                isAtmos: audio?.profile?.localizedCaseInsensitiveContains("atmos") == true))
+                dynamicRange: range, audioChannels: audio?.channels ?? 0))
             return AppleStreamFormatBadge.merged(probed: probed, named: AppleStreamFormatBadge.parse(name ?? ""))
         }
 

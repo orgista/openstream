@@ -115,23 +115,6 @@ enum AppleDebugMacCaptionsProbe {
                     host.selectSubtitleTrack(id: id)
                     subtitles.refresh(from: engine)
                 }
-            case "quality":
-                // The player's own "…" menu item, sent as a click sends it.
-                if let window = NSApp.windows.first(where: { $0.isVisible && $0.frame.width > 400 }),
-                   let player = playerView(in: window.contentView) as? AVPlayerView,
-                   let item = player.actionPopUpButtonMenu?.items.first(where: { $0.title.hasPrefix("Quality") }),
-                   let action = item.action {
-                    NSApp.sendAction(action, to: item.target, from: item)
-                    try? await Task.sleep(for: .seconds(4))
-                    if let sheet = window.attachedSheet ?? NSApp.windows.first(where: { $0 !== window && $0.isVisible && $0.frame.width > 200 }) {
-                        shootWindow(sheet, to: output.appending(path: "\(index + 1)-quality-sheet.png"), log: &log)
-                        log.append("CAPTIONS-PROBE quality sheet: \(texts(in: sheet.contentView))")
-                    } else {
-                        log.append("CAPTIONS-PROBE quality sheet: none")
-                    }
-                } else {
-                    log.append("CAPTIONS-PROBE quality: no menu item")
-                }
             case "engine":
                 engine.selectSubtitleTrack(id: argument == "off" ? nil : trackID(language: argument, in: engine))
                 subtitles.refresh(from: engine)

@@ -45,6 +45,6 @@ struct AppleLocalFileInspection: Equatable, Sendable {
         }
         return .init(width: Int(probe.videoWidth), height: Int(probe.videoHeight),
                      dynamicRange: probe.isDolbyVision ? .dolbyVision : range,
-                     audioChannels: audio?.channels ?? 0, isAtmos: audio?.isAtmos ?? false)
+                     audioChannels: audio?.channels ?? 0)
     }
 }

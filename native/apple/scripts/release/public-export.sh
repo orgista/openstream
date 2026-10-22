@@ -37,7 +37,7 @@ for name in ['Package.swift','Package.resolved','Sources','Tests','Apps','script
         if rel.parts[0]=='Tests' and p.stat().st_size>5*1024*1024: continue
         if 'out' in rel.parts:
             if p.suffix!='.mkv' or subprocess.run(['git','-C',str(root),'ls-files','--error-unmatch',str(rel)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode: continue
-        if rel.parts[0]=='scripts' and not (rel.parts[1]=='release' or p.name in {'sdk-floor-check.sh','apple-license-check.sh','check-no-addons-in-release.sh','seed-sim.sh','export-appstore-screenshots.py'}): continue
+        if rel.parts[0]=='scripts' and not (rel.parts[1]=='release' or p.name in {'sdk-floor-check.sh','apple-license-check.sh','check-no-addons-in-release.sh','check-appstore-compliance.sh','seed-sim.sh','export-appstore-screenshots.py'}): continue
         items.append(str(rel))
 Path(sys.argv[2]).write_text('\n'.join(items)+'\n')
 PYLIST

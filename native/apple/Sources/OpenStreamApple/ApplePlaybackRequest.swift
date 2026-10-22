@@ -11,7 +11,6 @@ public struct ApplePlaybackRequest: Equatable, Sendable {
     }
 
     public struct Hints: Equatable, Sendable {
-        public var notWebReady: Bool
         public var proxyHeaders: [String: String]
         public var filename: String?
         /// Stable episode identity supplied by provider libraries on every player route.
@@ -39,7 +38,6 @@ public struct ApplePlaybackRequest: Equatable, Sendable {
         public var disc: AppleDiscPlaybackChoice?
 
         public init(
-            notWebReady: Bool = false,
             proxyHeaders: [String: String] = [:],
             filename: String? = nil,
             libraryFileURL: URL? = nil,
@@ -48,7 +46,6 @@ public struct ApplePlaybackRequest: Equatable, Sendable {
             nativeRemoteHLS: Bool = false,
             declaresEmbeddedCaptions: Bool = false
         ) {
-            self.notWebReady = notWebReady
             self.proxyHeaders = proxyHeaders
             self.filename = filename
             self.libraryFileURL = libraryFileURL

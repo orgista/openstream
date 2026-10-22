@@ -36,10 +36,7 @@ struct AppleDevSourcesPolicyTests {
            "username": "fixture-user", "password": "fixture-password"},
           {"kind": "mediaServer", "server": "plex", "name": "Plex", "url": "http://plex.fixture.example:32400",
            "token": "fixture-token"}
-        ], "settings": {"tmdbAPIKey": "fixture-tmdb",
-          "radarr": {"url": "http://radarr.fixture.example", "apiKey": "fixture-radarr",
-                     "rootFolderPath": "/movies", "qualityProfileID": 4},
-          "sonarr": {"url": "", "apiKey": ""}, "traktClientID": "fixture-trakt"}}
+        ], "settings": {"tmdbAPIKey": "fixture-tmdb"}}
         """)
 
         #expect(file.problems.isEmpty)
@@ -57,9 +54,7 @@ struct AppleDevSourcesPolicyTests {
                          credential: .token("fixture-token")),
         ])
         #expect(file.settings.tmdbAPIKey == "fixture-tmdb")
-        #expect(file.settings.radarr?.qualityProfileID == "4")
-        #expect(file.settings.sonarr == nil)
-        #expect(file.settings.appliedNames == ["tmdb", "radarr", "trakt"])
+        #expect(file.settings.appliedNames == ["tmdb"])
     }
 
     @Test func unknownKindsAreIgnoredAndTheRestStillImports() throws {

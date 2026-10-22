@@ -56,7 +56,6 @@ public enum AppleOfflineStoreError: Error, Equatable, LocalizedError, Sendable {
     case emptyMediaID
     case adaptiveStreamRequiresAssetDownload
     case adaptiveStreamHeadersUnsupported
-    case transientGatewayStream
     case uncontainedSourceFileURL
     case sourceFileNotFound
     case unsupportedRemoteScheme
@@ -71,8 +70,6 @@ public enum AppleOfflineStoreError: Error, Equatable, LocalizedError, Sendable {
             "Adaptive HLS downloads aren’t available on this device."
         case .adaptiveStreamHeadersUnsupported:
             "This adaptive stream requires request headers that Apple’s offline downloader can’t safely persist."
-        case .transientGatewayStream:
-            "A temporary transcoded stream cannot be kept offline. Download the original file instead."
         case .uncontainedSourceFileURL: "The selected file is outside an approved app or Files location."
         case .sourceFileNotFound: "The source file is no longer available."
         case .unsupportedRemoteScheme: "Offline downloads require an HTTP or HTTPS media URL."

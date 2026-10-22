@@ -55,22 +55,11 @@ enum AppleDevSource: Equatable, Sendable {
 
 /// The service keys block of the dev-sources file. Empty values are absent.
 struct AppleDevSettings: Equatable, Sendable {
-    struct Arr: Equatable, Sendable {
-        var url: String
-        var apiKey: String
-        var rootFolderPath: String
-        var qualityProfileID: String
-    }
-
     var tmdbAPIKey: String?
-    var radarr: Arr?
-    var sonarr: Arr?
-    var traktClientID: String?
 
     /// Which keys the file set, by name only.
     var appliedNames: [String] {
-        [tmdbAPIKey.map { _ in "tmdb" }, radarr.map { _ in "radarr" },
-         sonarr.map { _ in "sonarr" }, traktClientID.map { _ in "trakt" }].compactMap { $0 }
+        tmdbAPIKey == nil ? [] : ["tmdb"]
     }
 }
 
@@ -232,22 +221,7 @@ enum AppleDevSourcesPolicy {
     }
 
     private static func decodeSettings(_ settings: [String: Any]) -> AppleDevSettings {
-        AppleDevSettings(
-            tmdbAPIKey: optional(settings["tmdbAPIKey"]),
-            radarr: arr(settings["radarr"]),
-            sonarr: arr(settings["sonarr"]),
-            traktClientID: optional(settings["traktClientID"])
-        )
-    }
-
-    private static func arr(_ value: Any?) -> AppleDevSettings.Arr? {
-        guard let object = value as? [String: Any] else { return nil }
-        let url = string(object["url"])
-        let apiKey = string(object["apiKey"])
-        guard !url.isEmpty, !apiKey.isEmpty else { return nil }
-        return AppleDevSettings.Arr(url: url, apiKey: apiKey,
-                                    rootFolderPath: string(object["rootFolderPath"]),
-                                    qualityProfileID: string(object["qualityProfileID"]))
+        AppleDevSettings(tmdbAPIKey: optional(settings["tmdbAPIKey"]))
     }
 
     private static func existingIPTV(_ type: AppleIPTVSourceType, endpoint: String, in existing: [AppleSource]) -> AppleSource? {

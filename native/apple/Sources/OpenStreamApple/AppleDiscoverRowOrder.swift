@@ -12,6 +12,8 @@ enum AppleDiscoverRowOrder {
     static let top10Movies = "top10Movies"
     static let top10Shows = "top10Shows"
     static let catalogPrefix = "catalog:"
+    static let top10MoviesTitle = "Top 10 Movies This Week"
+    static let top10ShowsTitle = "Top 10 Shows This Week"
 
     /// The built-in rows in the order Discover has always drawn them, with
     /// the catalogue shelves after them.
@@ -25,8 +27,8 @@ enum AppleDiscoverRowOrder {
         case library: "Your Library"
         case mediaServers: "Media Servers"
         case topPicks: "Top Picks for You"
-        case top10Movies: "Top 10 Movies in the US"
-        case top10Shows: "Top 10 Shows in the US"
+        case top10Movies: top10MoviesTitle
+        case top10Shows: top10ShowsTitle
         default: nil
         }
     }

@@ -30,6 +30,11 @@ struct AppleNetworkStubTests {
         #expect(mapped("https://api.themoviedb.org/3/search/movie?query=x&api_key=k") == "/stubs/api.themoviedb.org/3/search/movie.json")
         #expect(mapped("http://host.example/player_api.php?username=u&password=p") == "/stubs/host.example/player_api.php.json")
         #expect(mapped("https://host.example/../../etc/passwd") == nil)
+        #expect(AppleNetworkStubPolicy.searchFixtureURL(for: URL(string: "https://api.themoviedb.org/3/search/movie?query=Stub%20Movie&api_key=k")!,
+                                                        root: root)?.path
+            == "/stubs/api.themoviedb.org/3/search/movie/query=stub movie.json")
+        #expect(AppleNetworkStubPolicy.searchFixtureURL(for: URL(string: "https://api.themoviedb.org/3/search/movie?query=a/b")!, root: root) == nil)
+        #expect(AppleNetworkStubPolicy.searchFixtureURL(for: URL(string: "https://api.themoviedb.org/3/movie/2")!, root: root) == nil)
         #expect(AppleNetworkStubPolicy.missDescription(for: URL(string: "http://h.example/player_api.php?password=p")!)
             == "network stub: no fixture for h.example/player_api.php")
     }
@@ -47,6 +52,13 @@ struct AppleNetworkStubTests {
             let tmdb = try await AppleTMDBClient.liveLoader(
                 URLRequest(url: URL(string: "https://api.themoviedb.org/3/search/movie?query=x&api_key=k")!))
             #expect(String(decoding: tmdb.0, as: UTF8.self) == #"{"results":[]}"#)
+
+            let named = root.appendingPathComponent("api.themoviedb.org/3/search/movie", isDirectory: true)
+            try FileManager.default.createDirectory(at: named, withIntermediateDirectories: true)
+            try Data(#"{"results":[{"id":2}]}"#.utf8).write(to: named.appendingPathComponent("query=stub.json"))
+            let search = try await AppleTMDBClient.liveLoader(
+                URLRequest(url: URL(string: "https://api.themoviedb.org/3/search/movie?query=Stub&api_key=k")!))
+            #expect(String(decoding: search.0, as: UTF8.self) == #"{"results":[{"id":2}]}"#)
 
             let miss = URLRequest(url: URL(string: "https://fixture.example/iptv/missing.json")!)
             await #expect(throws: AppleNetworkStub.Error.unmatched("network stub: no fixture for fixture.example/iptv/missing.json")) {

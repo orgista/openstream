@@ -78,7 +78,6 @@
 		E2B2AB38C6D68040B501C422 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 99D9BC94256B56EF50B40F8D /* Assets.xcassets */; };
 		FD7D51600EA6E0DA8FC34047 /* OpenStreamMessages.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 6ADFECBFDE89C06061477463 /* OpenStreamMessages.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A5C00000000000000000000B /* ShareViewController.swift in Build */ = {isa = PBXBuildFile; fileRef = A5C000000000000000000001 /* ShareViewController.swift */; };
-		A5C00000000000000000000C /* ShareAppOpener.swift in Build */ = {isa = PBXBuildFile; fileRef = A5C000000000000000000002 /* ShareAppOpener.swift */; };
 		A5C00000000000000000000D /* AppleSharedLinkHandoff.swift in Build */ = {isa = PBXBuildFile; fileRef = A5C000000000000000000003 /* AppleSharedLinkHandoff.swift */; };
 		A5C00000000000000000000E /* PrivacyInfo.xcprivacy in Build */ = {isa = PBXBuildFile; fileRef = A5C000000000000000000004 /* PrivacyInfo.xcprivacy */; };
 		A5C00000000000000000000F /* OpenStreamShare.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A5C000000000000000000005; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -264,7 +263,6 @@
 		F0939948B102A07B300065C8 /* OpenStreamTVUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OpenStreamTVUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		FBC0D50DDECAD797F31ABA92 /* OpenStreamMacUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OpenStreamMacUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A5C000000000000000000001 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "OpenStreamShare/ShareViewController.swift"; sourceTree = SOURCE_ROOT; };
-		A5C000000000000000000002 /* ShareAppOpener.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "OpenStreamShare/ShareAppOpener.swift"; sourceTree = SOURCE_ROOT; };
 		A5C000000000000000000003 /* AppleSharedLinkHandoff.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "../Sources/OpenStreamApple/AppleSharedLinkHandoff.swift"; sourceTree = SOURCE_ROOT; };
 		A5C000000000000000000004 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = "OpenStreamShare/PrivacyInfo.xcprivacy"; sourceTree = SOURCE_ROOT; };
 		A5C000000000000000000005 /* OpenStreamShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; path = OpenStreamShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -427,7 +425,6 @@
 				B00000000000000000000005 /* OpenStreamTopShelf */,
 				B00000000000000000000030 /* OpenStreamWidgets */,
 				A5C000000000000000000001 /* Share extension */,
-				A5C000000000000000000002 /* Share extension */,
 				A5C000000000000000000003 /* Share extension */,
 				A5C000000000000000000004 /* Share extension */,
 
@@ -1106,7 +1103,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		A5C000000000000000000014 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A5C00000000000000000000B, A5C00000000000000000000C, A5C00000000000000000000D, ); runOnlyForDeploymentPostprocessing = 0; };
+		A5C000000000000000000014 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A5C00000000000000000000B, A5C00000000000000000000D, ); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */

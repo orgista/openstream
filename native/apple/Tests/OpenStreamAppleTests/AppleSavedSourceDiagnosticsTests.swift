@@ -22,7 +22,7 @@ private struct AppleDiagnosticFixture: AppleSavedSourceDiagnosticsOperations {
 @Test func diagnosticsReturnOnlyStructuredRedactedFields() async throws {
     let fixture = AppleDiagnosticFixture { _, _ in }
     let results = await AppleSavedSourceDiagnosticsRunner(operations: fixture).run(timeout: .seconds(1))
-    #expect(results.count == 21)
+    #expect(results.count == 16)
     let encoded = try JSONEncoder().encode(results)
     let text = try #require(String(data: encoded, encoding: .utf8))
     #expect(!text.contains("fixture-user"))

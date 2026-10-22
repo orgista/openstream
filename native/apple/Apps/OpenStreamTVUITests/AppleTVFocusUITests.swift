@@ -512,9 +512,6 @@ final class AppleTVFocusUITests: OpenStreamUITestCase {
         if let title = ProcessInfo.processInfo.environment["OPENSTREAM_DETAIL_FIXTURE_NAME"] {
             app.launchArguments += ["-OpenStreamDetailTitle", title, "-openstream.settings.trailer.autoplay.v1", "NO"]
         }
-        if let id = ProcessInfo.processInfo.environment["OPENSTREAM_DETAIL_FIXTURE_ID"] {
-            app.launchArguments += ["-OpenStreamDebugPlayID", id, "-OpenStreamDebugPlayType", "series", "-OpenStreamDebugStreamFixture", "YES"]
-        }
         launch(screen: "detail")
         XCTAssertTrue(wait(for: element("detail.play"), 40))
         let season = element("detail.season")
@@ -1301,33 +1298,6 @@ final class AppleTVFocusUITests: OpenStreamUITestCase {
         XCTAssertTrue(focusedElement.exists, "the shelf left focus nowhere")
     }
 
-    /// Owner B24: the source choice, now the Quality picker (N38).
-    ///
-    /// On Apple TV it is not a visible control — it lives in a `contextMenu` on
-    /// the Play button, so the only way to it is a long press of Select. That
-    /// is worth a test precisely because nothing on screen advertises it: if
-    /// the menu ever stopped opening, nothing else would reveal it.
-    func testOtherSourcesIsReachableByLongPressingPlay() {
-        launch(screen: "detail")
-        XCTAssertTrue(wait(for: element("detail.play"), 40), "the title page never appeared")
-        let playFocused = focused(where: NSPredicate(format: "identifier == %@", "detail.play"))
-        XCTAssertTrue(playFocused.waitForExistence(timeout: 10),
-                      "expected Play to hold focus on appear, got '\(focusedElement.label)'")
-
-        remote.press(.select, forDuration: 2.0)
-
-        let entry = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "label == %@", "Quality")).firstMatch
-        let opened = entry.waitForExistence(timeout: 10)
-
-        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        shot.name = "quality-context-menu"
-        shot.lifetime = .keepAlways
-        add(shot)
-
-        XCTAssertTrue(opened, "long-pressing Play did not reveal the Quality entry")
-    }
-
     /// Owner B23: the episode list must show which episode is focused.
     ///
     /// Down from Play lands on the episode rail, through the Season picker
@@ -1486,16 +1456,6 @@ final class AppleTVFocusUITests: OpenStreamUITestCase {
     /// has a local MP4 trailer for every stub title, and the Apple TV hero
     /// plays it muted over the art once the art is up.
     func testDiscoverHeroPlaysServerTrailer() throws {
-        let mediaBase = ProcessInfo.processInfo.environment["OPENSTREAM_STUB_MEDIA_BASE"] ?? "http://127.0.0.1:8767"
-        let stubSources = URL(fileURLWithPath: Self.stubDirectory).appendingPathComponent("e2e-sources.json")
-        var file = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: stubSources)) as? [String: Any])
-        var sources = file["sources"] as? [[String: Any]] ?? []
-        sources.append(["kind": "mediaServer", "server": "jellyfin", "name": "Fixture Jellyfin",
-                        "url": mediaBase + "/jf", "username": "fixture", "password": "fixture"])
-        file["sources"] = sources
-        let sourcesFile = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("server-trailer-sources.json")
-        try JSONSerialization.data(withJSONObject: file).write(to: sourcesFile)
-        app.launchArguments += ["-OpenStreamDevSources", sourcesFile.path, "-OpenStreamResetOnLaunch", "YES"]
         launch(screen: "discover")
         XCTAssertTrue(wait(for: element("home.featured.play"), 60), "the Discover billboard never appeared")
 
@@ -1503,13 +1463,6 @@ final class AppleTVFocusUITests: OpenStreamUITestCase {
             format: "identifier == 'hero.serverTrailer' AND value == 'playing'")).firstMatch
         XCTAssertTrue(playing.waitForExistence(timeout: 60), "the hero never played the server's trailer")
         attachScreen("server-trailer-hero-playing")
-
-        // Later tests expect the stub sources alone.
-        app.terminate()
-        app.launchArguments = Self.stubbedLaunchArguments
-        app.launch()
-        XCTAssertTrue(wait(for: element("home.featured.play"), 60))
-        app.terminate()
     }
 
     /// Server trailers on a device with the owner's own Plex and Jellyfin
@@ -1820,13 +1773,13 @@ final class AppleTVFocusUITests: OpenStreamUITestCase {
         var opened = false
         for step in 1 ... 10 {
             press(.down, "open-down-\(step)", shot: false)
-            if focusedElement.exists, focusedElement.identifier.hasPrefix("home.media.") { opened = true; break }
+            if focusedElement.exists, focusedElement.identifier.hasPrefix("home.ms.") { opened = true; break }
         }
         if opened {
             let poster = focusedElement.identifier
             press(.right, "open-poster")
             let target = focusedElement.identifier
-            if target.hasPrefix("home.media.") {
+            if target.hasPrefix("home.ms.") {
                 press(.select, "open-title-page", wait: 4)
                 press(.menu, "open-back", wait: 2.5)
                 print("SURVEY open-back expected='\(target)' first='\(poster)'")

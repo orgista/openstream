@@ -519,7 +519,7 @@ final class AppStoreScreenshotUITests: XCTestCase {
         #if os(tvOS)
         try activate(element("sources.live.type.m3u"))
         #else
-        let typePicker = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Xtream Account")).firstMatch
+        let typePicker = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Provider Login")).firstMatch
         try activate(typePicker)
         try activate(button("M3U Playlist"))
         #endif
@@ -638,7 +638,7 @@ final class AppStoreScreenshotUITests: XCTestCase {
         let address = try XCTUnwrap(env["OPENSTREAM_RC_M3U_URL"], "Apple TV needs OPENSTREAM_RC_M3U_URL")
         try fill("sources.live.endpoint", address)
         #else
-        try activate(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Xtream Account")).firstMatch)
+        try activate(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Provider Login")).firstMatch)
         try activate(button("M3U Playlist"))
         #if os(macOS)
         NSPasteboard.general.clearContents()

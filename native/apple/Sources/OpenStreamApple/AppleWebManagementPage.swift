@@ -15,7 +15,7 @@ public enum AppleWebManagementPage {
     </svg>
     """
 
-    static let sourceTypes: [(value: String, label: String)] = [("m3u", "M3U Playlist"), ("xtream", "Xtream Account")]
+    static let sourceTypes: [(value: String, label: String)] = [("m3u", "M3U Playlist"), ("xtream", "Provider Login")]
 
     public static var defaultSourceType: String { sourceTypes[0].value }
 

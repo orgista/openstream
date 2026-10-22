@@ -143,9 +143,6 @@ final class AppleConfigurationController {
     private func fullPayload() throws -> AppleBackupEnvelope.Payload {
         var secrets = try sources.configurationSecrets()
         secrets.settingsCredentials = try settings.configurationCredentials()
-        secrets.privateSettings = try settings.configurationValues().filter {
-            AppleSettingsStore.configurationURLKeys.contains($0.key)
-        }
         return AppleBackupEnvelope.Payload(snapshot: try capture(), secrets: secrets)
     }
 
@@ -434,13 +431,7 @@ final class AppleConfigurationController {
     }
 
     private func capture(savedAt: Date? = nil) throws -> AppleConfigurationSnapshot {
-        var values = try settings.configurationValues()
-        for key in AppleSettingsStore.configurationURLKeys {
-            guard let data = values[key], let text = try AppleSettingsStore.configurationValue(data) as? String,
-                  let url = URL(string: text), !text.isEmpty else { continue }
-            let address = AppleConfigurationSnapshot.publicAddress(url).absoluteString
-            values[key] = try PropertyListSerialization.data(fromPropertyList: [address], format: .binary, options: 0)
-        }
+        let values = try settings.configurationValues()
         let playback = ApplePlaybackStore(defaults: defaults)
         return AppleConfigurationSnapshot(
             savedAt: savedAt ?? (defaults.object(forKey: Self.savedAtKey) as? Date ?? .now),
@@ -473,14 +464,7 @@ final class AppleConfigurationController {
 
     private func apply(_ snapshot: AppleConfigurationSnapshot, secrets: AppleConfigurationSecrets?) async throws {
         try traced("validate") { try snapshot.validate() }
-        var values = snapshot.settings
-        if let secrets {
-            for (key, value) in secrets.privateSettings where AppleSettingsStore.configurationURLKeys.contains(key) {
-                values[key] = value
-            }
-        } else if syncEnabled {
-            values.merge(try settings.synchronizedConfigurationURLs()) { _, incoming in incoming }
-        }
+        let values = snapshot.settings
         // Validate settings before any store is changed.
         try traced("settings check") {
             for (key, value) in values where AppleSettingsStore.configurationKeys.contains(key) {
@@ -580,7 +564,6 @@ final class AppleConfigurationController {
             let local = try capture()
             let data = try (stored.map { $0.merging(local) } ?? local).cloudData()
             try sources.prepareConfigurationKeychain()
-            try settings.prepareConfigurationKeychain()
             cloud.set(data, forKey: Self.cloudKey)
             cloud.synchronize()
             appleTrace("configuration sync: sent \(sources.sources.count) sources to iCloud")

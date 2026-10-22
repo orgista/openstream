@@ -17,6 +17,30 @@ final class AppleTVTopShelfUITests: OpenStreamUITestCase {
     private let pineBoard = XCUIApplication(bundleIdentifier: "com.apple.PineBoard")
     private let headBoard = XCUIApplication(bundleIdentifier: "com.apple.HeadBoard")
 
+    /// Discover → Stub Movie Five (first in the server's Latest row) → Play,
+    /// fifteen seconds of it, then back to Discover.
+    private func watchPartOfAFixtureTitle(in app: XCUIApplication) {
+        func focus(_ predicate: NSPredicate, pressing direction: XCUIRemote.Button) -> Bool {
+            let target = app.descendants(matching: .any).matching(NSCompoundPredicate(andPredicateWithSubpredicates: [
+                NSPredicate(format: "hasFocus == true"), predicate])).firstMatch
+            for _ in 0 ..< 12 where !target.exists {
+                remote.press(direction)
+                _ = target.waitForExistence(timeout: 1.5)
+            }
+            return target.exists
+        }
+        XCTAssertTrue(focus(Self.serverShelfItem("jf-movie-5"), pressing: .down), "the fixture title never took focus")
+        remote.press(.select)
+        XCTAssertTrue(focus(NSPredicate(format: "identifier == 'detail.play'"), pressing: .right), "Play never took focus")
+        remote.press(.select)
+        let ready = app.descendants(matching: .any)["player.playback.ready"].firstMatch
+        XCTAssertTrue(ready.waitForExistence(timeout: 60), "the fixture title never played")
+        Thread.sleep(forTimeInterval: 15)
+        remote.press(.menu)
+        Thread.sleep(forTimeInterval: 2)
+        remote.press(.menu)
+    }
+
     private func attach(_ name: String) {
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = name
@@ -29,11 +53,14 @@ final class AppleTVTopShelfUITests: OpenStreamUITestCase {
         //    whatever the last session happened to leave behind.
         let app = XCUIApplication(bundleIdentifier: "com.orgista.openstream")
         app.launchArguments += ["-OpenStreamTrace", "YES"]
-        app.launchArguments += ["-OpenStreamStubContinueWatching", "YES"]
         configureFixtureLaunch(app)
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 60), "the app never came to the foreground")
-        // The publisher runs off the catalog/media stores once they load.
+        // The shelf lists what was watched here. On the fixtures, watch part of
+        // a title from the fixture Jellyfin first (`Tests/Fixtures/serve.py`).
+        if ProcessInfo.processInfo.environment["OPENSTREAM_STUB_DIR"]?.isEmpty == false {
+            watchPartOfAFixtureTitle(in: app)
+        }
         Thread.sleep(forTimeInterval: 25)
         attach("01-app-running")
 

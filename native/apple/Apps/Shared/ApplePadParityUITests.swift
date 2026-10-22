@@ -98,9 +98,10 @@ final class ApplePadParityUITests: XCTestCase {
         capture("live-inline")
     }
 
-    func testSeriesHasEpisodeRailSeasonMenuAndCast() throws {
+    /// The fixture Jellyfin's Stub Series (`Tests/Fixtures/serve.py`): two seasons of three chapters.
+    func testSeriesHasEpisodeRailAndSeasonMenu() throws {
         launch("detail")
-        XCTAssertTrue(element("detail.screen.series.tt0000010").waitForExistence(timeout: 60))
+        XCTAssertTrue(screen("detail.screen.series.").waitForExistence(timeout: 60))
         XCTAssertTrue(element("detail.play").waitForExistence(timeout: 30))
         try checkpoint("series-hero")
         let rail = element("detail.episodes")
@@ -120,20 +121,15 @@ final class ApplePadParityUITests: XCTestCase {
         seasonTwo.tap()
         XCTAssertTrue(rail.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Chapter 2.1")).firstMatch
             .waitForExistence(timeout: 15), "Season 2's episodes did not load")
-        let cast = element("detail.cast")
-        scrollTo(cast)
-        XCTAssertTrue(cast.exists, "Cast & Crew is missing")
-        XCTAssertTrue(app.descendants(matching: .any).matching(
-            NSPredicate(format: "label CONTAINS %@", "Fixture Performer")).firstMatch.exists)
-        try checkpoint("series-cast")
+        try checkpoint("series-season-two")
     }
 
     func testMovieHeroHasMetadataAndPlay() throws {
         launch("detail-movie")
-        XCTAssertTrue(element("detail.screen.movie.tt0000001").waitForExistence(timeout: 60))
+        XCTAssertTrue(screen("detail.screen.movie.").waitForExistence(timeout: 60))
         XCTAssertTrue(element("detail.play").waitForExistence(timeout: 30))
         XCTAssertTrue(element("detail.play").isHittable)
-        XCTAssertTrue(app.staticTexts["Stub Movie One"].firstMatch.exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Stub Movie")).firstMatch.exists)
         try checkpoint("movie-hero")
     }
 
@@ -154,7 +150,8 @@ final class ApplePadParityUITests: XCTestCase {
     func testLargestTextKeepsRowsTitleAndLiveActionsReachable() throws {
         // The iPad leaves out the billboard at these sizes and opens on the rows.
         launch("discover", largestText: true)
-        let poster = element("home.media.movie:tt0000001")
+        let poster = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "home.ms.")).firstMatch
         XCTAssertTrue(poster.waitForExistence(timeout: 60))
         XCTAssertTrue(poster.isHittable, "The largest text size hid Discover's first row")
         capture("discover-largest-text")
@@ -242,6 +239,10 @@ final class ApplePadParityUITests: XCTestCase {
 
     private func element(_ identifier: String) -> XCUIElement {
         app.descendants(matching: .any).matching(identifier: identifier).firstMatch
+    }
+
+    private func screen(_ prefix: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", prefix)).firstMatch
     }
 
     private var contentWindow: XCUIElement {

@@ -31,7 +31,7 @@ import SwiftUI
 
 /// The Mac's `AVPlayerView`, as the full player and Live's inline player both
 /// use it: the picture scaled by View ▸ Zoom to Fill, and the "…" button
-/// carrying Quality and — where AVKit's CC menu cannot do the job
+/// carrying — where AVKit's CC menu cannot do the job
 /// (`AppleStockSubtitleMenuPolicy`) — the app's Subtitles menu.
 struct AppleMacPlayerViewRepresentable: NSViewRepresentable {
     let playerView: AVPlayerView
@@ -51,7 +51,6 @@ struct AppleMacPlayerViewRepresentable: NSViewRepresentable {
     /// The per-play subtitle delay and frame-rate fix, offered while a track is on.
     var subtitleTiming = AppleSubtitleTiming()
     var onChangeSubtitleTiming: ((AppleSubtitleTiming.Change) -> Void)?
-    var onOtherSources: (() -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -73,11 +72,9 @@ struct AppleMacPlayerViewRepresentable: NSViewRepresentable {
         }
         context.coordinator.onSelectSubtitle = onSelectSubtitle
         context.coordinator.onChangeSubtitleTiming = onChangeSubtitleTiming
-        context.coordinator.onOtherSources = onOtherSources
         // Rebuilt only when what it lists changes: replacing the menu while
         // it is open would close it under the pointer.
-        let signature = MenuSignature(otherSources: onOtherSources != nil,
-                                      subtitles: showsSubtitleMenu ? subtitleEntries : [],
+        let signature = MenuSignature(subtitles: showsSubtitleMenu ? subtitleEntries : [],
                                       moreSubtitles: showsSubtitleMenu ? moreSubtitleEntries : [],
                                       timing: subtitleTiming)
         guard signature != context.coordinator.menuSignature else { return }
@@ -86,7 +83,6 @@ struct AppleMacPlayerViewRepresentable: NSViewRepresentable {
     }
 
     struct MenuSignature: Equatable {
-        let otherSources: Bool
         let subtitles: [AppleSubtitleCueLayerPolicy.MenuEntry]
         var moreSubtitles: [AppleSubtitleCueLayerPolicy.MenuEntry] = []
         var timing = AppleSubtitleTiming()
@@ -94,13 +90,6 @@ struct AppleMacPlayerViewRepresentable: NSViewRepresentable {
 
     private func actionMenu(coordinator: Coordinator) -> NSMenu? {
         let menu = NSMenu(title: "Options")
-        if onOtherSources != nil {
-            let item = NSMenuItem(title: "Quality…", action: #selector(Coordinator.showOtherSources(_:)),
-                                  keyEquivalent: "")
-            item.target = coordinator
-            item.image = NSImage(systemSymbolName: "slider.horizontal.3", accessibilityDescription: nil)
-            menu.addItem(item)
-        }
         if showsSubtitleMenu, !subtitleEntries.isEmpty {
             let tracks = NSMenu(title: "Subtitles")
             func subtitleItem(_ entry: AppleSubtitleCueLayerPolicy.MenuEntry) -> NSMenuItem {
@@ -172,14 +161,8 @@ struct AppleMacPlayerViewRepresentable: NSViewRepresentable {
             guard let box = sender.representedObject as? TimingChangeBox else { return }
             onChangeSubtitleTiming?(box.change)
         }
-        var onOtherSources: (() -> Void)?
-
         @objc func selectSubtitle(_ sender: NSMenuItem) {
             onSelectSubtitle(sender.representedObject as? Int)
-        }
-
-        @objc func showOtherSources(_ sender: NSMenuItem) {
-            onOtherSources?()
         }
     }
 }

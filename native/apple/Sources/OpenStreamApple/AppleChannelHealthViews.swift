@@ -112,10 +112,7 @@ struct AppleChannelHealthDetailView: View {
     #endif
 }
 
-/// Settings → Live TV: the summary line and the sweep. The Export Working
-/// M3U row is gone (owner 2026-10-09: greyed out and pointless here); the
-/// working playlist is still served at `/working.m3u` on the Web Management
-/// portal (`AppleWorkingM3UExportRoute`).
+/// Settings → Live TV: the summary line and the sweep.
 struct AppleChannelHealthSettingsRows: View {
     let store: AppleChannelHealthStore
     let settings: AppleSettingsStore
@@ -211,34 +208,5 @@ struct AppleChannelHealthSettingsRows: View {
         }
         if let nothingToCheck, store.lineup.isEmpty { return nothingToCheck }
         return store.summary(now: now)
-    }
-}
-
-#if !os(tvOS)
-/// The working-channel playlist as a file for the share sheet.
-/// The text is written only when the viewer actually exports.
-struct AppleWorkingM3UFile: Transferable {
-    let lineup: [AppleIPTVChannel]
-    let health: [String: AppleChannelHealthResult]
-
-    static var transferRepresentation: some TransferRepresentation {
-        DataRepresentation(exportedContentType: .m3uPlaylist) { file in
-            Data(AppleWorkingM3UExport.text(lineup: file.lineup, health: file.health).utf8)
-        }
-        .suggestedFileName(AppleWorkingM3UExportRoute.fileName)
-    }
-}
-#endif
-
-/// Where the working-channel playlist is served on the portal.
-public enum AppleWorkingM3UExportRoute {
-    public static let path = "/working.m3u"
-    public static let fileName = "OpenStream Working Channels.m3u"
-
-    /// The address to type on a computer: pairing and download in one step.
-    public static func address(for session: AppleWebManagementSession) -> String {
-        let host = session.friendlyURL.host ?? ""
-        let port = session.friendlyURL.port.map { ":\($0)" } ?? ""
-        return "\(host)\(port)\(path)?pair=\(session.pairingCode)"
     }
 }

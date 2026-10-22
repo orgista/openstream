@@ -367,58 +367,6 @@ public final class AppleSettingsStore {
         didSet { persistSecret(omdbAPIKey, account: SecretKey.omdbAPIKey) }
     }
 
-    public var radarrURL: String {
-        didSet { defaults.set(radarrURL, forKey: DefaultsKey.radarrURL) }
-    }
-
-    public var radarrAPIKey: String {
-        didSet { persistSecret(radarrAPIKey, account: SecretKey.radarrAPIKey) }
-    }
-
-    public var radarrRootFolderPath: String {
-        didSet { defaults.set(radarrRootFolderPath, forKey: DefaultsKey.radarrRootFolderPath) }
-    }
-
-    public var radarrQualityProfileID: String {
-        didSet { defaults.set(radarrQualityProfileID, forKey: DefaultsKey.radarrQualityProfileID) }
-    }
-
-    public var sonarrURL: String {
-        didSet { defaults.set(sonarrURL, forKey: DefaultsKey.sonarrURL) }
-    }
-
-    public var sonarrAPIKey: String {
-        didSet { persistSecret(sonarrAPIKey, account: SecretKey.sonarrAPIKey) }
-    }
-
-    public var sonarrRootFolderPath: String {
-        didSet { defaults.set(sonarrRootFolderPath, forKey: DefaultsKey.sonarrRootFolderPath) }
-    }
-
-    public var sonarrQualityProfileID: String {
-        didSet { defaults.set(sonarrQualityProfileID, forKey: DefaultsKey.sonarrQualityProfileID) }
-    }
-
-    public var gatewayEnabled: Bool {
-        didSet { defaults.set(gatewayEnabled, forKey: DefaultsKey.gatewayEnabled) }
-    }
-
-    public var gatewayURL: String {
-        didSet { defaults.set(gatewayURL, forKey: DefaultsKey.gatewayURL) }
-    }
-
-    public var gatewayToken: String {
-        didSet { persistSecret(gatewayToken, account: SecretKey.gatewayToken) }
-    }
-
-    public var traktClientID: String {
-        didSet { persistSecret(traktClientID, account: SecretKey.traktClientID) }
-    }
-
-    public var traktClientSecret: String {
-        didSet { persistSecret(traktClientSecret, account: SecretKey.traktClientSecret) }
-    }
-
     /// Saved app choice. The system CC + SDH switch can additionally enable
     /// captions, without changing this value or its persisted representation.
     public var storedCaptionsPreference: AppleCaptionsPreference {
@@ -676,14 +624,6 @@ public final class AppleSettingsStore {
         self.captionNotificationCenter = captionNotificationCenter
 
         metadataEnabled = defaults.object(forKey: DefaultsKey.metadataEnabled) as? Bool ?? false
-        radarrURL = defaults.string(forKey: DefaultsKey.radarrURL) ?? ""
-        radarrRootFolderPath = defaults.string(forKey: DefaultsKey.radarrRootFolderPath) ?? ""
-        radarrQualityProfileID = defaults.string(forKey: DefaultsKey.radarrQualityProfileID) ?? ""
-        sonarrURL = defaults.string(forKey: DefaultsKey.sonarrURL) ?? ""
-        sonarrRootFolderPath = defaults.string(forKey: DefaultsKey.sonarrRootFolderPath) ?? ""
-        sonarrQualityProfileID = defaults.string(forKey: DefaultsKey.sonarrQualityProfileID) ?? ""
-        gatewayEnabled = defaults.bool(forKey: DefaultsKey.gatewayEnabled)
-        gatewayURL = defaults.string(forKey: DefaultsKey.gatewayURL) ?? ""
         // Keep the app's saved choice intact. The effective getter adds the
         // system CC + SDH signal; an unset app preference still defaults to on.
         if let stored = defaults.string(forKey: DefaultsKey.captionsPreference),
@@ -751,14 +691,20 @@ public final class AppleSettingsStore {
         }
         tmdbAPIKey = load(SecretKey.tmdbAPIKey)
         omdbAPIKey = load(SecretKey.omdbAPIKey)
-        radarrAPIKey = load(SecretKey.radarrAPIKey)
-        sonarrAPIKey = load(SecretKey.sonarrAPIKey)
-        gatewayToken = load(SecretKey.gatewayToken)
-        traktClientID = load(SecretKey.traktClientID)
-        traktClientSecret = load(SecretKey.traktClientSecret)
         unreadableSecretAccounts = unreadable
         persistenceError = firstReadError
+        Self.removeRetiredServiceSettings(defaults: defaults, keychain: keychain)
         observeSystemCaptions()
+    }
+
+    /// Radarr, Sonarr, Trakt and the transcode gateway left the app
+    /// (2026-10-22). Their saved addresses and keys are deleted once, so
+    /// nothing of them stays on the device or reaches a backup.
+    static func removeRetiredServiceSettings(defaults: UserDefaults, keychain: any AppleCredentialStoring) {
+        guard !defaults.bool(forKey: DefaultsKey.retiredServicesRemoved) else { return }
+        for key in RetiredKey.defaults { defaults.removeObject(forKey: key) }
+        for account in RetiredKey.secrets { try? keychain.remove(account) }
+        defaults.set(true, forKey: DefaultsKey.retiredServicesRemoved)
     }
 
     private func observeSystemCaptions() {
@@ -804,14 +750,6 @@ public final class AppleSettingsStore {
     static var configurationKeys: [String] {
         [
             DefaultsKey.metadataEnabled,
-            DefaultsKey.radarrURL,
-            DefaultsKey.radarrRootFolderPath,
-            DefaultsKey.radarrQualityProfileID,
-            DefaultsKey.sonarrURL,
-            DefaultsKey.sonarrRootFolderPath,
-            DefaultsKey.sonarrQualityProfileID,
-            DefaultsKey.gatewayEnabled,
-            DefaultsKey.gatewayURL,
             DefaultsKey.captionsAutoOn,
             DefaultsKey.captionsPreference,
             DefaultsKey.autoPlayTrailer,
@@ -844,8 +782,6 @@ public final class AppleSettingsStore {
         ]
     }
 
-    static let configurationURLKeys = [DefaultsKey.radarrURL, DefaultsKey.sonarrURL, DefaultsKey.gatewayURL]
-
     func configurationValues() throws -> [String: Data] {
         var values: [String: Data] = [:]
         for key in Self.configurationKeys {
@@ -874,14 +810,6 @@ public final class AppleSettingsStore {
         }
         let restored = AppleSettingsStore(defaults: defaults, keychain: keychain)
         metadataEnabled = restored.metadataEnabled
-        radarrURL = restored.radarrURL
-        radarrRootFolderPath = restored.radarrRootFolderPath
-        radarrQualityProfileID = restored.radarrQualityProfileID
-        sonarrURL = restored.sonarrURL
-        sonarrRootFolderPath = restored.sonarrRootFolderPath
-        sonarrQualityProfileID = restored.sonarrQualityProfileID
-        gatewayEnabled = restored.gatewayEnabled
-        gatewayURL = restored.gatewayURL
         storedCaptionsPreference = restored.storedCaptionsPreference
         subtitleLanguages = restored.subtitleLanguages
         audioLanguage = restored.audioLanguage
@@ -912,24 +840,6 @@ public final class AppleSettingsStore {
         regionalZIPCode = restored.regionalZIPCode
     }
 
-    func prepareConfigurationKeychain() throws {
-        for key in Self.configurationURLKeys {
-            if let value = defaults.string(forKey: key), !value.isEmpty {
-                try keychain.set(value, for: "backup.url.\(key)")
-            } else { try keychain.remove("backup.url.\(key)") }
-        }
-    }
-
-    func synchronizedConfigurationURLs() throws -> [String: Data] {
-        var values: [String: Data] = [:]
-        for key in Self.configurationURLKeys {
-            if let value = try keychain.string(for: "backup.url.\(key)") {
-                values[key] = try PropertyListSerialization.data(fromPropertyList: [value], format: .binary, options: 0)
-            }
-        }
-        return values
-    }
-
     func configurationCredentials() throws -> [String: String] {
         var values: [String: String] = [:]
         for account in Self.configurationSecretAccounts {
@@ -939,7 +849,7 @@ public final class AppleSettingsStore {
     }
 
     private static var configurationSecretAccounts: [String] {
-        [SecretKey.tmdbAPIKey, SecretKey.omdbAPIKey, SecretKey.radarrAPIKey, SecretKey.sonarrAPIKey, SecretKey.gatewayToken, SecretKey.traktClientID, SecretKey.traktClientSecret]
+        [SecretKey.tmdbAPIKey, SecretKey.omdbAPIKey]
     }
 
     func restoreConfigurationCredentials(_ values: [String: String]) throws {
@@ -948,23 +858,11 @@ public final class AppleSettingsStore {
         }
         tmdbAPIKey = try keychain.string(for: SecretKey.tmdbAPIKey) ?? ""
         omdbAPIKey = try keychain.string(for: SecretKey.omdbAPIKey) ?? ""
-        radarrAPIKey = try keychain.string(for: SecretKey.radarrAPIKey) ?? ""
-        sonarrAPIKey = try keychain.string(for: SecretKey.sonarrAPIKey) ?? ""
-        gatewayToken = try keychain.string(for: SecretKey.gatewayToken) ?? ""
-        traktClientID = try keychain.string(for: SecretKey.traktClientID) ?? ""
-        traktClientSecret = try keychain.string(for: SecretKey.traktClientSecret) ?? ""
     }
 
     private enum DefaultsKey {
         static let metadataEnabled = "openstream.settings.metadata.enabled.v1"
-        static let radarrURL = "openstream.settings.radarr.url.v1"
-        static let radarrRootFolderPath = "openstream.settings.radarr.rootFolderPath.v1"
-        static let radarrQualityProfileID = "openstream.settings.radarr.qualityProfileID.v1"
-        static let sonarrURL = "openstream.settings.sonarr.url.v1"
-        static let sonarrRootFolderPath = "openstream.settings.sonarr.rootFolderPath.v1"
-        static let sonarrQualityProfileID = "openstream.settings.sonarr.qualityProfileID.v1"
-        static let gatewayEnabled = "openstream.settings.gateway.enabled.v1"
-        static let gatewayURL = "openstream.settings.gateway.url.v1"
+        static let retiredServicesRemoved = "openstream.settings.retiredServicesRemoved.v1"
         static let captionsAutoOn = "openstream.settings.captions.autoOn.v1"
         static let captionsPreference = "openstream.settings.captions.preference.v1"
         static let autoPlayTrailer = "openstream.settings.trailer.autoplay.v1"
@@ -1001,11 +899,22 @@ public final class AppleSettingsStore {
     private enum SecretKey {
         static let tmdbAPIKey = "metadata.tmdb.apiKey"
         static let omdbAPIKey = "metadata.omdb.apiKey"
-        static let radarrAPIKey = "downloads.radarr.apiKey"
-        static let sonarrAPIKey = "downloads.sonarr.apiKey"
-        static let gatewayToken = "transcode.gateway.token"
-        static let traktClientID = "trakt.client.id"
-        static let traktClientSecret = "trakt.client.secret"
+    }
+
+    /// What Radarr, Sonarr, Trakt and the transcode gateway kept.
+    enum RetiredKey {
+        static let defaults = [
+            "openstream.settings.radarr.url.v1", "openstream.settings.radarr.rootFolderPath.v1",
+            "openstream.settings.radarr.qualityProfileID.v1", "openstream.settings.sonarr.url.v1",
+            "openstream.settings.sonarr.rootFolderPath.v1", "openstream.settings.sonarr.qualityProfileID.v1",
+            "openstream.settings.gateway.enabled.v1", "openstream.settings.gateway.url.v1",
+        ]
+        static let secrets = [
+            "downloads.radarr.apiKey", "downloads.sonarr.apiKey", "transcode.gateway.token",
+            "trakt.client.id", "trakt.client.secret",
+            "backup.url.openstream.settings.radarr.url.v1", "backup.url.openstream.settings.sonarr.url.v1",
+            "backup.url.openstream.settings.gateway.url.v1",
+        ]
     }
 }
 

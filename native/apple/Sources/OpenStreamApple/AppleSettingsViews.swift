@@ -6,8 +6,6 @@ enum AppleSettingsRoute: Hashable {
     case restrictions
     case metadata
     case metadataAdvanced
-    case serverDownloads
-    case trakt
     case watchProviders
     case discoverRows
     case playback
@@ -164,10 +162,6 @@ struct AppleSettingsView: View {
             AppleMetadataSettingsView(settings: settings)
         case .metadataAdvanced:
             AppleMetadataCredentialsView(settings: settings)
-        case .serverDownloads:
-            AppleServerDownloadsSettingsView(settings: settings)
-        case .trakt:
-            AppleTraktSettingsView(settings: settings)
         case .watchProviders:
             AppleWatchProviderSettingsView(settings: settings)
         case .discoverRows:
@@ -250,14 +244,6 @@ struct AppleSettingsView: View {
                 .appleTVReadableFocus()
                 settingsLink(AppleSettingsRoute.watchProviders) {
                     AppleTVNavigationLabel("Streaming Services", systemImage: "rectangle.stack.badge.play")
-                }
-                .appleTVReadableFocus()
-                settingsLink(AppleSettingsRoute.serverDownloads) {
-                    AppleTVNavigationLabel("Radarr & Sonarr", systemImage: "arrow.down.circle")
-                }
-                .appleTVReadableFocus()
-                settingsLink(AppleSettingsRoute.trakt) {
-                    AppleTVNavigationLabel("Trakt", systemImage: "arrow.triangle.2.circlepath")
                 }
                 .appleTVReadableFocus()
             }
@@ -555,12 +541,6 @@ private struct AppleTVServicesPane: View {
             }
             NavigationLink(value: AppleSettingsRoute.watchProviders) {
                 AppleTVNavigationLabel("Streaming Services", systemImage: "rectangle.stack.badge.play")
-            }
-            NavigationLink(value: AppleSettingsRoute.serverDownloads) {
-                AppleTVNavigationLabel("Radarr & Sonarr", systemImage: "arrow.down.circle")
-            }
-            NavigationLink(value: AppleSettingsRoute.trakt) {
-                AppleTVNavigationLabel("Trakt", systemImage: "arrow.triangle.2.circlepath")
             }
         }
         .appleSettingsPane("Services", embedded: true)
@@ -984,200 +964,6 @@ private struct AppleMetadataCredentialsView: View {
             AppleSettingsPersistenceError(settings: settings)
         }
         .appleSettingsPage("Advanced")
-    }
-}
-
-@MainActor
-struct AppleServerDownloadsSettingsView: View {
-    let settings: AppleSettingsStore
-
-    var body: some View {
-        @Bindable var settings = settings
-
-        Form {
-            AppleArrConnectionSection(
-                kind: .radarr,
-                baseURL: $settings.radarrURL,
-                apiKey: $settings.radarrAPIKey,
-                rootFolderPath: $settings.radarrRootFolderPath,
-                qualityProfileID: $settings.radarrQualityProfileID
-            )
-
-            AppleArrConnectionSection(
-                kind: .sonarr,
-                baseURL: $settings.sonarrURL,
-                apiKey: $settings.sonarrAPIKey,
-                rootFolderPath: $settings.sonarrRootFolderPath,
-                qualityProfileID: $settings.sonarrQualityProfileID
-            )
-
-            AppleSettingsPersistenceError(settings: settings)
-        }
-        .appleSettingsPage("Radarr & Sonarr")
-    }
-}
-
-@MainActor
-private struct AppleArrConnectionSection: View {
-    /// Quality profile is last on purpose: it uses the number pad, which has
-    /// no return key at all, so it can be arrived at but never submitted from.
-    private enum Field: Hashable { case baseURL, apiKey, rootFolder, qualityProfile }
-    private static let chain: [Field] = [.baseURL, .apiKey, .rootFolder, .qualityProfile]
-    @FocusState private var focusedField: Field?
-
-    let kind: AppleArrKind
-    @Binding var baseURL: String
-    @Binding var apiKey: String
-    @Binding var rootFolderPath: String
-    @Binding var qualityProfileID: String
-
-    private let client: AppleArrClient
-    @State private var state = AppleConnectionTestState.idle
-
-    init(
-        kind: AppleArrKind,
-        baseURL: Binding<String>,
-        apiKey: Binding<String>,
-        rootFolderPath: Binding<String>,
-        qualityProfileID: Binding<String>,
-        client: AppleArrClient = AppleArrClient()
-    ) {
-        self.kind = kind
-        _baseURL = baseURL
-        _apiKey = apiKey
-        _rootFolderPath = rootFolderPath
-        _qualityProfileID = qualityProfileID
-        self.client = client
-    }
-
-    var body: some View {
-        Group {
-            #if os(macOS)
-            Section {
-                fields
-            } header: {
-                Text(kind.displayName)
-            } footer: {
-                AppleFormActionBar { testButton }
-            }
-            #else
-            Section(kind.displayName) {
-                fields
-                testButton
-                    // The list row draws its own capsule and `.brandSecondary` draws a
-                    // pill inside it — a box in a box, which is the "no boxes and
-                    // weirdness" the owner called out for the settings panes
-                    // (2026-09-16). One piece of chrome, not two. Confirmed on the
-                    // phone as well as the television (2026-09-17), so it is not
-                    // platform-gated.
-                    .listRowBackground(Color.clear)
-            }
-            #endif
-        }
-        .onChange(of: baseURL) { _, _ in state = .idle }
-        .onChange(of: apiKey) { _, _ in state = .idle }
-        .onChange(of: rootFolderPath) { _, _ in state = .idle }
-        .onChange(of: qualityProfileID) { _, _ in state = .idle }
-    }
-
-    /// The prompt colour the other add-source forms use: the default
-    /// placeholder was fainter here, and the empty API key row read as blank
-    /// (UX tour 2026-10-08).
-    private static func prompt(_ title: String) -> Text {
-        #if os(iOS)
-        Text(title).foregroundStyle(Color(uiColor: .secondaryLabel))
-        #else
-        Text(title).foregroundStyle(.secondary)
-        #endif
-    }
-
-    @ViewBuilder
-    private var fields: some View {
-        TextField("Server URL", text: $baseURL, prompt: Self.prompt("Server URL"))
-            .autocorrectionDisabled()
-            #if os(iOS) || os(visionOS)
-            .keyboardType(.URL)
-            .textContentType(.URL)
-            #endif
-            .tint(.primary)
-            .appleFormSubmit(.baseURL, chain: Self.chain, focus: $focusedField)
-        SecureField("API key", text: $apiKey, prompt: Self.prompt("API key"))
-            .textContentType(.password)
-            .appleFormSubmit(.apiKey, chain: Self.chain, focus: $focusedField)
-        TextField("Root folder path", text: $rootFolderPath, prompt: Self.prompt("Root folder path"))
-            .autocorrectionDisabled()
-            .appleFormSubmit(.rootFolder, chain: Self.chain, focus: $focusedField)
-        TextField("Quality profile ID", text: $qualityProfileID, prompt: Self.prompt("Quality profile ID"))
-            #if os(iOS)
-            .keyboardType(.numberPad)
-            #endif
-            .appleFormSubmit(.qualityProfile, chain: Self.chain, focus: $focusedField)
-
-        AppleConnectionStatusView(state: state)
-    }
-
-    private var testButton: some View {
-        Button {
-            Task { await testConnection() }
-        } label: {
-            AppleConnectionTestLabel(isTesting: state.isTesting)
-        }
-        .buttonStyle(.brandSecondary)
-        .disabled(!canTest || state.isTesting)
-    }
-
-    private var canTest: Bool {
-        AppleArrEndpointPolicy.isAllowed(baseURL) && AppleArrClient.isValidAPIKey(apiKey)
-    }
-
-    private func testConnection() async {
-        let submittedURL = baseURL
-        let submittedAPIKey = apiKey
-        state = .testing
-
-        do {
-            let status = try await client.test(kind: kind, baseURL: submittedURL, apiKey: submittedAPIKey)
-            guard baseURL == submittedURL, apiKey == submittedAPIKey else { return }
-            state = .success(connectionLabel(for: status))
-        } catch is CancellationError {
-            guard baseURL == submittedURL, apiKey == submittedAPIKey else { return }
-            state = .idle
-        } catch {
-            guard baseURL == submittedURL, apiKey == submittedAPIKey else { return }
-            state = .failure(error.localizedDescription)
-        }
-    }
-
-    private func connectionLabel(for status: AppleArrStatus) -> String {
-        var parts = ["Connected", status.appName]
-        if !status.version.isEmpty { parts.append(status.version) }
-        if !status.instanceName.isEmpty { parts.append(status.instanceName) }
-        return parts.joined(separator: " · ")
-    }
-}
-
-@MainActor
-private struct AppleTraktSettingsView: View {
-    private enum Field: Hashable { case clientID, clientSecret }
-    private static let chain: [Field] = [.clientID, .clientSecret]
-    @FocusState private var focusedField: Field?
-
-    let settings: AppleSettingsStore
-
-    var body: some View {
-        @Bindable var settings = settings
-
-        Form {
-            Section("Client Credentials") {
-                SecureField("Client ID", text: $settings.traktClientID)
-                    .appleFormSubmit(.clientID, chain: Self.chain, focus: $focusedField)
-                SecureField("Client secret", text: $settings.traktClientSecret)
-                    .appleFormSubmit(.clientSecret, chain: Self.chain, focus: $focusedField)
-            }
-
-            AppleSettingsPersistenceError(settings: settings)
-        }
-        .appleSettingsPage("Trakt")
     }
 }
 

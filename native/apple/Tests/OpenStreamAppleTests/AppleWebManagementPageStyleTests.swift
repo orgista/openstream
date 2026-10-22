@@ -19,7 +19,7 @@ struct AppleWebManagementPageStyleTests {
     @Test func liveSourceFieldsMatchTheApp() {
         let html = AppleWebManagementPage.setup()
         #expect(html.contains("M3U Playlist"))
-        #expect(html.contains("Xtream Account"))
+        #expect(html.contains("Provider Login"))
         #expect(!html.contains("IPTV playlist"))
         #expect(html.contains("data-reveal=\"password\""))
         #expect(html.contains("aria-label=\"Show password\""))

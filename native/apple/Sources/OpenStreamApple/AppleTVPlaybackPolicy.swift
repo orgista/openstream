@@ -64,21 +64,18 @@ public enum AppleTVPlaybackPresentationPolicy {
         public var container: String?
         public var videoCodec: String?
         public var audioCodec: String?
-        public var notWebReady: Bool
 
-        public init(container: String?, videoCodec: String? = nil, audioCodec: String? = nil, notWebReady: Bool = false) {
+        public init(container: String?, videoCodec: String? = nil, audioCodec: String? = nil) {
             self.container = container?.lowercased()
             self.videoCodec = videoCodec?.lowercased()
             self.audioCodec = audioCodec?.lowercased()
-            self.notWebReady = notWebReady
         }
 
         public init(request: ApplePlaybackRequest, videoCodec: String? = nil, audioCodec: String? = nil) {
             self.init(
                 container: AppleTVPlaybackPresentationPolicy.containerExtension(url: request.url, filename: request.hints.filename),
                 videoCodec: videoCodec,
-                audioCodec: audioCodec,
-                notWebReady: request.hints.notWebReady
+                audioCodec: audioCodec
             )
         }
 
@@ -102,7 +99,7 @@ public enum AppleTVPlaybackPresentationPolicy {
             return .audioOnly
         }
         let videoNative = signature.videoCodec.map { nativeVideoCodecs.contains($0) } ?? true
-        if signature.isNativeContainer, !signature.notWebReady {
+        if signature.isNativeContainer {
             let audioNative = signature.audioCodec.map { nativeContainerAudioCodecs.contains($0) } ?? true
             return videoNative && audioNative ? .avPlayer : .surface
         }
@@ -135,8 +132,7 @@ public enum AppleTVPlaybackPresentationPolicy {
         isTV: Bool = isTVPlatform
     ) -> ApplePlaybackEngineKind {
         guard isTV, preferred == .openStream else { return preferred }
-        // A stream flagged as not web-ready expects a demuxer.
-        guard !signature.notWebReady, signature.isNativeContainer else { return .openStream }
+        guard signature.isNativeContainer else { return .openStream }
         switch expectedRoute(for: signature) {
         case .avPlayer, .audioOnly: return .native
         case .surface, .none: return .openStream

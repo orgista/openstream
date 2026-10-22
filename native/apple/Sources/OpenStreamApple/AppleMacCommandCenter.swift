@@ -121,8 +121,8 @@ public final class AppleMacCommandCenter {
     /// This does two jobs, and the second one is the important one. A menu
     /// item's key equivalent is matched *before* the responder chain sees the
     /// key, so a live "Play/Pause ␣" item would make it impossible to type a
-    /// space into any text field in the app — the manifest URL, a Trakt client
-    /// id, a backup passphrase. A disabled menu item does not claim its key
+    /// space into any text field in the app — a server address, an API key,
+    /// a backup passphrase. A disabled menu item does not claim its key
     /// equivalent, so gating the Controls menu on this being non-nil is what
     /// lets the space bar be the play/pause key at all.
     public private(set) var playback: AppleMacPlaybackControls?

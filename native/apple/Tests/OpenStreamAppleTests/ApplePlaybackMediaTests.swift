@@ -64,8 +64,7 @@ import Testing
 
     #expect(ApplePlaybackRoutePolicy.route(
         sourceURL: remoteMKV,
-        decision: unsupported,
-        gatewayConfigured: true
+        decision: unsupported
     ) == .direct(remoteMKV))
 }
 
@@ -82,8 +81,7 @@ import Testing
             isReadable: true,
             isExportable: true,
             isProtected: true
-        ),
-        gatewayConfigured: true
+        )
     ) == .unavailable(["decoder unavailable"]))
 
     #expect(ApplePlaybackRoutePolicy.route(
@@ -141,53 +139,6 @@ import Testing
     ).support == .supported)
 }
 
-@Test func playbackPreparerExecutesGatewayRouteAndReturnsItsPlaybackRequest() async throws {
-    let sourceURL = URL(fileURLWithPath: "/tmp/movie.mkv")
-    let config = try AppleTranscodeGatewayConfig(
-        baseURL: "https://gateway.example",
-        sessionToken: String(repeating: "a", count: 32)
-    )
-    let client = AppleTranscodeGatewayClient { request in
-        guard let url = request.url else { throw URLError(.badURL) }
-        let body: Data
-        switch url.path {
-        case "/api/transcode/capabilities":
-            body = Data(#"{"available":true,"version":"1","hardwareAccelerated":true}"#.utf8)
-        case "/api/transcode/smb-sessions":
-            body = Data(#"{"transcodeUrl":"/gateway/transcode/media?transcodeId=cccccccccccccccccccccccccccccccc"}"#.utf8)
-        default:
-            throw URLError(.unsupportedURL)
-        }
-        guard let response = HTTPURLResponse(
-            url: url,
-            statusCode: 200,
-            httpVersion: nil,
-            headerFields: ["Content-Type": "application/json"]
-        ) else {
-            throw URLError(.badServerResponse)
-        }
-        return (body, response)
-    }
-    let preparer = ApplePlaybackPreparer(gatewayClient: client)
-
-    let prepared = try await preparer.prepare(
-        sourceURL: sourceURL,
-        decision: .init(support: .unsupported, reasons: ["container"]),
-        gatewayRequest: .init(
-            config: config,
-            smbURI: "smb://nas/media/movie.mkv",
-            maximumWidth: 3840,
-            maximumHeight: 2160
-        )
-    )
-
-    // The engine demuxes Matroska in-app; the gateway is no longer on the
-    // playback path for it, so the prepared route is direct.
-    #expect(prepared.route == .direct(sourceURL))
-    #expect(prepared.url == sourceURL)
-    #expect(prepared.requestHeaders.isEmpty)
-}
-
 @Test func routePolicyRoutesMatroskaAndMPEGTransportStreamDirectly() {
     let localMKV = URL(fileURLWithPath: "/tmp/movie.mkv")
     let localTS = URL(fileURLWithPath: "/tmp/movie.ts")
@@ -196,20 +147,17 @@ import Testing
 
     #expect(ApplePlaybackRoutePolicy.route(
         sourceURL: localMKV,
-        decision: unsupported,
-        gatewayConfigured: true
+        decision: unsupported
     ) == .direct(localMKV))
 
     #expect(ApplePlaybackRoutePolicy.route(
         sourceURL: localTS,
-        decision: unsupported,
-        gatewayConfigured: true
+        decision: unsupported
     ) == .direct(localTS))
 
     #expect(ApplePlaybackRoutePolicy.route(
         sourceURL: remoteTS,
-        decision: unsupported,
-        gatewayConfigured: true
+        decision: unsupported
     ) == .direct(remoteTS))
 }
 
@@ -253,7 +201,7 @@ import Testing
 
     let unsupported = ApplePlaybackFailure.classify(URLError(.cannotDecodeContentData))
     #expect(unsupported.kind == .unsupportedMedia)
-    #expect(unsupported.message.contains("cannot be played directly") || unsupported.message.contains("Transcode Gateway"))
+    #expect(unsupported.message.contains("cannot be played directly"))
 
     let network = ApplePlaybackFailure.classify(URLError(.cannotConnectToHost))
     #expect(network.kind == .network)

@@ -28,16 +28,6 @@ import Testing
         #expect(pressed.contains("mute=0"))
     }
 
-    @Test func theYouTubeFrameReportsItsFirstFrames() {
-        let script = AppleYouTubePreviewHTML.playerChromeScript
-        #expect(script.contains("requestVideoFrameCallback"))
-        #expect(script.contains("state: '\(AppleTrailerFirstFrameGate.framesState)'"))
-        #expect(script.contains("seen >= \(AppleTrailerFirstFrameGate.minimumFrames)"))
-        // Re-armed on every start, so a resume or replay waits for frames too.
-        #expect(script.contains("addEventListener('playing'"))
-        #expect(AppleTrailerFirstFrameGate.cap > AppleTrailerRevealPolicy.portraitCap)
-    }
-
     @Test func theCrossfadeIsShort() {
         #expect(AppleTrailerArtFirstPolicy.crossfadeDuration(reduceMotion: false) == 0.4)
         #expect(AppleTrailerArtFirstPolicy.crossfadeDuration(reduceMotion: true) == 0)

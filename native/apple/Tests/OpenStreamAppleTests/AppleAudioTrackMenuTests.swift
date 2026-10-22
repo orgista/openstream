@@ -13,7 +13,7 @@ struct AppleAudioTrackMenuTests {
 
     @Test func labelsAreHuman() {
         let titles = AppleAudioTrackMenu.entries(Self.tracks, activeTrackID: nil).map(\.title)
-        #expect(titles == ["English · Dolby Digital 5.1", "Spanish · AAC Stereo", "Commentary"])
+        #expect(titles == ["English · AC-3 5.1", "Spanish · AAC Stereo", "Commentary"])
     }
 
     @Test func theDefaultIsCheckedUntilTheEngineSaysOtherwise() {
@@ -30,12 +30,15 @@ struct AppleAudioTrackMenuTests {
         #expect(entries.count == 1)
         #expect(entries.first?.trackID == 5)
         #expect(entries.first?.isSelected == true)
-        #expect(entries.first?.title == "English · Dolby Digital Plus 5.1")
+        #expect(entries.first?.title == "English · E-AC-3 5.1")
     }
 
-    @Test func atmosAndCommentaryFlags() {
+    /// Codec names only, never a licensed format brand (licence audit 2026-10-22).
+    @Test func objectAudioReadsAsItsCodecAndCommentaryIsFlagged() {
         let atmos = ApplePlaybackTrack(id: 1, title: "", language: "en", codec: "truehd", channels: 8, isAtmos: true)
-        #expect(AppleAudioTrackMenu.label(for: atmos) == "English · Dolby Atmos")
+        #expect(AppleAudioTrackMenu.label(for: atmos) == "English · TrueHD 7.1")
+        let dts = ApplePlaybackTrack(id: 3, title: "", language: "en", codec: "dts", channels: 6)
+        #expect(AppleAudioTrackMenu.label(for: dts) == "English · DTS 5.1")
         let flagged = ApplePlaybackTrack(id: 2, title: "Track 2", language: "en", codec: "aac", isCommentary: true)
         #expect(AppleAudioTrackMenu.label(for: flagged) == "Commentary")
     }

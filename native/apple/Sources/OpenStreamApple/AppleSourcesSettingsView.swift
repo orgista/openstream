@@ -124,10 +124,6 @@ struct AppleSourcesSettingsView: View {
                     AppleTVNavigationLabel("Files", systemImage: "folder.badge.plus")
                 }
                 .appleTVReadableFocus()
-                NavigationLink(value: AppleSourceRoute.addInstance) {
-                    AppleTVNavigationLabel("Instance", systemImage: "plus.circle")
-                }
-                .appleTVReadableFocus()
                 NavigationLink(value: AppleSourceRoute.webManagement) {
                     AppleTVNavigationLabel("Web Management", systemImage: "network")
                 }
@@ -211,8 +207,6 @@ struct AppleSourcesSettingsView: View {
                     settings: settings,
                     webManagement: webManagement
                 )
-            case .addInstance:
-                AppleAddInstanceView()
             case .addLiveTV:
                 AppleAddLiveTVSourceView(sourceStore: sourceStore)
             case .addMediaServer:
@@ -225,8 +219,6 @@ struct AppleSourcesSettingsView: View {
                 AppleNetworkShareConnectView(start: .addFolder(id), flow: .shared, sourceStore: sourceStore)
             case .editNetworkShare(let id, let part):
                 AppleNetworkShareConnectView(start: .edit(id, part), flow: .shared, sourceStore: sourceStore)
-            case .addARR:
-                AppleServerDownloadsSettingsView(settings: settings)
             case .webManagement:
                 AppleWebManagementView(sourceStore: sourceStore, service: webManagement)
             case .detail(let sourceID):
@@ -292,7 +284,6 @@ struct AppleSourcesSettingsView: View {
 
 enum AppleSourceRoute: Hashable {
     case addFiles
-    case addInstance
     case addLiveTV
     case addMediaServer
     case addNetworkShare
@@ -300,22 +291,8 @@ enum AppleSourceRoute: Hashable {
     case networkShareServer(AppleNetworkShareServer)
     case addNetworkShareFolder(AppleSource.ID)
     case editNetworkShare(AppleSource.ID, AppleNetworkShareEditPart)
-    case addARR
     case webManagement
     case detail(AppleSource.ID)
-}
-
-private struct AppleAddInstanceView: View {
-    var body: some View {
-        List {
-            NavigationLink(value: AppleSourceRoute.addARR) {
-                AppleTVNavigationLabel("Radarr or Sonarr", systemImage: "arrow.down.circle")
-            }
-            .appleTVReadableFocus()
-        }
-        .appleSettingsPage("Add Instance")
-        .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
-    }
 }
 
 private struct AppleAddFilesView: View {
@@ -571,7 +548,6 @@ private extension AppleSourceKind {
     var systemImage: String {
         switch self {
         case .library: "books.vertical"
-        case .youtube: "play.rectangle"
         case .liveTV: "dot.radiowaves.left.and.right"
         case .nas: "externaldrive.connected.to.line.below"
         case .mediaServer: "server.rack"
@@ -787,7 +763,7 @@ struct AppleTVFormMessage: View {
     }
 }
 
-/// Two or more choices shown as pills (Xtream Account / M3U Playlist, the
+/// Two or more choices shown as pills (Provider Login / M3U Playlist, the
 /// server's shares); the chosen one is white.
 struct AppleTVChoicePill: View {
     let title: String
@@ -1265,7 +1241,7 @@ private struct AppleAddLiveTVSourceView: View {
         if usesPastedPlaylist { return nil }
         guard (try? AppleIPTVEndpointPolicy.normalize(endpoint)) != nil else {
             return type == .xtream
-                ? "Enter the Xtream server URL, including the port."
+                ? "Enter the provider's server URL, including the port."
                 : "Enter the playlist's HTTP or HTTPS URL."
         }
         if type == .xtream {

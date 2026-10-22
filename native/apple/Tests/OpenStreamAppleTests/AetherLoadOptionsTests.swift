@@ -3,6 +3,15 @@ import Testing
 @testable import OpenStreamApple
 
 struct AetherLoadOptionsTests {
+    /// Licence audit 2026-10-22: the device never encodes E-AC-3; audio
+    /// that needs re-encoding is bridged as FLAC.
+    @Test(arguments: [false, true])
+    func bridgedAudioIsNeverEncodedAsEAC3(isLive: Bool) throws {
+        let request = ApplePlaybackRequest(url: try #require(URL(string: "https://fixture.example/movie.mkv")),
+                                           isLive: isLive, mediaID: "bridge", sourceKind: .mediaServer)
+        #expect(AetherPlaybackEngine.loadOptions(for: request, headers: [:]).audioBridgeMode == .lossless)
+    }
+
     @Test func liveRawTSRequestsUseFastZapJoin() throws {
         let request = ApplePlaybackRequest(
             url: try #require(URL(string: "https://fixture.example/live.ts")),

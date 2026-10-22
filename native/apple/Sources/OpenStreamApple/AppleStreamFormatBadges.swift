@@ -1,23 +1,25 @@
 import Foundation
 
-/// A compact format badge on a title page or a quality row: the picture's
-/// resolution, its dynamic range, the sound, and whether the file is a remux.
+/// A compact format badge on a title page: the picture's resolution, its
+/// dynamic range, the channel layout, and whether the file is a remux.
 ///
 /// Drawn as the same small grey outlined text badge the meta line already
 /// uses (`AppleFormatBadge`), never a third-party wordmark and never a colour.
+/// Dolby Vision reads as plain "HDR" and object audio has no badge: no
+/// licensed format names on the badges (licence audit 2026-10-22).
 /// Everything comes from data the app already holds: a stream's name,
 /// description and `behaviorHints.filename`, a library file's name, or the
 /// engine's probe of a local file. Nothing here asks the network.
 public enum AppleStreamFormatBadge: Int, CaseIterable, Comparable, Sendable {
-    case uhd
-    case fullHD
-    case dolbyVision
-    case hdr10Plus
-    case hdr10
-    case atmos
-    case surround71
-    case surround51
-    case remux
+    // Stored as these numbers (`AppleMediaVersion.badgeValues`); 5 was Atmos.
+    case uhd = 0
+    case fullHD = 1
+    case dolbyVision = 2
+    case hdr10Plus = 3
+    case hdr10 = 4
+    case surround71 = 6
+    case surround51 = 7
+    case remux = 8
 
     public static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
 
@@ -25,10 +27,9 @@ public enum AppleStreamFormatBadge: Int, CaseIterable, Comparable, Sendable {
         switch self {
         case .uhd: "4K"
         case .fullHD: "1080p"
-        case .dolbyVision: "Dolby Vision"
+        case .dolbyVision: "HDR"
         case .hdr10Plus: "HDR10+"
         case .hdr10: "HDR10"
-        case .atmos: "Atmos"
         case .surround71: "7.1"
         case .surround51: "5.1"
         case .remux: "Remux"
@@ -40,10 +41,9 @@ public enum AppleStreamFormatBadge: Int, CaseIterable, Comparable, Sendable {
         switch self {
         case .uhd: "4K"
         case .fullHD: "1080p"
-        case .dolbyVision: "Dolby Vision"
+        case .dolbyVision: "HDR"
         case .hdr10Plus: "HDR10 plus"
         case .hdr10: "HDR10"
-        case .atmos: "Dolby Atmos"
         case .surround71: "7.1 surround"
         case .surround51: "5.1 surround"
         case .remux: "Remux"
@@ -61,14 +61,12 @@ public enum AppleStreamFormatBadge: Int, CaseIterable, Comparable, Sendable {
         public var dynamicRange: DynamicRange
         /// The default (or first) audio track's channel count; 0 when unknown.
         public var audioChannels: Int
-        public var isAtmos: Bool
 
-        public init(width: Int, height: Int, dynamicRange: DynamicRange, audioChannels: Int, isAtmos: Bool) {
+        public init(width: Int, height: Int, dynamicRange: DynamicRange, audioChannels: Int) {
             self.width = width
             self.height = height
             self.dynamicRange = dynamicRange
             self.audioChannels = audioChannels
-            self.isAtmos = isAtmos
         }
     }
 
@@ -89,7 +87,6 @@ public enum AppleStreamFormatBadge: Int, CaseIterable, Comparable, Sendable {
         } else if has(#"\bhdr(?:10)?\b"#) {
             badges.append(.hdr10)
         }
-        if has(#"\batmos\b"#) { badges.append(.atmos) }
         if has(#"(?<![0-9])(?<![0-9]\.)7[ .]1(?![0-9])"#) {
             badges.append(.surround71)
         } else if has(#"(?<![0-9])(?<![0-9]\.)5[ .]1(?![0-9])"#) {
@@ -113,7 +110,6 @@ public enum AppleStreamFormatBadge: Int, CaseIterable, Comparable, Sendable {
         case .hdr10: badges.append(.hdr10)
         case .sdr, .hlg: break
         }
-        if probe.isAtmos { badges.append(.atmos) }
         if probe.audioChannels >= 8 {
             badges.append(.surround71)
         } else if probe.audioChannels == 6 {
@@ -130,8 +126,8 @@ public enum AppleStreamFormatBadge: Int, CaseIterable, Comparable, Sendable {
         var result = Set(probed)
         if named.contains(.remux) { result.insert(.remux) }
         // A probe that could not read the audio leaves the name's sound.
-        if !probed.contains(where: { [.atmos, .surround71, .surround51].contains($0) }) {
-            for badge in named where [.atmos, .surround71, .surround51].contains(badge) { result.insert(badge) }
+        if !probed.contains(where: { [.surround71, .surround51].contains($0) }) {
+            for badge in named where [.surround71, .surround51].contains(badge) { result.insert(badge) }
         }
         return normalized(Array(result))
     }
@@ -146,13 +142,6 @@ public enum AppleStreamFormatBadge: Int, CaseIterable, Comparable, Sendable {
         return set.sorted()
     }
 
-    /// The badges a quality row shows: none. The picker stays plain 4K /
-    /// 1080p / 720p and the backend picks the source (owner 2026-09-24); the
-    /// format badges live on the title page only.
-    public static func rowBadges(_ badges: [Self]) -> [Self] {
-        []
-    }
-
     /// The badges the meta line adds after the title's own catalog badges,
     /// leaving out any resolution or HDR the catalog already shows.
     public static func titles(_ badges: [Self], excludingCatalogBadges catalog: [String]) -> [String] {
@@ -162,6 +151,7 @@ public enum AppleStreamFormatBadge: Int, CaseIterable, Comparable, Sendable {
             case .uhd where shown.contains("4K"): return nil
             case .fullHD where shown.contains("4K") || shown.contains("HD"): return nil
             case .hdr10 where shown.contains("HDR") || shown.contains("HDR10+"): return nil
+            case .dolbyVision where shown.contains("HDR"): return nil
             case .hdr10Plus where shown.contains("HDR10+"): return nil
             default: return badge.title
             }

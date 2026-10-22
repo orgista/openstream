@@ -29,6 +29,21 @@ class OpenStreamUITestCase: XCTestCase {
         ["-OpenStreamStubNetwork", stubDirectory, "-OpenStreamResetOnLaunch", "YES",
          "-OpenStreamTrace", "YES", "-OpenStreamMuteAudio", "YES"]
     }
+
+    /// A fixture Jellyfin title on a Discover shelf (`Tests/Fixtures/serve.py`, /jf):
+    /// `home.ms.<shelf>.ms:<source>:<item>`.
+    static func serverShelfItem(_ itemID: String) -> NSPredicate {
+        NSPredicate(format: "identifier BEGINSWITH 'home.ms.' AND identifier ENDSWITH %@", ":" + itemID)
+    }
+
+    /// `-OpenStreamDevSources` with only a TMDB key, so a stubbed run can search
+    /// (`TestPlans/Stubs/api.themoviedb.org`). The app deletes the file once read.
+    func tmdbFixtureKeyLaunchArguments() throws -> [String] {
+        let file = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("tmdb-fixture-\(UUID().uuidString).json")
+        try Data(#"{"version":1,"sources":[],"settings":{"tmdbAPIKey":"fixture"}}"#.utf8).write(to: file)
+        return ["-OpenStreamDevSources", file.path]
+    }
     /// Test-plan arguments belong to the runner. Forward fixture settings to each
     /// app launch, including tests that replace launchArguments between routes.
     func configureFixtureLaunch(_ app: XCUIApplication) {

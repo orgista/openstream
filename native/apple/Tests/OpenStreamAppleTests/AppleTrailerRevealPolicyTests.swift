@@ -55,17 +55,6 @@ struct AppleTrailerRevealPolicyTests {
         #endif
     }
 
-    @Test("Owner: \"only the centre play glyph is hidden\"; YouTube attribution stays")
-    func frameScriptsPreserveAttribution() {
-        for script in [AppleYouTubePreviewHTML.playerChromeScript, AppleYouTubePreviewHTML.macPlayerFrameScript] {
-            #expect(script.contains(#"[class^="player-controls"]"#) == false)
-            #expect(script.contains("player-controls-top") == false)
-            #expect(script.contains(".ytp-chrome-top") == false)
-            #expect(script.contains(".player-controls-middle,"))
-            #expect(script.contains(".ytp-bezel"))
-        }
-    }
-
     @Test("The iOS and Mac page defaults reveal at 0.5 s with 0.3 s of media")
     func pageDefaultsToFastReveal() throws {
         let embed = try #require(AppleTrailerPreviewPolicy.embedURL(for: "trailer_456"))

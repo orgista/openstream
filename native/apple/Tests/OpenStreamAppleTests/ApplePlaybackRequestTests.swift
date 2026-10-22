@@ -20,7 +20,7 @@ import Testing
         headers: ["User-Agent": "A"],
         mediaID: "id",
         sourceKind: .files,
-        hints: .init(notWebReady: false, proxyHeaders: ["User-Agent": "B"])
+        hints: .init(proxyHeaders: ["User-Agent": "B"])
     )
     #expect(request.effectiveHeaders["User-Agent"] == "B")
 }
@@ -111,7 +111,6 @@ import Testing
 
 @Test func hintsDefaultsAreEmpty() {
     let hints = ApplePlaybackRequest.Hints()
-    #expect(hints.notWebReady == false)
     #expect(hints.proxyHeaders.isEmpty)
     #expect(hints.filename == nil)
 }

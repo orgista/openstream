@@ -74,20 +74,27 @@ public actor AppleSMBRangeServer {
         self.structureStore = structureStore
     }
 
-    /// `-OpenStreamSMBTestLatencyMs 40`: a pause before every SMB read, so a
-    /// device on a fast LAN can stand in for a slow Wi-Fi path. Launch
-    /// arguments only, never a stored setting.
+    /// `-OpenStreamSMBTestLatencyMs 40` (Debug builds): a pause before every
+    /// SMB read, so a device on a fast LAN can stand in for a slow Wi-Fi path.
     public static func launchArgumentLatency() -> Duration {
+        #if DEBUG
         let value = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)["OpenStreamSMBTestLatencyMs"]
         let milliseconds = (value as? String).flatMap(Int.init) ?? (value as? Int) ?? 0
         return .milliseconds(min(max(milliseconds, 0), 500))
+        #else
+        return .zero
+        #endif
     }
 
-    /// `-OpenStreamSMBBlockCache NO`: the bridge as it was before the disc
-    /// block cache, for before/after measurements.
+    /// `-OpenStreamSMBBlockCache NO` (Debug builds): the bridge as it was
+    /// before the disc block cache, for before/after measurements.
     public static func launchArgumentUsesBlockCache() -> Bool {
+        #if DEBUG
         let value = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)["OpenStreamSMBBlockCache"]
         return (value as? String).map { $0.uppercased() != "NO" } ?? true
+        #else
+        return true
+        #endif
     }
 
     /// Bytes the bridge has sent for `playbackURL` so far; 0 for a URL it did

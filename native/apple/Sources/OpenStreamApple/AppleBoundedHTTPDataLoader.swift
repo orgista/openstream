@@ -116,6 +116,7 @@ final class AppleBoundedHTTPClient: NSObject, URLSessionDataDelegate, @unchecked
         guard maximumBytes > 0 else { throw AppleBoundedHTTPError.responseTooLarge }
         // `-OpenStreamStubNetwork <dir>`: fixtures answer, the network never
         // sees the request (UI tests, offline captures).
+        #if DEBUG
         if let root = AppleNetworkStub.root {
             let (data, response) = try AppleNetworkStub.response(for: request, root: root)
             guard behavior == .returnPrefix || data.count <= maximumBytes else {
@@ -124,6 +125,7 @@ final class AppleBoundedHTTPClient: NSObject, URLSessionDataDelegate, @unchecked
             progress(min(data.count, maximumBytes), response.expectedContentLength)
             return (data.prefix(maximumBytes), response)
         }
+        #endif
         let taskBox = AppleBoundedHTTPTaskBox()
         let result = try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in

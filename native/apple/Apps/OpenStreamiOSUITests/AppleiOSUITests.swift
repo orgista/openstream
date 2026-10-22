@@ -832,8 +832,8 @@ final class AppleiOSUITests: OpenStreamUITestCase {
     /// Captures every debug route without adding sources or modifying settings.
     func testEveryRouteIsPhotographed() {
         let routes = ["discover", "library", "live", "detail", "episodes", "play", "first-run",
-                      "backup", "channels", "playback-settings", "metadata", "server-downloads",
-                      "trakt", "watch-providers", "privacy", "storage", "about", "add-files",
+                      "backup", "channels", "playback-settings", "metadata",
+                      "watch-providers", "privacy", "storage", "about", "add-files",
                       "add-media-server", "subtitle-languages", "settings"]
         let orientations: [UIDeviceOrientation] = UIDevice.current.userInterfaceIdiom == .pad
             ? [.portrait, .landscapeLeft] : [.portrait]
@@ -1389,7 +1389,7 @@ final class AppleiOSUITests: OpenStreamUITestCase {
     func testAddLiveTVUsesNativeActionsWithoutPlaylistText() {
         launch(screen: "add-live")
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
-        let picker = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Xtream Account")).firstMatch
+        let picker = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Provider Login")).firstMatch
         XCTAssertTrue(picker.waitForExistence(timeout: 20))
         picker.tap()
         let m3u = app.buttons["M3U Playlist"].firstMatch
@@ -1453,7 +1453,7 @@ final class AppleiOSUITests: OpenStreamUITestCase {
     private func addUITestPlaylist(_ playlist: String, verifyConnection: Bool = false) {
         launch(screen: "add-live")
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
-        let picker = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Xtream Account")).firstMatch
+        let picker = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Provider Login")).firstMatch
         XCTAssertTrue(picker.waitForExistence(timeout: 20), "no Type picker")
         picker.tap()
         let m3u = app.buttons["M3U Playlist"].firstMatch
@@ -1584,7 +1584,7 @@ final class AppleiOSUITests: OpenStreamUITestCase {
     func testAddLiveTVActionsFitAtLargestTextSize() {
         app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         launch(screen: "add-live")
-        let picker = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Xtream Account")).firstMatch
+        let picker = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Provider Login")).firstMatch
         XCTAssertTrue(picker.waitForExistence(timeout: 20))
         picker.tap()
         app.buttons["M3U Playlist"].firstMatch.tap()
@@ -2131,15 +2131,14 @@ final class AppleiOSUITests: OpenStreamUITestCase {
     /// and Play naming S1, E3, the episode menu's Mark as Watched / Mark as
     /// Unwatched, and the page after un-watching E2. The history is the
     /// in-memory review fixture, so nothing is stored; nothing is played.
-    /// The page also gets the localhost stream fixture, so Play has a route
-    /// on a simulator with only metadata sources; it is never pressed.
+    /// The series is the fixture Jellyfin's (`Tests/Fixtures/serve.py`).
     func testWatchedEpisodesArePhotographed() throws {
         let env = ProcessInfo.processInfo.environment
         guard env["OPENSTREAM_WATCHED_PROOF"] == "1" else {
             throw XCTSkip("OPENSTREAM_WATCHED_PROOF not set")
         }
-        app.launchArguments += ["-OpenStreamDebugWatchedFixture", "1:1,1:2", "-OpenStreamDebugStreamFixture", "YES",
-                                "-OpenStreamDetailTitle", env["OPENSTREAM_WATCHED_TITLE"] ?? "Breaking Bad"]
+        app.launchArguments += ["-OpenStreamDebugWatchedFixture", "1:1,1:2",
+                                "-OpenStreamDetailTitle", env["OPENSTREAM_WATCHED_TITLE"] ?? "Stub Series"]
         launch(screen: "detail")
         let play = app.buttons["detail.play"].firstMatch
         XCTAssertTrue(play.waitForExistence(timeout: 60), "the title page never opened")
@@ -3377,8 +3376,8 @@ final class AppleiOSUITests: OpenStreamUITestCase {
     /// are pressed; the rest are reported as a policy skip rather than silently
     /// dropped.
     private static let crawlCollectionPrefixes = [
-        "home.media.", "home.continue.", "home.top10.", "home.ms.", "home.top-picks.",
-        "library.title.", "librarytv.channel.", "detail.similar.", "detail.quality.",
+        "home.continue.", "home.top10.", "home.ms.", "home.top-picks.",
+        "library.title.", "librarytv.channel.", "detail.similar.",
         "guide.play.", "guide.favorite.", "live.footer.", "live.picker.channel.",
         "settings.subtitleLanguages.", "watchprovider.", "sources.smb.share.",
         "sources.mediaServer.embyServer.", "sources.mediaServer.plex.server.",
@@ -3479,8 +3478,6 @@ final class AppleiOSUITests: OpenStreamUITestCase {
             CrawlScreen(route: "playback-settings"),
             CrawlScreen(route: "subtitle-languages"),
             CrawlScreen(route: "metadata"),
-            CrawlScreen(route: "server-downloads"),
-            CrawlScreen(route: "trakt"),
             CrawlScreen(route: "watch-providers"),
             CrawlScreen(route: "privacy"),
             CrawlScreen(route: "storage"),
@@ -3676,15 +3673,14 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         var scene = CrawlScene()
         scene.appState = app.state.rawValue
         guard let snapshot = try? app.snapshot() else { return scene }
-        crawlWalk(snapshot, shelf: nil, into: &scene)
+        crawlWalk(snapshot, into: &scene)
         scene.textHash = scene.textDigest.finalize()
         scene.controlHash = scene.controlDigest.finalize()
         return scene
     }
 
-    private func crawlWalk(_ node: XCUIElementSnapshot, shelf: String?, into scene: inout CrawlScene) {
+    private func crawlWalk(_ node: XCUIElementSnapshot, into scene: inout CrawlScene) {
         let identifier = node.identifier
-        let shelfHere = identifier.hasPrefix("home.catalog.") ? identifier : shelf
         switch node.elementType {
         case .button, .link, .switch, .segmentedControl, .cell, .textField, .secureTextField, .slider:
             scene.nodes.append(CrawlNode(
@@ -3696,7 +3692,7 @@ final class AppleiOSUITests: OpenStreamUITestCase {
                 frame: node.frame,
                 isEnabled: node.isEnabled,
                 isSelected: node.isSelected,
-                collection: crawlCollectionKey(identifier, shelf: shelfHere)))
+                collection: crawlCollectionKey(identifier)))
             scene.controlDigest.combine(identifier)
             scene.controlDigest.combine(node.label)
             scene.controlDigest.combine((node.value as? String) ?? "")
@@ -3723,14 +3719,11 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         default:
             break
         }
-        for child in node.children { crawlWalk(child, shelf: shelfHere, into: &scene) }
+        for child in node.children { crawlWalk(child, into: &scene) }
     }
 
-    private func crawlCollectionKey(_ identifier: String, shelf: String?) -> String? {
+    private func crawlCollectionKey(_ identifier: String) -> String? {
         guard let prefix = Self.crawlCollectionPrefixes.first(where: { identifier.hasPrefix($0) }) else { return nil }
-        // Every catalog card carries the same prefix whatever row it is in, so
-        // the row has to come from the shelf that holds it.
-        if prefix == "home.media.", let shelf { return shelf }
         // The two Top 10 rows, and one media server's shelf against another's.
         if prefix == "home.top10." || prefix == "home.ms." {
             let parts = identifier.split(separator: ".")
@@ -5316,7 +5309,7 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         // A Discover poster: the trailer is left to play (no glyph over it,
         // N49 #17), then the page is scrolled to Related (N49 #20).
         relaunch()
-        if let poster = find("home.media.") {
+        if let poster = find("home.ms.") {
             poster.tap()
             expectBar("poster")
             // Rate still opens its menu as one element; closed untouched.
@@ -5547,11 +5540,11 @@ final class AppleiOSUITests: OpenStreamUITestCase {
             start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .fast, thenHoldForDuration: 0.1)
             step("hero-page-\(index)", wait: 2)
         }
-        var shelfCard = firstHittable("home.media.")
+        var shelfCard = firstHittable("home.ms.")
         for _ in 0 ..< 3 where shelfCard == nil {
             scrollUp()
             Thread.sleep(forTimeInterval: 1.2)
-            shelfCard = firstHittable("home.media.")
+            shelfCard = firstHittable("home.ms.")
         }
         if let shelfCard {
             // By coordinates at the row's height: once the row pages, the
@@ -5569,11 +5562,11 @@ final class AppleiOSUITests: OpenStreamUITestCase {
 
         // A catalog poster opened, its page scrolled, then Back.
         relaunch(nil, settle: 22)
-        var poster = firstHittable("home.media.")
+        var poster = firstHittable("home.ms.")
         for _ in 0 ..< 4 where poster == nil {
             scrollUp()
             Thread.sleep(forTimeInterval: 1.2)
-            poster = firstHittable("home.media.")
+            poster = firstHittable("home.ms.")
         }
         if let poster {
             poster.tap()

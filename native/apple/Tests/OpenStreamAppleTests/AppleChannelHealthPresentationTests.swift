@@ -123,10 +123,8 @@ struct AppleChannelHealthPresentationTests {
         #expect(AppleChannelHealthIndicator(result: map["plain"]) == nil)
     }
 
-    // MARK: Export wiring
-
     @MainActor
-    @Test func storeReadsHistoryOnceAndExportsOnlyWorkingChannels() async throws {
+    @Test func storeReadsHistoryOnce() async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: "health-ui-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
         let history = AppleChannelHealthHistory(directory: directory)
@@ -147,35 +145,12 @@ struct AppleChannelHealthPresentationTests {
 
         #expect(store.workingCount == 1)
         #expect(store.summary(now: now) == "1 of 4 responding, last swept 1m ago")
-        let text = store.workingM3U()
-        #expect(text.hasPrefix("#EXTM3U\n"))
-        #expect(text.contains("#EXTINF:-1,Channel a"))
-        #expect(!text.contains("Channel b"))
-        #expect(!text.contains("Channel c"))
 
         let map = store.map(for: lineup)
         #expect(AppleChannelHealthIndicator(result: map["b"]) == .offline)
         #expect(AppleChannelHealthIndicator(result: map["c"]) == .notPlayable)
         #expect(AppleChannelHealthIndicator(result: map["a"]) == nil)
         #expect(map["dd"] == nil)
-    }
-
-    @Test func shareFileCarriesTheWorkingPlaylist() async throws {
-        guard #available(macOS 15.2, iOS 18.2, *) else { return }
-        let lineup = [channel("a"), channel("b")]
-        let file = AppleWorkingM3UFile(lineup: lineup, health: ["a": result("a", .online), "b": result("b", .timeout)])
-        let data = try await file.exported(as: .m3uPlaylist)
-        let text = String(decoding: data, as: UTF8.self)
-        #expect(text == AppleWorkingM3UExport.text(lineup: lineup, health: file.health))
-        #expect(text.contains("Channel a"))
-        #expect(!text.contains("Channel b"))
-    }
-
-    @Test func portalAddressPairsAndDownloadsInOneVisit() {
-        let session = AppleWebManagementSession(
-            url: URL(string: "http://192.0.2.10:8090/")!, friendlyURL: URL(string: "http://192.0.2.10:8090/")!,
-            expiresAt: now, token: "token", pairingCode: "ABC123")
-        #expect(AppleWorkingM3UExportRoute.address(for: session) == "192.0.2.10:8090/working.m3u?pair=ABC123")
     }
 }
 

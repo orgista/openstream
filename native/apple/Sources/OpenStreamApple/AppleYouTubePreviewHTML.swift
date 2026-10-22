@@ -80,7 +80,7 @@ enum AppleYouTubePreviewHTML {
         <meta name="referrer" content="strict-origin-when-cross-origin">
         <style>
         html,body{position:relative;margin:0;width:100%;height:100%;background:transparent;overflow:hidden}
-        iframe{position:absolute;inset:0;margin:0;width:100%;height:100%;background:#000;border:0;opacity:1;pointer-events:none}
+        iframe{position:absolute;inset:0;margin:0;width:100%;height:100%;background:#000;border:0;opacity:1}
         body.ready iframe{opacity:1;transition:opacity .12s linear}
         @media(prefers-reduced-motion:reduce){iframe{transition:none}}\(scaledLayout)
         </style>
@@ -366,7 +366,7 @@ enum AppleYouTubePreviewHTML {
               enablejsapi: 1,
               rel: 0,
               fs: 0,
-              origin: 'https://openstream.app'
+              origin: '\(AppleTrailerPreviewPolicy.embedOrigin.absoluteString)'
             },
             events: {
               'onReady': function(event) {
@@ -445,64 +445,6 @@ enum AppleYouTubePreviewHTML {
         """
     }
 
-    /// YouTube's own chrome that `controls: 0` still draws: the play/pause
-    /// glyph in the middle of the picture and the caption window.
-    private static let playerChromeHidingCSS =
-        #".player-controls-middle,.ytp-bezel,.ytp-bezel-text-wrapper,.ytp-caption-window-container,.caption-window{display:none!important}"#
-
-    /// Injected into every frame of the title page's web view on iPhone and
-    /// iPad, it acts only in YouTube's own player page, which the host page
-    /// cannot reach across origins. Without it the mobile player left a large
-    /// pause glyph over the playing trailer (N49 #17); the Apple TV app draws
-    /// nothing over a playing preview. Pausing stays with the native shield
-    /// over the web view, which never passes a touch to YouTube.
-    ///
-    /// It also reports when YouTube's `<video>` has really drawn frames
-    /// (`AppleTrailerFirstFrameGate`): the host keeps the art up until then.
-    static let playerChromeScript = """
-    (function() {
-      if (!/(^|\\.)youtube(-nocookie)?\\.com$/.test(location.hostname)) return;
-      var style = document.createElement('style');
-      style.textContent = '\(playerChromeHidingCSS)';
-      (document.head || document.documentElement).appendChild(style);
-    \(AppleTrailerFirstFrameGate.frameScript)
-    })();
-    """
-
-    /// Injected into every frame of the Mac hero's web view, it acts only in
-    /// YouTube's own player page, which the host page cannot reach across
-    /// origins (macOS WebKit runs user scripts there):
-    /// - the play/pause glyph YouTube flashes in the middle of the picture
-    ///   (it showed at the crossfade, N31) and its caption window never draw
-    ///   (`playerChromeHidingCSS`);
-    /// - it reports the player page's size and where its `<video>` is drawn
-    ///   whenever either changes (`geometry`). YouTube re-lays its video out
-    ///   a few frames after the page is resized, so the host waits for this
-    ///   to settle at the web view's new size before the art fades (N31: the
-    ///   picture came in at the art's size, then grew once the cover was going).
-    static let macPlayerFrameScript = """
-    (function() {
-      if (!/(^|\\.)youtube(-nocookie)?\\.com$/.test(location.hostname)) return;
-      var style = document.createElement('style');
-      style.textContent = '\(playerChromeHidingCSS)';
-      (document.head || document.documentElement).appendChild(style);
-      var last = '';
-      function report() {
-        var video = document.querySelector('video');
-        var box = video ? video.getBoundingClientRect() : null;
-        var geometry = {state: 'geometry', frame: [innerWidth, innerHeight],
-          video: box ? [box.left, box.top, box.width, box.height] : null,
-          source: video ? [video.videoWidth, video.videoHeight] : null};
-        var key = JSON.stringify(geometry);
-        if (key === last) return;
-        last = key;
-        try { window.webkit.messageHandlers.trailerState.postMessage(geometry); } catch (_) {}
-      }
-      addEventListener('resize', report);
-      setInterval(report, 50);
-    })();
-    """
-
     private static func htmlEscaped(_ value: String) -> String {
         value
             .replacingOccurrences(of: "&", with: "&amp;")
@@ -510,53 +452,5 @@ enum AppleYouTubePreviewHTML {
             .replacingOccurrences(of: "'", with: "&#39;")
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
-    }
-}
-
-/// The art stays over a starting trailer until YouTube's `<video>` has
-/// presented `minimumFrames` frames with advancing media time, reported by
-/// `requestVideoFrameCallback` inside YouTube's own frame (owner item 4,
-/// 2026-10-09: the trailer "flashes as it begins"). PLAYING and advancing
-/// `currentTime` alone came before the first decoded frame was on screen on
-/// a device, where the video is a hardware layer. Each new `playing` event
-/// (a resume, a replay) arms it again. `cap` reveals anyway for a WebKit
-/// that never calls back.
-enum AppleTrailerFirstFrameGate {
-    static let framesState = "frames"
-    static let minimumFrames = 3
-    static let cap: TimeInterval = 2.5
-
-    static var frameScript: String {
-        """
-          (function() {
-            var key = location.pathname.split('/').pop();
-            function arm(video) {
-              if (!video || typeof video.requestVideoFrameCallback !== 'function') return;
-              var seen = 0, last = -1, sent = false;
-              function onFrame(now, meta) {
-                var time = meta && typeof meta.mediaTime === 'number' ? meta.mediaTime : video.currentTime;
-                if (time !== last) { seen += 1; last = time; }
-                if (seen >= \(minimumFrames)) {
-                  if (!sent) {
-                    sent = true;
-                    try { window.webkit.messageHandlers.trailerState.postMessage({videoKey: key, state: '\(framesState)'}); } catch (_) {}
-                  }
-                  return;
-                }
-                video.requestVideoFrameCallback(onFrame);
-              }
-              video.addEventListener('playing', function() {
-                seen = 0; last = -1; sent = false;
-                video.requestVideoFrameCallback(onFrame);
-              });
-              video.requestVideoFrameCallback(onFrame);
-            }
-            var hooked = null;
-            setInterval(function() {
-              var video = document.querySelector('video');
-              if (video && video !== hooked) { hooked = video; arm(video); }
-            }, 100);
-          })();
-        """
     }
 }

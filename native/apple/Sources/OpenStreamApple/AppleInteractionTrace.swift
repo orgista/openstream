@@ -74,23 +74,9 @@ public enum AppleInteractionTrace {
         #if DEBUG
         return true
         #else
-        return defaultEnabled(
-            infoPlistFlag: Bundle.main.object(forInfoDictionaryKey: infoPlistKey) as? Bool,
-            isTestFlight: AppleBuildChannel.hasSandboxReceipt)
+        // TestFlight, App Review and the App Store behave alike (2026-10-22).
+        return false
         #endif
-    }
-
-    /// `OpenStreamTraceDefault` in the app's Info.plist. A build stamped
-    /// `true` ships with tracing on (owner, 2026-09-17: Internal and
-    /// TraceEnabled), `false` with it off (the Reddit group). Absent, sandbox-receipt
-    /// installs (TestFlight, and App Review's build) trace by default and App
-    /// Store installs do not. The Settings
-    /// toggle overrides either way.
-    public static let infoPlistKey = "OpenStreamTraceDefault"
-
-    public static func defaultEnabled(infoPlistFlag: Bool?, isTestFlight: Bool) -> Bool {
-        if let infoPlistFlag { return infoPlistFlag }
-        return isTestFlight
     }
 
     /// Restarts the timeline. Called from the root view's `task`, which runs
@@ -108,15 +94,12 @@ public enum AppleInteractionTrace {
         record(.screen, "trace started")
     }
 
-    /// Debug builds always echo the trace to stdout. A release build does so only when a cabled Mac launches it with
-    /// `-OpenStreamTraceConsole YES` (`devicectl device process launch --console`), so device runs can be read live.
-    static let printsToConsole: Bool = {
-        #if DEBUG
-        return true
-        #else
-        return UserDefaults.standard.bool(forKey: "OpenStreamTraceConsole")
-        #endif
-    }()
+    /// Debug builds echo the trace to stdout; a shipped build never does.
+    #if DEBUG
+    static let printsToConsole = true
+    #else
+    static let printsToConsole = false
+    #endif
 
     public static func record(_ kind: Kind, _ detail: @autoclosure () -> String) {
         guard isEnabled else { return }

@@ -63,7 +63,7 @@ struct AppleDiscoverView: View {
     @State private var relationRevision = AppleTMDBRelationCache.revision
     @State private var recommendations = RecommendationResult()
     @State private var recommendationsRevision: String?
-    @State private var top10Week: AppleNetflixTop10Week?
+    @State private var top10: AppleTop10Store.Chart?
     @State private var library = AppleLocalLibraryStore.shared
     /// The heroes (media ids) whose wordmark lookup has finished; until then
     /// a hero with no wordmark yet holds its title slot empty rather than
@@ -302,7 +302,7 @@ struct AppleDiscoverView: View {
         #if !os(tvOS)
         .overlay(alignment: .top) {
             // Not over the centred loading state, which already says it.
-            if catalogStore.isLoading, hasContent {
+            if discoverIsLoading, hasContent {
                 ProgressView()
                     .padding()
             }
@@ -364,7 +364,9 @@ struct AppleDiscoverView: View {
         .navigationDestination(isPresented: $visionReviewDetail) {
             if let value = visionReviewItem { detail(value, initialAutoPlay: visionReviewAutoPlay) }
         }
-        .task(id: hasContent) {
+        // Again once a media server's titles arrive: a local library can make
+        // Discover non-empty before the server's shelves (the review title) load.
+        .task(id: "\(hasContent):\(visionReviewItem != nil)") {
             let screen = UserDefaults.standard.string(forKey: "OpenStreamVisionScreen")
             // Search is a page pushed from Discover everywhere except Apple TV,
             // so it had no debug route at all and no sweep could reach it —
@@ -444,10 +446,6 @@ struct AppleDiscoverView: View {
             .appleTraceScreen("search")
             .environment(\.appleTabToolbar, tabToolbarContext)
         }
-        .onChange(of: settings.top10ListsEnabled) { _, enabled in
-            if enabled { loadTop10() }
-            else { top10Week = nil }
-        }
         // A deep link, widget, Spotlight result or App Intent moves Discover's
         // own navigation state. The stack itself keeps its identity: it used
         // to be rebuilt for every route, and replacing the visible navigation
@@ -502,9 +500,8 @@ struct AppleDiscoverView: View {
             await mediaServerLibrary.reload(sources: sourceStore.sources) { try sourceStore.mediaServerSession(for: $0) }
             try? await mediaIndex.synchronizePlaybackProgress()
         }
-        .task(id: settings.top10ListsEnabled) {
-            guard settings.top10ListsEnabled else { return }
-            loadTop10()
+        .task(id: "\(settings.top10ListsEnabled):\(metadataConfiguration != nil)") {
+            await loadTop10()
         }
         #if DEBUG
         // `-OpenStreamDebugOpenHeroDetails YES` presses the billboard's
@@ -920,7 +917,8 @@ struct AppleDiscoverView: View {
         let relevant = ranked.filter { $0.viewingScore + $0.likedScore + $0.relationScore > 0 }
         var result = RecommendationResult(picks: relevant.prefix(20).compactMap { byID[$0.title.id] }, heroStates: heroStates)
         let headings = snapshot.serverShelves.map(\.title)
-            + ["Continue Watching", "Library", "Top Picks for You", "Top 10 Movies in the US", "Top 10 Shows in the US"]
+            + ["Continue Watching", "Library", "Top Picks for You",
+               AppleDiscoverRowOrder.top10MoviesTitle, AppleDiscoverRowOrder.top10ShowsTitle]
         // One meaningful watched seed, most recent first. New rows are appended
         // after the viewer's configured rails, outside the automatic rhythm.
         for seed in history.prefix(8) {
@@ -986,8 +984,8 @@ struct AppleDiscoverView: View {
         rails += mediaServerLibrary.shelves.map { (.mediaServer($0.id), .poster) }
         if !picks.isEmpty { rails.append((.topPicks, .still)) }
         if settings.top10ListsEnabled {
-            if !(top10Week?.films ?? []).isEmpty { rails.append((.top10("movie"), .still)) }
-            if !(top10Week?.tv ?? []).isEmpty { rails.append((.top10("series"), .still)) }
+            if !(top10?.movies ?? []).isEmpty { rails.append((.top10("movie"), .still)) }
+            if !(top10?.shows ?? []).isEmpty { rails.append((.top10("series"), .still)) }
         }
         let ordered: [DiscoverRail]
         if let custom = customRowOrder {
@@ -1017,10 +1015,6 @@ struct AppleDiscoverView: View {
         AppleCatalogShelfPolicy.identity(item, source: source)
     }
 
-    private func top10Identity(_ entry: AppleNetflixTop10Entry, type: String) -> String {
-        "\(type):\(entry.title.lowercased())"
-    }
-
     private func displayedRails(continueWatching: [IndexedCatalogItem], picks: [IndexedCatalogItem]) -> [DisplayedRail] {
         let rails = discoverRails(continueWatching: continueWatching, picks: picks)
         let keys = rails.map { rail -> [String] in
@@ -1030,7 +1024,7 @@ struct AppleDiscoverView: View {
             case .mediaServer(let id): return (mediaServerLibrary.shelves.first { $0.id == id }?.items ?? []).map { rowIdentity($0) }
             case .topPicks: return picks.map { rowIdentity($0.item, source: $0.source) }
             case .becauseWatched: return recommendations.seedItems.map { rowIdentity($0.item, source: $0.source) }
-            case .top10(let type): return (type == "movie" ? top10Week?.films ?? [] : top10Week?.tv ?? []).map { top10Identity($0, type: type) }
+            case .top10(let type): return top10Items(type).map { rowIdentity($0) }
             }
         }
         let deduped = AppleCatalogShelfPolicy.deduplicatedRows(keys)
@@ -1096,11 +1090,8 @@ struct AppleDiscoverView: View {
         case .topPicks:
             indexedShelf(title: "Top Picks for You", identifier: "top-picks", values: rowItems(picks, allowed: allowed, item: { $0.item }, source: { $0.source }), showsProgress: false)
         case .top10(let type):
-            if type == "movie" {
-                top10Shelf(title: "Top 10 Movies in the US", entries: top10Week?.films ?? [], type: "movie", allowed: allowed)
-            } else {
-                top10Shelf(title: "Top 10 Shows in the US", entries: top10Week?.tv ?? [], type: "series", allowed: allowed)
-            }
+            top10Shelf(title: type == "movie" ? AppleDiscoverRowOrder.top10MoviesTitle : AppleDiscoverRowOrder.top10ShowsTitle,
+                       items: top10Items(type), type: type, allowed: allowed)
         }
     }
 
@@ -1142,48 +1133,42 @@ struct AppleDiscoverView: View {
         return .live(type: value.item.type, recordID: key, recordProgress: value.record.progress, store: store)
     }
 
-    private func loadTop10() {
-        Task {
-            // Before the rows exist, so they draw with the art matched on an earlier launch.
-            await AppleTop10ArtworkStore.shared.load()
-            if let stored = await AppleNetflixTop10Client.shared.storedWeek() { top10Week = stored }
-            try? await Task.sleep(for: AppleLaunchWorkPolicy.remainingLaunchWindow(processAge: AppleLaunchMarks.launchAge()))
-            do {
-                top10Week = try await AppleNetflixTop10Client.shared.latestWeek()
-                appleTrace("discover top 10 loaded")
-            } catch {
-                AppleInteractionTrace.record(.network, "discover top 10 failed \(appleErrorLabel(error))")
-            }
+    /// TMDB's weekly charts, drawn from the kept copy first. Off, or with no
+    /// TMDB key, there are no Top 10 rows.
+    private func loadTop10() async {
+        guard settings.top10ListsEnabled, let metadataConfiguration else {
+            top10 = nil
+            return
+        }
+        if top10 == nil { top10 = await AppleTop10Store.shared.stored() }
+        do { try await Task.sleep(for: AppleLaunchWorkPolicy.remainingLaunchWindow(processAge: AppleLaunchMarks.launchAge())) }
+        catch { return }
+        do {
+            top10 = try await AppleTop10Store.shared.latest(configuration: metadataConfiguration)
+            appleTrace("discover top 10 loaded")
+        } catch {
+            AppleInteractionTrace.record(.network, "discover top 10 failed \(appleErrorLabel(error))")
         }
     }
 
+    private func top10Items(_ type: String) -> [AppleCatalogItem] {
+        (type == "movie" ? top10?.movies : top10?.shows) ?? []
+    }
+
     @ViewBuilder
-    private func top10Shelf(title: String, entries: [AppleNetflixTop10Entry], type: String, allowed: Set<String>) -> some View {
+    private func top10Shelf(title: String, items: [AppleCatalogItem], type: String, allowed: Set<String>) -> some View {
         var seen = Set<String>()
-        let ordered = entries.sorted { $0.rank < $1.rank }.filter {
-            let key = top10Identity($0, type: type)
-            return allowed.contains(key) && seen.insert(key).inserted
-        }
-        if !ordered.isEmpty {
+        let ranked = items.enumerated().filter { allowed.contains(rowIdentity($0.element)) && seen.insert(rowIdentity($0.element)).inserted }
+        if !ranked.isEmpty {
             // Ranked shelves retain the standard row spacing and focus treatment.
             AppleMediaShelf(title: title) {
-                ForEach(ordered, id: \.rank) { entry in
-                    Group {
-                        let match = AppleTop10ArtworkStore.shared.cached(title: entry.title, type: type)
-                            .map(AppleTop10ArtworkStore.match)
-                        if let match {
-                            let record = AppleMediaIngestion.catalogRecord(instanceID: match.source.id, item: match.item)
-                            let value = IndexedCatalogItem(record: record, item: match.item, source: match.source)
-                            NavigationLink { detail(value) } label: { AppleTop10Card(item: match.item, rank: entry.rank) }
-                        } else {
-                            AppleTop10SearchCard(entry: entry, type: type,
-                                                 metadataConfiguration: metadataConfiguration) { match in
-                                let record = AppleMediaIngestion.catalogRecord(instanceID: match.source.id, item: match.item)
-                                detail(IndexedCatalogItem(record: record, item: match.item, source: match.source))
-                            }
-                        }
+                ForEach(ranked, id: \.offset) { rank, item in
+                    let match = AppleCatalogSearchMatch.metadataOnly(item)
+                    let record = AppleMediaIngestion.catalogRecord(instanceID: match.source.id, item: item)
+                    NavigationLink { detail(IndexedCatalogItem(record: record, item: item, source: match.source)) } label: {
+                        AppleTop10Card(item: item, rank: rank + 1)
                     }
-                    .accessibilityIdentifier("home.top10.\(type).\(entry.rank)")
+                    .accessibilityIdentifier("home.top10.\(type).\(rank + 1)")
                 }
             }
         }
@@ -1396,7 +1381,6 @@ struct AppleDiscoverView: View {
                 mediaIndex: mediaIndex,
                 playbackSources: sourceStore.sources,
                 metadataConfiguration: metadataConfiguration,
-                gatewayConfig: gatewayConfig,
                 settings: settings,
                 openSettings: openSettings,
                 initialAutoPlay: initialAutoPlay,
@@ -1429,15 +1413,6 @@ struct AppleDiscoverView: View {
         #else
         32
         #endif
-    }
-
-    private var gatewayConfig: AppleTranscodeGatewayConfig? {
-        guard settings.gatewayEnabled else { return nil }
-        return try? AppleTranscodeGatewayConfig(
-            baseURL: settings.gatewayURL,
-            sessionToken: settings.gatewayToken,
-            isEnabled: true
-        )
     }
 
     private var metadataConfiguration: AppleTMDBConfiguration? { settings.tmdbConfiguration }
@@ -1594,7 +1569,6 @@ struct AppleSearchView: View {
                                 mediaIndex: mediaIndex,
                                 playbackSources: sourceStore.sources,
                                 metadataConfiguration: metadataConfiguration,
-                                gatewayConfig: gatewayConfig,
                                 settings: settings,
                                 openSettings: openSettings,
                                 tabToolbar: tabToolbar
@@ -1660,7 +1634,6 @@ struct AppleSearchView: View {
                 mediaIndex: mediaIndex,
                 playbackSources: sourceStore.sources,
                 metadataConfiguration: metadataConfiguration,
-                gatewayConfig: gatewayConfig,
                 settings: settings,
                 openSettings: openSettings,
                 initialAutoPlay: value.action == .play,
@@ -1781,18 +1754,10 @@ struct AppleSearchView: View {
         sharedLinkLoading = true
         defer { if generation == sharedLinkGeneration { sharedLinkLoading = false } }
         do {
-            if case .youtube = link {
-                throw AppleSharedLinkError.unsupportedYouTube
-            }
             await mediaIndex.load()
             try Task.checkCancellation()
             let resolution = try await AppleSharedLinkResolution.resolve(link, records: mediaIndex.records,
-                sources: sourceStore.sources, configuration: metadataConfiguration) { name in
-                    await searchStore.search(query: name) {
-                        await mediaIndex.search($0)
-                    }
-                    return searchStore.results
-                }
+                                                                         configuration: metadataConfiguration)
             try Task.checkCancellation()
             guard revision == router.revision, generation == sharedLinkGeneration else { return }
             if case .sharedLink = router.route { deliveredRouteRevision = revision }
@@ -1801,20 +1766,17 @@ struct AppleSearchView: View {
                 routedResult = .init(record: record, item: match.item, source: match.source, action: .display, revision: revision)
                 appleTrace("shared link match title page \(record.title)")
             } else if let item = resolution.item {
-                let source = AppleTop10ArtworkStore.match(item).source
+                let source = AppleCatalogSearchMatch.metadataOnly(item).source
                 let record = AppleMediaRecord(canonicalID: item.mediaID, kind: item.type == "movie" ? .movie : .series,
                                              title: item.name, year: item.year, availability: [])
                 query = item.name
                 routedResult = .init(record: record, item: item, source: source, action: .display, revision: revision)
                 appleTrace("shared link match metadata title page \(item.name)")
-            } else if let title = resolution.title {
-                query = title.name
-                appleTrace("shared link match ambiguous or unavailable → search")
             } else { throw AppleSharedLinkError.unreadable }
         } catch {
             guard !Task.isCancelled, revision == router.revision, generation == sharedLinkGeneration else { return }
             if case .sharedLink = router.route { deliveredRouteRevision = revision }
-            sharedLinkError = (error as? AppleSharedLinkError)?.errorDescription ?? "Couldn't read that link"
+            sharedLinkError = AppleSharedLinkError.unreadable.errorDescription ?? ""
             showsSharedLinkError = true
             appleTrace("shared link resolution failed \(link.provider)")
         }
@@ -1885,15 +1847,6 @@ struct AppleSearchView: View {
         }
     }
 
-    private var gatewayConfig: AppleTranscodeGatewayConfig? {
-        guard settings.gatewayEnabled else { return nil }
-        return try? AppleTranscodeGatewayConfig(
-            baseURL: settings.gatewayURL,
-            sessionToken: settings.gatewayToken,
-            isEnabled: true
-        )
-    }
-
 
     private var metadataConfiguration: AppleTMDBConfiguration? { settings.tmdbConfiguration }
 }
@@ -1947,56 +1900,6 @@ private struct AppleTop10Card: View {
             Spacer(minLength: 0)
         }
         .frame(width: cardWidth, alignment: .leading)
-    }
-}
-
-private struct AppleTop10SearchCard<Destination: View>: View {
-    let entry: AppleNetflixTop10Entry
-    let type: String
-    let metadataConfiguration: AppleTMDBConfiguration?
-    @ViewBuilder let destination: (AppleCatalogSearchMatch) -> Destination
-    @State private var match: AppleCatalogSearchMatch?
-    @State private var isLoading = true
-
-    var body: some View {
-        Group {
-            if let match {
-                NavigationLink { destination(match) } label: { AppleTop10Card(item: match.item, rank: entry.rank) }
-            } else {
-                // No spinner: it sat against the caption, beside the title,
-                // and read as part of the name. The title tile is the
-                // placeholder, as on every other card still waiting for art.
-                AppleTop10UnresolvedCard(title: entry.title, rank: entry.rank)
-                    .accessibilityValue(isLoading ? "Finding artwork" : "Unavailable from connected catalogs")
-            }
-        }
-        .task(id: "\(entry.title):\(metadataConfiguration != nil)") {
-            match = nil
-            isLoading = true
-            do {
-                try await Task.sleep(for: AppleLaunchWorkPolicy.remainingLaunchWindow(processAge: AppleLaunchMarks.launchAge()))
-            } catch { return }
-            // TMDB's answer is kept on disk for the next launch.
-            if let metadataConfiguration,
-               let item = await AppleTop10ArtworkStore.shared.resolve(title: entry.title, type: type,
-                                                                       configuration: metadataConfiguration) {
-                guard !Task.isCancelled else { return }
-                match = AppleTop10ArtworkStore.match(item)
-            }
-            guard !Task.isCancelled else { return }
-            isLoading = false
-        }
-    }
-}
-
-private struct AppleTop10UnresolvedCard: View {
-    let title: String
-    let rank: Int
-    var body: some View {
-        AppleTop10Card(
-            item: AppleCatalogItem(mediaID: "unresolved-rank-\(rank)", type: "movie", name: title),
-            rank: rank
-        )
     }
 }
 
@@ -2567,7 +2470,6 @@ struct AppleCatalogItemDetailView: View {
     let mediaIndex: AppleMediaIndexStore
     let playbackSources: [AppleSource]
     let metadataConfiguration: AppleTMDBConfiguration?
-    let gatewayConfig: AppleTranscodeGatewayConfig?
     let settings: AppleSettingsStore
     let openSettings: () -> Void
     let initialAutoPlay: Bool
@@ -2698,7 +2600,6 @@ struct AppleCatalogItemDetailView: View {
         mediaIndex: AppleMediaIndexStore,
         playbackSources: [AppleSource],
         metadataConfiguration: AppleTMDBConfiguration?,
-        gatewayConfig: AppleTranscodeGatewayConfig?,
         settings: AppleSettingsStore,
         openSettings: @escaping () -> Void,
         initialAutoPlay: Bool = false,
@@ -2713,7 +2614,6 @@ struct AppleCatalogItemDetailView: View {
         self.mediaIndex = mediaIndex
         self.playbackSources = playbackSources
         self.metadataConfiguration = metadataConfiguration
-        self.gatewayConfig = gatewayConfig
         self.settings = settings
         self.openSettings = openSettings
         self.initialAutoPlay = initialAutoPlay
@@ -4250,7 +4150,6 @@ struct AppleCatalogItemDetailView: View {
                                 mediaIndex: mediaIndex,
                                 playbackSources: playbackSources,
                                 metadataConfiguration: metadataConfiguration,
-                                gatewayConfig: gatewayConfig,
                                 settings: settings,
                                 openSettings: openSettings,
                                 tabToolbar: tabToolbar
@@ -4429,8 +4328,8 @@ struct AppleCatalogItemDetailView: View {
     }
 
     /// The first art that has not failed, in the order the page prefers it.
-    /// It took only the first that existed: a catalog backdrop that 404s
-    /// (metahub has none for new titles) left the hero black under the
+    /// It took only the first that existed: a backdrop that 404s (some new
+    /// titles have none) left the hero black under the
     /// copy, and black again once a trailer ended — "back to the art" with
     /// no art (iOS 18.6 regression 2026-10-01, screens 14/16).
     private var heroArtworkURL: URL? {
@@ -5629,7 +5528,6 @@ struct AppleCatalogItemDetailView: View {
                     mediaIndex: mediaIndex,
                     playbackSources: playbackSources,
                     metadataConfiguration: metadataConfiguration,
-                    gatewayConfig: gatewayConfig,
                     settings: settings,
                     openSettings: openSettings,
                     tabToolbar: tabToolbar
@@ -5979,12 +5877,11 @@ struct AppleCatalogItemDetailView: View {
         let settings = settings
         let store = localSourceStore ?? AppleSourceStore()
         result.sourceOptionsLoader = {
-            let localOptions = files.map { file in
-                ApplePlaybackSourceOption(id: file.url, tier: nil) { _ in
+            files.map { file in
+                ApplePlaybackSourceOption(id: file.url) {
                     try await library.presentation(for: file, sourceStore: store, settings: settings)
                 }
             }
-            return ApplePlaybackSourceOptions(tiers: [], automatic: localOptions, byTier: [:])
         }
         return result
     }
@@ -6200,8 +6097,7 @@ struct AppleCatalogItemDetailView: View {
                     let prepared = try await playbackPreparer.prepare(
                         sourceURL: offlineRecord.localURL,
                         decision: ApplePlaybackPreparer.decision(for: inspection),
-                        inspectedAsset: inspection,
-                        gatewayRequest: nil
+                        inspectedAsset: inspection
                     )
                     let presentation = AppleMediaPlayerPresentation(
                         request: ApplePlaybackRequest(
@@ -6889,12 +6785,6 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         private weak var container: PlayerContainer?
         private var playbackIntent = true
         private var revealGeneration = 0
-        /// The YouTube frame's `<video>` has presented real frames since the
-        /// last start (`AppleYouTubePreviewHTML.playerChromeScript`). The art
-        /// holds until then, so the crossfade never runs over a black or
-        /// still-buffering player (owner item 4: "flashes as it begins").
-        private var framesPresented = false
-        private var pendingRevealMuted: Bool?
 
         func attach(to container: PlayerContainer) {
             self.container = container
@@ -6909,8 +6799,6 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         func prepareForPlayback() {
             playbackIntent = true
             revealGeneration += 1
-            framesPresented = false
-            pendingRevealMuted = nil
             container?.setPreviewVisible(false, animated: false)
             webView?.layer.removeAllAnimations()
             webView?.alpha = 1
@@ -6921,8 +6809,6 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         func hidePreview(animated: Bool = false, completion: (() -> Void)? = nil) {
             playbackIntent = false
             revealGeneration += 1
-            framesPresented = false
-            pendingRevealMuted = nil
             lastPlaying = false
             container?.setPreviewVisible(false, animated: animated, completion: completion)
             webView?.layer.removeAllAnimations()
@@ -7065,33 +6951,8 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             #if DEBUG && os(iOS)
             if state == "playing" { container?.probe?.begin() }
             #endif
-            if state == AppleTrailerFirstFrameGate.framesState {
-                framesPresented = true
-                if let pending = pendingRevealMuted, playbackIntent {
-                    pendingRevealMuted = nil
-                    appleTrace("trailer first frames presented: revealing")
-                    reveal(muted: pending)
-                }
-                return
-            }
             if state == "revealed" {
                 guard playbackIntent else { return }
-                guard framesPresented else {
-                    // The page saw PLAYING, but no frame has been drawn yet:
-                    // hold the art, and reveal anyway after the cap rather
-                    // than never (a WebKit without frame callbacks).
-                    pendingRevealMuted = muted
-                    let generation = revealGeneration
-                    appleTrace("trailer waiting for first frames")
-                    DispatchQueue.main.asyncAfter(deadline: .now() + AppleTrailerFirstFrameGate.cap) { [weak self] in
-                        guard let self, self.revealGeneration == generation, self.playbackIntent,
-                              let pending = self.pendingRevealMuted else { return }
-                        self.pendingRevealMuted = nil
-                        appleTrace("trailer first frames not reported: revealing at the cap")
-                        self.reveal(muted: pending)
-                    }
-                    return
-                }
                 reveal(muted: muted)
                 return
             } else if state == "ended" {
@@ -7188,24 +7049,6 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             configuration.allowsPictureInPictureMediaPlayback = false
             configuration.allowsAirPlayForMediaPlayback = false
             configuration.websiteDataStore = AppleTrailerPlayerPrefetch.dataStore
-            configuration.userContentController.addUserScript(WKUserScript(
-                source: ApplePlaybackSessionPolicy.trailer.webMediaSessionSuppressionScript,
-                injectionTime: .atDocumentStart,
-                forMainFrameOnly: false
-            ))
-            #if DEBUG && os(iOS)
-            // `-OpenStreamTrailerNoChromeCSS YES` (N75): without the chrome CSS, to film what it hides.
-            let injectsChromeCSS = !UserDefaults.standard.bool(forKey: "OpenStreamTrailerNoChromeCSS")
-            #else
-            let injectsChromeCSS = true
-            #endif
-            if injectsChromeCSS {
-                configuration.userContentController.addUserScript(WKUserScript(
-                    source: AppleYouTubePreviewHTML.playerChromeScript,
-                    injectionTime: .atDocumentStart,
-                    forMainFrameOnly: false
-                ))
-            }
             #if DEBUG && os(iOS)
             if UserDefaults.standard.bool(forKey: "OpenStreamHeroTrailerProbe") {
                 configuration.userContentController.addUserScript(WKUserScript(
@@ -7510,8 +7353,8 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             probe.container = container
             container.probe = probe
         }
-        // `-OpenStreamHeroNoSettle YES`, as on the Mac: reveal, then
-        // re-measure, for a before/after run on one build.
+        // `-OpenStreamHeroNoSettle YES`: reveal, then re-measure, for a
+        // before/after run on one build.
         if UserDefaults.standard.bool(forKey: "OpenStreamHeroNoSettle") {
             container.settlesPictureBeforeReveal = false
         }
@@ -7617,7 +7460,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             allowsSound: allowsSound
         )
         appleTrace("trailer web load key=\(url.lastPathComponent) autoplay=\(isPlaying) allowsSound=\(allowsSound)")
-        view.loadHTMLString(html, baseURL: URL(string: "https://openstream.app"))
+        view.loadHTMLString(html, baseURL: AppleTrailerPreviewPolicy.embedOrigin)
     }
 }
 #endif
@@ -8253,7 +8096,6 @@ struct AppleDetailMetrics {
 
 enum AppleFormatBadgeKind: Equatable, Sendable {
     case text(String)
-    case image(String)
 
     static func resolve(_ value: String) -> Self? {
         switch value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() {
@@ -8266,19 +8108,9 @@ enum AppleFormatBadgeKind: Equatable, Sendable {
         case "SDH": return .text("SDH")
         case "G", "PG", "PG-13", "R", "NC-17", "NR", "TV-Y", "TV-Y7", "TV-G", "TV-PG", "TV-14", "TV-MA":
             return .text(value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased())
-        case "DV", "DOLBY VISION": return .image("dolby-vision")
-        case "DOLBY ATMOS": return .image("dolby-atmos")
-        case "DOLBY AUDIO": return .image("dolby-audio")
+        // Plain words, never a licensed format's name or logo (licence audit 2026-10-22).
+        case "DV", "DOLBY VISION": return .text("HDR")
         default: return nil
-        }
-    }
-
-    static func isRenderable(_ kind: Self) -> Bool {
-        switch kind {
-        case .text: return true
-        case .image(let name):
-            return Bundle.module.url(forResource: name, withExtension: "pdf", subdirectory: "Badges") != nil
-                || Bundle.module.url(forResource: name, withExtension: "png", subdirectory: "Badges") != nil
         }
     }
 }
@@ -8303,23 +8135,17 @@ enum AppleTitleMetadataPresentation {
     static func orderedBadges(contentRating: String?, formatBadges: [String], limit: Int) -> [String] {
         let candidates = [contentRating].compactMap { $0 } + formatBadges
         let ranked = candidates.compactMap { raw -> (String, Int)? in
-            guard let kind = AppleFormatBadgeKind.resolve(raw) else { return nil }
-            switch kind {
-            case .text(let title):
-                let rank: Int
-                switch title {
-                case "4K", "HD": rank = 10
-                case "HDR", "HDR10+": rank = 30
-                case "CC": rank = 50
-                case "SDH": rank = 60
-                case "AD": rank = 70
-                default: rank = 0
-                }
-                return (title, rank)
-            case .image:
-                // Owner policy: no third-party wordmarks on title metadata.
-                return nil
+            guard case .text(let title) = AppleFormatBadgeKind.resolve(raw) else { return nil }
+            let rank: Int
+            switch title {
+            case "4K", "HD": rank = 10
+            case "HDR", "HDR10+": rank = 30
+            case "CC": rank = 50
+            case "SDH": rank = 60
+            case "AD": rank = 70
+            default: rank = 0
             }
+            return (title, rank)
         }
         .sorted { lhs, rhs in lhs.1 == rhs.1 ? lhs.0 < rhs.0 : lhs.1 < rhs.1 }
 
@@ -8380,8 +8206,7 @@ struct AppleFormatBadge: View {
     }
 
     /// A badge that draws `text` as given, in the same grey outline: the
-    /// stream format badges ("Dolby Vision", "Atmos", "5.1") are words, never
-    /// the wordmark art `resolve` maps some of them to.
+    /// stream format badges ("HDR", "5.1").
     init(text: String) {
         kind = .text(text)
     }
@@ -8408,26 +8233,6 @@ struct AppleFormatBadge: View {
                 .alignmentGuide(.firstTextBaseline) { dimensions in
                     dimensions[.bottom]
                 }
-        case .image(let name):
-            if Self.assetExists(named: name) {
-                Image("Badges/\(name)", bundle: .module)
-                    .renderingMode(.template)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(height: 14)
-                    .foregroundStyle(badgeForeground)
-                    .padding(.horizontal, AppleDetailMetrics.badgeHorizontalPadding)
-                    .frame(height: AppleDetailMetrics.badgeHeight)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: AppleDetailMetrics.badgeCornerRadius)
-                            .stroke(badgeStroke, lineWidth: AppleDetailMetrics.badgeStrokeWidth)
-                    }
-                    .alignmentGuide(.firstTextBaseline) { dimensions in
-                        dimensions[.bottom]
-                    }
-            } else {
-                EmptyView()
-            }
         case nil:
             EmptyView()
         }
@@ -8439,11 +8244,6 @@ struct AppleFormatBadge: View {
 
     private var badgeStroke: Color {
         colorScheme == .dark ? .white.opacity(0.60) : .black.opacity(0.60)
-    }
-
-    private static func assetExists(named name: String) -> Bool {
-        Bundle.module.url(forResource: name, withExtension: "pdf", subdirectory: "Badges") != nil
-            || Bundle.module.url(forResource: name, withExtension: "png", subdirectory: "Badges") != nil
     }
 }
 
@@ -8876,7 +8676,7 @@ extension AppleCatalogItemDetailView {
     }
 
     /// "Start from Beginning" in the one button's context menu on the iPhone,
-    /// iPad, Mac and Vision Pro, beside Quality.
+    /// iPad, Mac and Vision Pro.
     @ViewBuilder
     private var playButtonMenuItems: some View {
         versionMenu

@@ -491,27 +491,34 @@ final class AppleiOSStubSmokeUITests: OpenStreamUITestCase {
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
 
-        // Discover is lazy: the stub shelf sits under the hero, so it is not
-        // in the hierarchy until it has scrolled into view.
-        // Movie One belongs to Your Library and is removed from catalog shelves.
-        let poster = app.descendants(matching: .any).matching(identifier: "home.media.movie:tt0000002").firstMatch
+        // Discover is lazy: the fixture Jellyfin's shelves sit under the hero,
+        // so a poster is not in the hierarchy until it has scrolled into view.
+        // Stub Movie Five leads the server's Latest row: Six, the newest, is in
+        // Continue Watching, and Discover shows a title once.
+        let poster = app.descendants(matching: .any).matching(Self.serverShelfItem("jf-movie-5")).firstMatch
         XCTAssertTrue(app.descendants(matching: .any).matching(
             NSPredicate(format: "identifier BEGINSWITH 'home.' OR identifier BEGINSWITH 'discover.'")).firstMatch
             .waitForExistence(timeout: 60), "Discover never drew")
         // The row is lazy and a page swipe can carry it past the top: scroll
         // until it is on screen, and back down a little when it went by.
-        for _ in 0 ..< 10 {
+        // A frame check, not `isHittable`: a card still outside the window has
+        // no activation point, and asking for one fails the test outright.
+        let visible = app.frame.insetBy(dx: 0, dy: 80)
+        func onScreen() -> Bool {
+            guard let frame = (try? poster.snapshot())?.frame else { return false }
+            return visible.contains(CGPoint(x: frame.midX, y: frame.midY))
+        }
+        for _ in 0 ..< 10 where !onScreen() {
             guard let frame = (try? poster.snapshot())?.frame else { app.swipeUp(); _ = poster.waitForExistence(timeout: 3); continue }
-            if poster.isHittable { break }
             if frame.midY < app.frame.midY { app.swipeDown() } else { app.swipeUp() }
             Thread.sleep(forTimeInterval: 0.6)
         }
-        XCTAssertTrue(poster.exists && poster.isHittable, "the stub catalog row never drew")
+        XCTAssertTrue(onScreen(), "the fixture server's row never drew")
         poster.tap()
 
         let play = app.buttons["detail.play"].firstMatch
         XCTAssertTrue(play.waitForExistence(timeout: 30), "the title page never opened")
-        XCTAssertTrue(app.staticTexts["Stub Movie Two"].firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Stub Movie Five"].firstMatch.waitForExistence(timeout: 10))
 
         if min(app.frame.width, app.frame.height) < 600 {
             // Owner, 2026-10-19: "in the content page there is a search icon we don't need".
@@ -557,10 +564,12 @@ final class AppleiOSStubSmokeUITests: OpenStreamUITestCase {
 
     /// Library → Unmatched → Match picks a title, which leaves the shelf with
     /// its art; Use Automatic Match on the title page puts it back.
-    func testUnmatchedShelfMatchesAndReverts() {
+    func testUnmatchedShelfMatchesAndReverts() throws {
         // The reset clears metadata keys and lookup caches left on the
-        // simulator, so the fixture's misses cache as no-matches.
+        // simulator, so the fixture's misses cache as no-matches. Match
+        // searches TMDB, answered from the stub files.
         app.launchArguments = ["-OpenStreamLibraryTitlesFixture"] + Self.stubbedLaunchArguments
+            + (try tmdbFixtureKeyLaunchArguments())
         app.launchEnvironment["OPENSTREAM_LIBRARY_FIXTURE_PATH"] = Self.stubDirectory + "/library-unmatched"
         app.launch()
         func shot(_ name: String) {

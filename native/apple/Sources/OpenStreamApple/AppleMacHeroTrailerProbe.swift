@@ -178,20 +178,14 @@ final class AppleMacHeroTrailerProbe {
         let band = container.pictureWindow
         let picture = CGRect(x: web.minX, y: web.minY + web.height * band.lowerBound,
                              width: web.width, height: web.height * (band.upperBound - band.lowerBound))
-        let scale = CGFloat(container.layoutScale)
-        let video = container.geometry()?.video.map {
-            CGRect(x: web.minX + $0.minX / scale, y: web.minY + $0.minY / scale,
-                   width: $0.width / scale, height: $0.height / scale)
-        }
         let insets = window?.contentView?.safeAreaInsets ?? NSEdgeInsetsZero
         let fullScreen = window?.styleMask.contains(.fullScreen) == true
         return String(
-            format: "tick=%04d t=%dms sinceFade=%@ cover=%.2f win=%@%@ safe=%.0f,%.0f,%.0f,%.0f hero=%@ art=%@ web=%@ pic=%@ vid=%@ page=%@ crop.art=%@ crop.pic=%@ zoom=%@",
+            format: "tick=%04d t=%dms sinceFade=%@ cover=%.2f win=%@%@ safe=%.0f,%.0f,%.0f,%.0f hero=%@ art=%@ web=%@ pic=%@ crop.art=%@ crop.pic=%@ zoom=%@",
             tick, Int(elapsed * 1000), sinceFade.map(String.init) ?? "-", container.coverOpacity,
             text(window?.frame), fullScreen ? "(fs)" : "",
             insets.top, insets.left, insets.bottom, insets.right,
-            text(hero), text(art), text(web), text(picture), text(video),
-            container.geometry().map { "\(Int($0.frame.width))x\(Int($0.frame.height))" } ?? "none",
+            text(hero), text(art), text(web), text(picture),
             fraction(art.map { AppleMacHeroCrop.visibleFraction(of: $0, through: hero) }),
             fraction(AppleMacHeroCrop.visibleFraction(of: picture, through: hero)),
             art.map { String(format: "%.3f", picture.width / max($0.width, 1)) } ?? "none")

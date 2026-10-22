@@ -222,7 +222,7 @@ struct AppleSetupTransferImportTests {
 }
 
 /// The owner's real setup, shaped with fake values: an IPTV
-/// provider and an SMB NAS; Radarr, Sonarr, TMDB and gateway settings; Live
+/// provider and an SMB NAS; a TMDB key; Live
 /// favourites; progress, history, ratings and a watchlist. Build 17's Apple TV
 /// refused it with "Couldn't import this setup." because the Apple TV cannot
 /// write to Application Support, where the media index (and the watchlist the
@@ -252,9 +252,6 @@ struct AppleSetupTransferOwnerSetupTests {
         #expect(Set(tv.sources.sources.map(\.id)) == Set(phone.sources.sources.map(\.id)))
         #expect(tv.sources.sources.allSatisfy { !$0.needsSignIn })
         #expect(tv.settings.tmdbAPIKey == "fixture-tmdb")
-        #expect(tv.settings.radarrAPIKey == "fixture-radarr")
-        #expect(tv.settings.radarrURL == "https://fixture.example/radarr")
-        #expect(tv.settings.gatewayURL == "https://fixture.example/gateway")
         #expect(tv.settings.favoriteChannelIDs == ["fixture-channel-1", "fixture-channel-2"])
         #expect(ApplePlaybackStore(defaults: tv.defaults).progress(for: "tt0000001")?.position == 600)
         #expect(AppleTitleRatingStore(defaults: tv.defaults).rating(for: "tt0000002") == .up)
@@ -307,13 +304,7 @@ struct AppleSetupTransferOwnerSetupTests {
                                       username: "fixture-user", password: "fixture-password")
         _ = try phone.sources.addNetworkShare(name: "NAS", host: "192.0.2.10", share: "Media",
                                               username: "fixture-user", password: "fixture-password")
-        phone.settings.radarrURL = "https://fixture.example/radarr"
-        phone.settings.radarrAPIKey = "fixture-radarr"
-        phone.settings.sonarrURL = "https://fixture.example/sonarr"
-        phone.settings.sonarrAPIKey = "fixture-sonarr"
         phone.settings.tmdbAPIKey = "fixture-tmdb"
-        phone.settings.gatewayURL = "https://fixture.example/gateway"
-        phone.settings.gatewayEnabled = true
         phone.settings.favoriteChannelIDs = ["fixture-channel-1", "fixture-channel-2"]
         let playback = ApplePlaybackStore(defaults: phone.defaults)
         playback.save(mediaID: "tt0000001", position: 600, duration: 6_000)

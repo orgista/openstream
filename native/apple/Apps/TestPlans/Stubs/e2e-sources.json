@@ -11,6 +11,14 @@
       "kind": "folder",
       "name": "Stub Library",
       "path": "$STUB_ROOT/library"
+    },
+    {
+      "kind": "mediaServer",
+      "server": "jellyfin",
+      "name": "Fixture Jellyfin",
+      "url": "http://127.0.0.1:8767/jf",
+      "username": "fixture",
+      "password": "fixture"
     }
   ]
 }

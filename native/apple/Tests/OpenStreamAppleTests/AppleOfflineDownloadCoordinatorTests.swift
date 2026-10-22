@@ -304,7 +304,7 @@ struct AppleOfflineDownloadCoordinatorTests {
     @Test func resolverFailuresSayPreparationFailed() async throws {
         let (coordinator, _, root) = try makeContext(data: Data())
         defer { try? FileManager.default.removeItem(at: root) }
-        coordinator.start(request: request(), resolvePlans: { throw ApplePlaybackPreparationError.gatewayUnavailable })
+        coordinator.start(request: request(), resolvePlans: { throw ApplePlaybackPreparationError.externalDemuxRequired })
         try await waitForDownloadState { if case .failed = $0 { return true }; return false }
         #expect(coordinator.state == .failed(item: "Sample Movie", message: AppleOfflineDownloadFailure.preparationFailed.message))
     }

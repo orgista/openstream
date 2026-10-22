@@ -13,18 +13,6 @@ import Testing
     }
 }
 
-@Suite struct AppleTraceDefaultTests {
-    @Test func sandboxReceiptTracesUnlessTheBuildSaysOtherwise() {
-        #expect(AppleInteractionTrace.defaultEnabled(infoPlistFlag: nil, isTestFlight: true))
-        #expect(!AppleInteractionTrace.defaultEnabled(infoPlistFlag: false, isTestFlight: true))
-    }
-
-    @Test func appStoreStaysOffUnlessTheBuildTurnsItOn() {
-        #expect(!AppleInteractionTrace.defaultEnabled(infoPlistFlag: nil, isTestFlight: false))
-        #expect(AppleInteractionTrace.defaultEnabled(infoPlistFlag: true, isTestFlight: false))
-    }
-}
-
 @Suite struct AppleAttributionTests {
     @Test func tmdbLogoShipsInTheBundle() {
         #expect(AppleTMDBAttributionRow.logo != nil)

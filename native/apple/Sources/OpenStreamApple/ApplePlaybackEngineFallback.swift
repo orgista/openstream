@@ -18,13 +18,11 @@ import Foundation
 /// - the "Playback Unavailable" alert (failure text, OK only) is for the
 ///   OpenStream engine failing.
 public enum ApplePlaybackEngineFallback {
-    /// The stock player opens this stream by the existing rules: not one marked
-    /// as needing the gateway, and not a container AVFoundation
+    /// The stock player opens this stream unless it is a container AVFoundation
     /// cannot demux (`ApplePlaybackCoordinator.stockPlayerOpens`). A name that
     /// says nothing about its container counts as playable.
     public static func stockPlayable(_ request: ApplePlaybackRequest) -> Bool {
-        !request.hints.notWebReady
-            && ApplePlaybackCoordinator.stockPlayerOpens(url: request.url, filename: request.hints.filename)
+        ApplePlaybackCoordinator.stockPlayerOpens(url: request.url, filename: request.hints.filename)
     }
 
     /// The engine a press starts on. Only Native changes, only for on-demand

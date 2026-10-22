@@ -34,7 +34,6 @@ struct AppleTransportOverlay: View {
 
     let coordinator: ApplePlaybackCoordinator
     let request: ApplePlaybackRequest
-    let otherSources: (() -> Void)?
     let onZapChannel: ((AppleLiveZappingPolicy.Direction) -> Void)?
     let onLastChannel: (() -> Void)?
     let onShowChannels: (() -> Void)?
@@ -101,7 +100,6 @@ struct AppleTransportOverlay: View {
     init(
         coordinator: ApplePlaybackCoordinator,
         request: ApplePlaybackRequest,
-        otherSources: (() -> Void)? = nil,
         onShowChannels: (() -> Void)? = nil,
         onZapChannel: ((AppleLiveZappingPolicy.Direction) -> Void)? = nil,
         onLastChannel: (() -> Void)? = nil,
@@ -128,7 +126,6 @@ struct AppleTransportOverlay: View {
         self.onPictureInPicture = onPictureInPicture
         self.coordinator = coordinator
         self.request = request
-        self.otherSources = otherSources
         self.onShowChannels = onShowChannels
         self.onZapChannel = onZapChannel
         self.onLastChannel = onLastChannel
@@ -507,7 +504,7 @@ struct AppleTransportOverlay: View {
                 }
                 if controls.contains(.otherSourcesMenu), !optionsInBottomBar {
                     AppleTransportOptionsMenu(coordinator: coordinator, model: model,
-                        otherSources: otherSources, onStartOver: onStartOver, onWatchLive: onWatchLive,
+                        onStartOver: onStartOver, onWatchLive: onWatchLive,
                         sharePlayMenu: liveTopControls ? sharePlayMenu : nil)
                 }
                 if let sharePlayMenu, controls.contains(.sharePlayMenu), !optionsInBottomBar,
@@ -800,7 +797,7 @@ struct AppleTransportOverlay: View {
                     }
                     if controls.contains(.captions) { trackMenu }
                     AppleTransportOptionsMenu(coordinator: coordinator, model: model,
-                        otherSources: otherSources, onStartOver: onStartOver, onWatchLive: onWatchLive,
+                        onStartOver: onStartOver, onWatchLive: onWatchLive,
                         sharePlayMenu: sharePlayMenu)
                 }
             }
@@ -1054,7 +1051,6 @@ private struct AppleTransportScrubberRow: View {
 private struct AppleTransportOptionsMenu: View {
     let coordinator: ApplePlaybackCoordinator
     let model: AppleTransportOverlayModel
-    let otherSources: (() -> Void)?
     let onStartOver: (() -> Void)?
     let onWatchLive: (() -> Void)?
     let sharePlayMenu: AppleTransportOverlay.SharePlayMenu?
@@ -1091,11 +1087,6 @@ private struct AppleTransportOptionsMenu: View {
                 }
                 .appleMenuPresence(model)
                 .accessibilityIdentifier("player.chapters")
-            }
-            if let otherSources {
-                Button("Quality", systemImage: "slider.horizontal.3", action: otherSources)
-                    .appleMenuPresence(model)
-                    .accessibilityIdentifier("player.quality")
             }
             if let sharePlayMenu {
                 Button(sharePlayMenu.primaryTitle, action: sharePlayMenu.primaryAction)
@@ -1149,11 +1140,6 @@ private struct AppleTransportOptionsMenu: View {
             })
             menu.accessibilityIdentifier = "player.chapters"
             items.append(menu)
-        }
-        if let otherSources {
-            let action = UIAction(title: "Quality", image: UIImage(systemName: "slider.horizontal.3")) { _ in otherSources() }
-            action.accessibilityIdentifier = "player.quality"
-            items.append(action)
         }
         if let sharePlayMenu { items.append(sharePlayMenu.uiMenu) }
         return UIMenu(children: items)

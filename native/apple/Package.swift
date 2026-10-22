@@ -35,7 +35,6 @@ let package = Package(
                 .copy("Resources/ChannelLineup"),
                 .copy("Resources/ThirdPartyLicenses"),
                 .copy("Resources/ThirdPartyNotices"),
-                .copy("Resources/Badges"),
                 .copy("Resources/Attribution"),
             ]
         ),

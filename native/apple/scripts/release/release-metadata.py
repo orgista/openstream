@@ -11,7 +11,7 @@ import zipfile
 from pathlib import Path
 
 
-# OpenStream plays media the user owns; public text never mentions add-ons (scripts/check-no-addons-in-release.sh).
+# OpenStream plays media the user owns; public text never mentions add-ons (scripts/check-appstore-compliance.sh).
 ADDON_WORDS = re.compile(r'stremio|strem[.]io|torrent|debrid|premiumize|torbox|magnet:|infohash|cinemeta|metahub|add-?on|manifest[.]json', re.I)
 
 

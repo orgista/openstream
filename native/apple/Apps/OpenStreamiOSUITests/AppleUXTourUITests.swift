@@ -112,7 +112,7 @@ final class AppleUXTourUITests: OpenStreamUITestCase {
         for _ in 0..<4 { app.swipeDown() }
         Thread.sleep(forTimeInterval: 1)
         explore("discover", depth: 0, reach: reach)
-        longPress(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "home.media.")).firstMatch,
+        longPress(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "home.ms.")).firstMatch,
                   "discover-poster", reach: reach)
     }
 
@@ -163,7 +163,7 @@ final class AppleUXTourUITests: OpenStreamUITestCase {
         let reach = { [unowned self] in
             self.launch([]); self.tab("Library")
             let title = self.app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ OR identifier BEGINSWITH %@",
-                                                              "library.title.", "home.media.")).firstMatch
+                                                              "library.title.", "home.ms.")).firstMatch
             if title.waitForExistence(timeout: 240) { Thread.sleep(forTimeInterval: 2); title.tap() }
         }
         reach()
@@ -171,8 +171,6 @@ final class AppleUXTourUITests: OpenStreamUITestCase {
         guard play.waitForExistence(timeout: 30) else { return fail("no Play on the Library title page") }
         shot("library-title")
         play.tap(); taps += 1
-        let quality = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "detail.quality.")).firstMatch
-        if quality.waitForExistence(timeout: 4), quality.isHittable { shot("source-choice"); quality.tap() }
         Thread.sleep(forTimeInterval: 15)
         shot("playing-15s-no-controls")
         revealPlayerControls()
@@ -194,7 +192,7 @@ final class AppleUXTourUITests: OpenStreamUITestCase {
             slider.adjust(toNormalizedSliderPosition: 0.35); taps += 1
             Thread.sleep(forTimeInterval: 3); shot("scrubbed-35pct"); record("scrubber", "adjusted")
         } else { log("  no slider on the player") }
-        var ids = ["player.captions", "player.subtitles", "player.options", "player.more", "player.quality",
+        var ids = ["player.captions", "player.subtitles", "player.options", "player.more",
                    "player.chapters", "player.sleepTimer", "player.mute", "player.fullscreen"]
         for control in controls where control.identifier.hasPrefix("player.") && !ids.contains(control.identifier)
             && !["player.close", "player.play-pause", "player.controls.show"].contains(control.identifier) {
@@ -229,7 +227,7 @@ final class AppleUXTourUITests: OpenStreamUITestCase {
         let reach = { [unowned self] in
             self.launch([]); self.tab("Library")
             _ = self.app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ OR identifier BEGINSWITH %@",
-                                                      "library.title.", "home.media.")).firstMatch.waitForExistence(timeout: 240)
+                                                      "library.title.", "home.ms.")).firstMatch.waitForExistence(timeout: 240)
             Thread.sleep(forTimeInterval: 2)
         }
         reach()
@@ -311,7 +309,7 @@ final class AppleUXTourUITests: OpenStreamUITestCase {
     private func openFirstTitle(kind: String) {
         let details = app.buttons["home.featured.details"].firstMatch
         if details.waitForExistence(timeout: 10), details.isHittable { details.tap() }
-        else { app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "home.media.")).firstMatch.tap() }
+        else { app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "home.ms.")).firstMatch.tap() }
         _ = titlePage.waitForExistence(timeout: 30)
         Thread.sleep(forTimeInterval: 3)
     }
@@ -470,7 +468,7 @@ final class AppleUXTourUITests: OpenStreamUITestCase {
     private static let unsafeIdentifierPrefixes = [
         "detail.rate.", "detail.my-list", "home.featured.my-list", "home.featured.play", "detail.play", "detail.startOver",
         "detail.next-episode", "detail.episode.", "detail.download", "home.continue.", "player.close", "live.shareplay",
-        "search.recent.clear", "backup.", "live.watchLive", "player.watchLive", "detail.quality.", "BackButton",
+        "search.recent.clear", "backup.", "live.watchLive", "player.watchLive", "BackButton",
         "live.picker.channel.", "live.footer.", "search.openCopiedLink",
         // The iPad's tab strip: tabs are visited by their own sections.
         "sparkles", "books.vertical", "dot.radiowaves.left.and.right", "gearshape",
@@ -653,7 +651,7 @@ final class AppleUXTourUITests: OpenStreamUITestCase {
             Thread.sleep(forTimeInterval: 0.8)
             return true
         }
-        for id in ["detail.back", "live.picker.back", "live.picker.close", "detail.quality.done", "player.quality.done",
+        for id in ["detail.back", "live.picker.back", "live.picker.close",
                    "detail.watchOn.instructions.done"] {
             let button = app.buttons[id].firstMatch
             if button.exists, button.isHittable { button.tap(); Thread.sleep(forTimeInterval: 1.0); return true }
@@ -737,7 +735,7 @@ final class AppleUXTourUITests: OpenStreamUITestCase {
     }
 
     private func waitForPosters() {
-        let poster = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "home.media.")).firstMatch
+        let poster = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "home.ms.")).firstMatch
         if !poster.waitForExistence(timeout: 90) { log("  Discover showed no posters within 90 s") }
         Thread.sleep(forTimeInterval: 3)
     }

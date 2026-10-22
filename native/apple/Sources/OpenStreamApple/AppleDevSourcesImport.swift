@@ -158,19 +158,6 @@ public enum AppleDevSourcesImport {
             settings.tmdbAPIKey = key
             if !key.isEmpty { settings.metadataEnabled = true }
         }
-        if let radarr = values.radarr {
-            settings.radarrURL = radarr.url
-            settings.radarrAPIKey = radarr.apiKey
-            if !radarr.rootFolderPath.isEmpty { settings.radarrRootFolderPath = radarr.rootFolderPath }
-            if !radarr.qualityProfileID.isEmpty { settings.radarrQualityProfileID = radarr.qualityProfileID }
-        }
-        if let sonarr = values.sonarr {
-            settings.sonarrURL = sonarr.url
-            settings.sonarrAPIKey = sonarr.apiKey
-            if !sonarr.rootFolderPath.isEmpty { settings.sonarrRootFolderPath = sonarr.rootFolderPath }
-            if !sonarr.qualityProfileID.isEmpty { settings.sonarrQualityProfileID = sonarr.qualityProfileID }
-        }
-        if let trakt = values.traktClientID { settings.traktClientID = trakt }
         let names = values.appliedNames
         if !names.isEmpty {
             appleTrace("\(AppleDevSourcesPolicy.tracePrefix) settings \(names.joined(separator: ", ")): applied")

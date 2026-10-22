@@ -1,11 +1,13 @@
+#if DEBUG
 import Foundation
 
 
 /// Where a stubbed request's answer lives on disk: `<root>/<host>/<path>`,
 /// with `.json` appended when the path does not already end in it. The query
 /// string is ignored, so `/3/search/movie?query=x&api_key=…` reads
-/// `api.themoviedb.org/3/search/movie.json`. Pure: the file system is the
-/// caller's.
+/// `api.themoviedb.org/3/search/movie.json`; a search may have its own answer
+/// in `api.themoviedb.org/3/search/movie/query=x.json` (lower-cased).
+/// Pure: the file system is the caller's.
 public enum AppleNetworkStubPolicy {
     public static let launchKey = "OpenStreamStubNetwork"
 
@@ -23,6 +25,16 @@ public enum AppleNetworkStubPolicy {
         // Stay inside the root: a `..` segment in a request is not a fixture.
         guard !path.split(separator: "/").contains("..") else { return nil }
         return root.appendingPathComponent(host).appendingPathComponent(String(path.dropFirst()))
+    }
+
+    /// The search-specific answer for a request with a `query` item, which
+    /// `AppleNetworkStub` reads before the path's own fixture.
+    public static func searchFixtureURL(for url: URL, root: URL) -> URL? {
+        guard let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+                .first(where: { $0.name == "query" })?.value?.lowercased(),
+              !query.isEmpty, !query.contains("/"), query != "..", query != ".",
+              let fixture = fixtureURL(for: url, root: root) else { return nil }
+        return fixture.deletingPathExtension().appendingPathComponent("query=\(query).json")
     }
 }
 
@@ -42,13 +54,9 @@ public enum AppleNetworkStub {
 
     /// The root from the launch argument, read once. Tests scope `testRoot`.
     private static let launchRoot: URL? = {
-        #if DEBUG
         guard let path = UserDefaults.standard.string(forKey: AppleNetworkStubPolicy.launchKey),
               !path.isEmpty else { return nil }
         return URL(fileURLWithPath: path, isDirectory: true)
-        #else
-        return nil
-        #endif
     }()
 
     public static var root: URL? { testRoot ?? launchRoot }
@@ -67,13 +75,13 @@ public enum AppleNetworkStub {
     /// line naming the missing file's request.
     static func response(for request: URLRequest, root: URL) throws -> (Data, URLResponse) {
         guard let url = request.url else { throw Error.unmatched("no url") }
-        guard let fixture = AppleNetworkStubPolicy.fixtureURL(for: url, root: root),
-              let fixtureData = try? Data(contentsOf: fixture) else {
+        let search = AppleNetworkStubPolicy.searchFixtureURL(for: url, root: root).flatMap { try? Data(contentsOf: $0) }
+        guard let fixtureData = search ?? AppleNetworkStubPolicy.fixtureURL(for: url, root: root)
+                .flatMap({ try? Data(contentsOf: $0) }) else {
             let line = AppleNetworkStubPolicy.missDescription(for: url)
             AppleInteractionTrace.record(.network, line)
             throw Error.unmatched(line)
         }
-        #if DEBUG
         var data = fixtureData
         // Only the E2E route rewrites fictional media hosts to its loopback server.
         // Control-plane requests and artwork still come from the stub files.
@@ -86,9 +94,6 @@ public enum AppleNetworkStub {
             }
             data = Data(text.utf8)
         }
-        #else
-        let data = fixtureData
-        #endif
         let response = HTTPURLResponse(
             url: url, statusCode: 200, httpVersion: "HTTP/1.1",
             headerFields: ["Content-Type": "application/json", "Content-Length": "\(data.count)"]
@@ -96,3 +101,4 @@ public enum AppleNetworkStub {
         return (data, response)
     }
 }
+#endif

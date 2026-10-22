@@ -64,11 +64,11 @@ public enum AppleAudioTrackMenu {
             || track.title.range(of: #"\bcommentary\b"#, options: [.regularExpression, .caseInsensitive]) != nil
     }
 
-    /// "Dolby Digital 5.1", "AAC Stereo", "Dolby Atmos". Nil when neither
-    /// the codec nor the channel count is known.
+    /// "E-AC-3 5.1", "AAC Stereo": the codec's own name, never a licensed
+    /// format brand (licence audit 2026-10-22). Nil when neither the codec
+    /// nor the channel count is known.
     static func formatName(for track: ApplePlaybackTrack) -> String? {
-        let codec = codecName(track.codec?.lowercased() ?? "", isAtmos: track.isAtmos)
-        if track.isAtmos, let codec { return codec }
+        let codec = codecName(track.codec?.lowercased() ?? "")
         let layout = channelName(track.channels)
         switch (codec, layout) {
         case let (codec?, layout?): return "\(codec) \(layout)"
@@ -78,12 +78,11 @@ public enum AppleAudioTrackMenu {
         }
     }
 
-    static func codecName(_ codec: String, isAtmos: Bool) -> String? {
-        if isAtmos, ["eac3", "truehd", "mlp"].contains(codec) { return "Dolby Atmos" }
+    static func codecName(_ codec: String) -> String? {
         switch codec {
-        case "ac3", "ac-3": return "Dolby Digital"
-        case "eac3", "ec-3", "e-ac-3": return "Dolby Digital Plus"
-        case "truehd", "mlp": return "Dolby TrueHD"
+        case "ac3", "ac-3": return "AC-3"
+        case "eac3", "ec-3", "e-ac-3": return "E-AC-3"
+        case "truehd", "mlp": return "TrueHD"
         case "dts", "dca": return "DTS"
         case "aac", "aac_latm", "mp4a": return "AAC"
         case "mp3", "mp3float": return "MP3"

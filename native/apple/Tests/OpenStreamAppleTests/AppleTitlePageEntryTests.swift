@@ -48,14 +48,14 @@ struct AppleTitlePageEntryTests {
         #expect(AppleCatalogArtworkPolicy.plateBackdrop(item: value, showing: URL(string: shown)) == nil)
     }
 
-    /// The iPhone/iPad title page's web view hides the same YouTube chrome
-    /// (the centre play/pause glyph, captions) as the Mac hero's.
-    @Test func trailerChromeIsHiddenOnEveryHost() {
-        for script in [AppleYouTubePreviewHTML.playerChromeScript, AppleYouTubePreviewHTML.macPlayerFrameScript] {
-            #expect(script.contains(#"[class^="player-controls"]"#) == false)
-            #expect(script.contains(".ytp-bezel"))
-            #expect(script.contains("display:none!important"))
-            #expect(script.contains("youtube(-nocookie)?"))
-        }
+    /// Trailers use YouTube's IFrame API as documented: the page names our
+    /// own origin and leaves YouTube's player untouched.
+    @Test func trailersUseTheOfficialPlayerUntouched() throws {
+        let embed = try #require(AppleTrailerPreviewPolicy.embedURL(for: "trailer_456"))
+        #expect(embed.absoluteString.contains("origin=https://orgista.com"))
+        let html = AppleYouTubePreviewHTML.document(embedURL: embed, startsPlaying: true)
+        #expect(html.contains("origin: 'https://orgista.com'"))
+        #expect(!html.contains("pointer-events:none"))
+        #expect(!html.contains("ytp-"))
     }
 }

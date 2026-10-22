@@ -417,11 +417,11 @@ public enum AppleIPTVError: Error, Equatable, LocalizedError, Sendable {
         case .unreachable(let reason):
             // URLError reasons end in their own full stop ("The request timed
             // out."), which read as ".." here (iPhone 27 v2 re-run).
-            "Could not reach the IPTV panel: \(AppleIPTVError.trimmingFinalPeriod(reason)). Check the network and that the address includes the port."
+            "Could not reach the provider's server: \(AppleIPTVError.trimmingFinalPeriod(reason)). Check the network and that the address includes the port."
         case .httpStatus(let code):
-            "The IPTV panel answered HTTP \(code) instead of account data."
+            "The provider's server answered HTTP \(code) instead of account data."
         case .unexpectedResponse(let contentType):
-            "The IPTV panel returned an unexpected page (\(contentType ?? "no content type")) instead of account data. A DNS filter, captive portal, or wrong address can cause this."
+            "The provider's server returned an unexpected page (\(contentType ?? "no content type")) instead of account data. A DNS filter, captive portal, or wrong address can cause this."
         case .nonHTTPResponse: "The IPTV server returned an invalid response."
         case .requestFailed(let status): "The IPTV request failed with HTTP \(status)."
         case .responseTooLarge: "The IPTV playlist is too large."

@@ -58,7 +58,6 @@ struct AppleJellyfinNegotiationTests {
         #expect(source.descriptors.duration == 6000)
         #expect(source.formatBadges.contains(.uhd))
         #expect(source.formatBadges.contains(.hdr10))
-        #expect(source.formatBadges.contains(.atmos))
         #expect(source.formatBadges.contains(.surround71))
         #expect(AppleJellyfinPlaybackPolicy.isAudioOnlyMismatch(source))
         let decision = AppleJellyfinPlaybackPolicy.conversionDecision(for: source)

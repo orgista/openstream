@@ -107,7 +107,7 @@ import Testing
     #expect(html.contains("trailer reveal watchdog"))
     #expect(!html.contains("revealAfterChromeSettles"))
     #expect(html.contains("document.body.classList.add('ready')"))
-    #expect(html.contains("pointer-events:none"))
+    #expect(!html.contains("pointer-events:none"))
     #expect(html.contains("window.setTrailerMuted = function(isMuted)"))
     #expect(html.contains("notifyNative(desiredMuted ? 'muted' : 'unmuted', desiredMuted)"))
     #expect(html.contains("window.setTrailerPlaying = function(isPlaying)"))

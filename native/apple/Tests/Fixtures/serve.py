@@ -8,7 +8,7 @@ Routes mirror the contract required by T3's fixture tests:
   GET /slow/<name>       sleeps 12 s, then behaves like /media/<name>
   GET /protected/<name>  requires Referer: https://fixtures.local/...
   GET /hls/<path>        static file from out/hls/
-  /jf/...                a Jellyfin server whose stub titles each have a local MP4 trailer
+  /jf/...                a small Jellyfin library (movies, one series, resume, images, playback, trailers)
   *                      404
 
 Run:
@@ -24,9 +24,103 @@ import argparse
 import json
 import os
 import re
+import struct
 import time
+import zlib
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit, parse_qs
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+TICKS = 10_000_000
+RUNTIME_TICKS = 1800 * TICKS
+IMAGE_TAG = "fixture"
+RESUME_ID = "jf-movie-6"
+LIBRARIES = [
+    {"Id": "jf-lib-movies", "Name": "Movies", "CollectionType": "movies"},
+    {"Id": "jf-lib-shows", "Name": "Shows", "CollectionType": "tvshows"},
+]
+
+
+def _fixture_item(item_id, name, kind, parent, **fields):
+    item = {"Id": item_id, "Name": name, "Type": kind, "ServerId": "fixture-server",
+            "ImageTags": {"Primary": IMAGE_TAG}, "BackdropImageTags": [], "Genres": [], "ProviderIds": {}}
+    item.update(fields)
+    return item, parent
+
+
+def _fixture_catalog():
+    entries = []
+    for n in range(2, 7):
+        entries.append(_fixture_item(
+            f"jf-movie-{n}", f"Stub Movie {['Two', 'Three', 'Four', 'Five', 'Six'][n - 2]}", "Movie", "jf-lib-movies",
+            ProductionYear=2024, Overview=f"A fixture movie, number {n}.", RunTimeTicks=RUNTIME_TICKS,
+            Genres=["Drama"] if n < 4 else ["Comedy"], CommunityRating=7.0 + n / 10,
+            ProviderIds={"Imdb": f"tt000000{n}"},
+            ImageTags={"Primary": IMAGE_TAG, "Backdrop": IMAGE_TAG, "Logo": IMAGE_TAG},
+            BackdropImageTags=[IMAGE_TAG]))
+    entries.append(_fixture_item(
+        "jf-series-10", "Stub Series", "Series", "jf-lib-shows", ProductionYear=2025,
+        Overview="A fixture series.", Genres=["Drama"], CommunityRating=8.0, ProviderIds={"Imdb": "tt0000010"},
+        ImageTags={"Primary": IMAGE_TAG, "Backdrop": IMAGE_TAG, "Logo": IMAGE_TAG}, BackdropImageTags=[IMAGE_TAG]))
+    for season in (1, 2):
+        entries.append(_fixture_item(
+            f"jf-season-{season}", f"Season {season}", "Season", "jf-series-10", IndexNumber=season,
+            SeriesId="jf-series-10", SeriesName="Stub Series"))
+        for episode in (1, 2, 3):
+            entries.append(_fixture_item(
+                f"jf-ep-{season}-{episode}", f"Chapter {season}.{episode}", "Episode", f"jf-season-{season}",
+                IndexNumber=episode, ParentIndexNumber=season, SeriesId="jf-series-10", SeasonId=f"jf-season-{season}",
+                SeriesName="Stub Series", Overview=f"Season {season}, episode {episode}.", RunTimeTicks=RUNTIME_TICKS))
+    return {item["Id"]: item for item, _ in entries}, {item["Id"]: parent for item, parent in entries}
+
+
+ITEMS, PARENTS = _fixture_catalog()
+
+
+def _png(width, height, rgba):
+    rows = b"".join(b"\x00" + bytes(rgba) * width for _ in range(height))
+    def chunk(tag, data):
+        body = tag + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+
+
+IMAGES = {"Primary": _png(200, 300, (70, 90, 140, 255)), "Backdrop": _png(320, 180, (40, 60, 100, 255)),
+          "Thumb": _png(320, 180, (40, 60, 100, 255)), "Logo": _png(300, 100, (255, 255, 255, 64))}
+
+
+def _present(item):
+    shown = dict(item)
+    data = {"PlaybackPositionTicks": 0, "PlayedPercentage": 0, "Played": False, "IsFavorite": False, "PlayCount": 0}
+    if item["Id"] == RESUME_ID:
+        stamp = datetime.now(timezone.utc) - timedelta(minutes=5)
+        data.update(PlaybackPositionTicks=120 * TICKS, PlayedPercentage=6.7,
+                    LastPlayedDate=stamp.strftime("%Y-%m-%dT%H:%M:%S.000Z"))
+    shown["UserData"] = data
+    return shown
+
+
+def _children(parent_id):
+    return [item for item_id, item in ITEMS.items() if PARENTS[item_id] == parent_id]
+
+
+def _descendants(parent_id):
+    found = []
+    for child in _children(parent_id):
+        found.append(child)
+        found.extend(_descendants(child["Id"]))
+    return found
+
+
+def _media_source(item_id):
+    return {"Id": item_id, "Name": item_id, "Container": "mp4", "Protocol": "File", "RunTimeTicks": RUNTIME_TICKS,
+            "Bitrate": 1000000, "SupportsDirectPlay": True, "SupportsDirectStream": True, "SupportsTranscoding": False,
+            "MediaStreams": [
+                {"Type": "Video", "Codec": "h264", "Index": 0, "Width": 256, "Height": 144, "Profile": "High", "Level": 40},
+                {"Type": "Audio", "Codec": "aac", "Index": 1, "Channels": 2, "Language": "eng", "IsDefault": True},
+                {"Type": "Subtitle", "Codec": "mov_text", "Index": 2, "Language": "eng", "IsTextSubtitleStream": True}]}
 
 
 class FixtureHandler(BaseHTTPRequestHandler):
@@ -252,47 +346,91 @@ class FixtureHandler(BaseHTTPRequestHandler):
         if parsed.path == "/jf/Users/AuthenticateByName":
             return self._send_json({"User": {"Id": "fixture-user", "Name": "fixture"},
                                     "AccessToken": "fixture-token", "ServerId": "fixture-server"})
+        if parsed.path.startswith("/jf/"):
+            match = re.match(r"^/jf/Items/([^/]+)/PlaybackInfo$", parsed.path)
+            if match:
+                return self._send_json({"MediaSources": [_media_source(match.group(1))], "PlaySessionId": "fixture-play"})
+            if parsed.path.startswith("/jf/Sessions/Playing"):
+                return self._send_simple(204)
         return self._send_simple(404, b"not found")
 
     # ------------------------------------------------------------------
-    # a Jellyfin server with one local trailer per stub title (/jf/...)
+    # a small Jellyfin library (/jf/...)
     # ------------------------------------------------------------------
-    def _stub_titles(self):
-        """Stub catalog names by IMDb id, so a title search finds the stub's own id."""
-        catalog = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
-                               "Apps", "TestPlans", "Stubs", "fixture.example", "catalog")
-        titles = {}
-        for folder, _, files in os.walk(catalog):
-            for name in files:
-                if not name.endswith(".json"):
-                    continue
-                try:
-                    with open(os.path.join(folder, name)) as handle:
-                        for meta in json.load(handle).get("metas", []):
-                            titles[meta["id"]] = (meta["name"], meta.get("type", "movie"))
-                except (OSError, ValueError, KeyError):
-                    pass
-        return titles
+    def _page(self, items, query):
+        start = int(query.get("StartIndex", ["0"])[0])
+        limit = int(query.get("Limit", ["100"])[0])
+        return self._send_json({"Items": [_present(item) for item in items[start:start + limit]],
+                                "TotalRecordCount": len(items), "StartIndex": start})
+
+    def _query_items(self, query):
+        parent = query.get("ParentId", [""])[0]
+        types = [t for t in query.get("IncludeItemTypes", [""])[0].split(",") if t]
+        if parent:
+            items = _descendants(parent) if types else _children(parent)
+        else:
+            items = [item for item in ITEMS.values() if item["Type"] in (types or ("Movie", "Series"))]
+        if types:
+            items = [item for item in items if item["Type"] in types]
+        genres = [g for g in query.get("Genres", [""])[0].split("|") if g]
+        if genres:
+            items = [item for item in items if set(genres) & set(item["Genres"])]
+        term = query.get("SearchTerm", [""])[0].lower()
+        if term:
+            items = [item for item in items if term in item["Name"].lower()]
+        return sorted(items, key=lambda item: item["Name"])
+
+    def _serve_clip(self, item_id):
+        clip = None if item_id.startswith("trailer-") else getattr(self.server, "e2e_media", None)
+        return self._serve_file(clip or os.path.join(self.server.root, "mp4-h264-aac.mp4"), allow_range=True)
 
     def _serve_jellyfin(self, path, query):
+        user = "/Users/fixture-user"
         if path == "/System/Info/Public":
             return self._send_json({"ServerName": "Fixture", "Version": "10.10.7", "Id": "fixture-server",
                                     "ProductName": "Jellyfin Server"})
-        if path == "/Users/fixture-user/Items" and "SearchTerm" in query:
-            term = query["SearchTerm"][0].lower()
-            items = [{"Id": imdb, "Name": name, "Type": "Series" if kind == "series" else "Movie",
-                      "ProviderIds": {"Imdb": imdb}}
-                     for imdb, (name, kind) in self._stub_titles().items() if name.lower() == term]
-            return self._send_json({"Items": items, "TotalRecordCount": len(items)})
+        if path == "/QuickConnect/Enabled":
+            return self._send_simple(200, b"false", "application/json")
+        if path == user:
+            return self._send_json({"Id": "fixture-user", "Name": "fixture", "ServerId": "fixture-server",
+                                    "Policy": {"EnableContentDownloading": True}})
+        if path == user + "/Views":
+            return self._send_json({"Items": LIBRARIES, "TotalRecordCount": len(LIBRARIES), "StartIndex": 0})
+        if path == user + "/Items/Latest":
+            parent = query.get("ParentId", [""])[0]
+            items = _children(parent) if parent else [i for i in ITEMS.values() if i["Type"] in ("Movie", "Series")]
+            limit = int(query.get("Limit", ["20"])[0])
+            return self._send_json([_present(item) for item in reversed(items)][:limit])
+        if path == user + "/Items/Resume":
+            return self._page([ITEMS[RESUME_ID]], query)
+        if path == user + "/Items":
+            return self._page(self._query_items(query), query)
+        if path == "/Shows/NextUp":
+            first = ITEMS["jf-ep-1-1"]
+            return self._page([first] if query.get("ParentId", [""])[0] == "jf-lib-shows" else [], query)
+        match = re.match(r"^/Users/fixture-user/Items/([^/]+)$", path)
+        if match:
+            item = ITEMS.get(match.group(1))
+            return self._send_json(_present(item)) if item else self._send_simple(404, b"not found")
+        match = re.match(r"^/Shows/([^/]+)/Seasons$", path)
+        if match:
+            return self._page(_children(match.group(1)), query)
+        match = re.match(r"^/Shows/([^/]+)/Episodes$", path)
+        if match:
+            season = query.get("SeasonId", [""])[0]
+            return self._page([i for i in _descendants(match.group(1)) if i["Type"] == "Episode"
+                               and (not season or i["SeasonId"] == season)], query)
         match = re.match(r"^/Items/([^/]+)/LocalTrailers$", path)
         if match:
             trailer = "trailer-" + match.group(1)
             return self._send_json([{"Id": trailer, "Name": "Trailer", "Container": "mp4", "RunTimeTicks": 100000000,
                                      "MediaSources": [{"Id": trailer, "Container": "mp4"}]}])
-        if re.match(r"^/Videos/trailer-[^/]+/stream\.mp4$", path):
-            return self._serve_file(os.path.join(self.server.root, "mp4-h264-aac.mp4"), allow_range=True)
-        if path.startswith("/Users/fixture-user/Items/Latest"):
-            return self._send_json([])
+        match = re.match(r"^/Items/[^/]+/Images/([A-Za-z]+)$", path)
+        if match:
+            return self._send_simple(200, IMAGES.get(match.group(1), IMAGES["Primary"]), "image/png")
+        match = re.match(r"^/(?:Videos/([^/]+)/stream(?:\.\w+)?|Items/([^/]+)/Download)$", path)
+        if match:
+            return self._serve_clip(match.group(1) or match.group(2))
         return self._send_json({"Items": [], "TotalRecordCount": 0})
 
     # ------------------------------------------------------------------

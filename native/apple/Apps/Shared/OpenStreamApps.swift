@@ -163,10 +163,7 @@ struct OpenStreamPlatformApp: App {
             #if DEBUG
             .task {
                 guard AppleSavedSourceDiagnosticsLaunch.isEnabled() else { return }
-                let operations = AppleSavedSourceDiagnosticsProductionOperations(
-                    sourceStore: AppleSourceStore(),
-                    settings: AppleSettingsStore()
-                )
+                let operations = AppleSavedSourceDiagnosticsProductionOperations(sourceStore: AppleSourceStore())
                 let results = await AppleSavedSourceDiagnosticsRunner(operations: operations).run()
                 print(AppleSavedSourceDiagnosticsConsole.summary(results))
             }

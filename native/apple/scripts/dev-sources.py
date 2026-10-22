@@ -97,15 +97,6 @@ def add_fixture_iptv():
 def edit_settings(settings):
     if yes("Set the TMDB API key?", default=not settings.get("tmdbAPIKey")):
         settings["tmdbAPIKey"] = secret("TMDB API key (v3) or read token")
-    for arr in ("radarr", "sonarr"):
-        if yes(f"Set {arr.title()}?", default=False):
-            settings[arr] = {
-                "url": ask(f"{arr.title()} URL"), "apiKey": secret(f"{arr.title()} API key"),
-                "rootFolderPath": ask("Root folder path", required=False),
-                "qualityProfileID": ask("Quality profile ID", required=False),
-            }
-    if yes("Set Trakt?", default=False):
-        settings["traktClientID"] = secret("Trakt client ID")
 
 
 def describe(entry):
@@ -150,7 +141,7 @@ def main():
         print()
         for key, (title, _) in actions.items():
             print(f"  {key}) {title}")
-        print("  k) Service keys (TMDB, Radarr, Sonarr, Trakt)")
+        print("  k) TMDB API key")
         print("  r) Remove a source")
         print("  s) Save and quit     q) Quit without saving")
         choice = input("> ").strip().lower()

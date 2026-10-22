@@ -32,10 +32,10 @@ import Testing
 @Test func detailFormatBadgesNeverRepresentDolbyAsText() {
     #expect(AppleFormatBadgeKind.resolve("4K") == .text("4K"))
     #expect(AppleFormatBadgeKind.resolve("HDR10+") == .text("HDR10+"))
-    #expect(AppleFormatBadgeKind.resolve("dolby vision") == .image("dolby-vision"))
-    #expect(AppleFormatBadgeKind.resolve("DV") == .image("dolby-vision"))
-    #expect(AppleFormatBadgeKind.resolve("DOLBY ATMOS") == .image("dolby-atmos"))
-    #expect(AppleFormatBadgeKind.resolve("DOLBY AUDIO") == .image("dolby-audio"))
+    #expect(AppleFormatBadgeKind.resolve("dolby vision") == .text("HDR"))
+    #expect(AppleFormatBadgeKind.resolve("DV") == .text("HDR"))
+    #expect(AppleFormatBadgeKind.resolve("DOLBY ATMOS") == nil)
+    #expect(AppleFormatBadgeKind.resolve("DOLBY AUDIO") == nil)
     #expect(AppleFormatBadgeKind.resolve("unknown") == nil)
 }
 

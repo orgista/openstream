@@ -1138,8 +1138,6 @@ struct AppleLocalTitleDestination: View {
         if let source = library.sources.first(where: { $0.id == group.items.first?.sourceID }) {
             AppleCatalogItemDetailView(item: library.catalogItem(for: group), source: source, mediaIndex: mediaIndex,
                 playbackSources: sourceStore.sources, metadataConfiguration: settings.metadataEnabled ? try? AppleTMDBConfiguration(credential: settings.tmdbAPIKey) : nil,
-                gatewayConfig: settings.gatewayEnabled ? try? AppleTranscodeGatewayConfig(baseURL: settings.gatewayURL,
-                    sessionToken: settings.gatewayToken, isEnabled: true) : nil,
                 settings: settings,
                 openSettings: openSettings, initialAutoPlay: autoPlay, localGroup: group, localSourceStore: sourceStore,
                 tabToolbar: tabToolbar)

@@ -1,8 +1,5 @@
 import Foundation
 import Testing
-#if canImport(JavaScriptCore)
-import JavaScriptCore
-#endif
 @testable import OpenStreamApple
 
 @Suite struct AppleHomeDesignPolicyTests {
@@ -14,8 +11,6 @@ import JavaScriptCore
         #expect(ApplePlaybackSessionPolicy.playback.audioCategory == .playback)
         #expect(ApplePlaybackSessionPolicy.playback.publishesNowPlaying)
         #expect(ApplePlaybackSessionPolicy.playback.registersRemoteCommands)
-        #expect(!preview.webMediaSessionSuppressionScript.isEmpty)
-        #expect(ApplePlaybackSessionPolicy.playback.webMediaSessionSuppressionScript.isEmpty)
     }
 
     @Test func trailersCannotRestoreLongFormAudioOrUnmuteWebPlayback() throws {
@@ -56,37 +51,4 @@ import JavaScriptCore
         #expect(AppleTrailerSoundBridge.allowsSoundJavascriptCommand(allowsSound: false, isMuted: true)
                 == "window.setTrailerAllowsSound(false, true);")
     }
-
-    #if canImport(JavaScriptCore)
-    @Test func trailerScriptClearsExistingAndRejectsNewMediaSessionHandlers() throws {
-        let context = try #require(JSContext())
-        context.evaluateScript("""
-        var handlers = {play: () => {}, pause: () => {}, seekto: () => {}};
-        var events = {};
-        var document = {addEventListener: (name, callback) => { events[name] = callback; }};
-        var navigator = {mediaSession: {
-          metadata: {title: 'Fixture trailer'}, playbackState: 'playing',
-          setActionHandler: (name, handler) => {
-            if (name === 'stop') throw new Error('Unsupported action');
-            handlers[name] = handler;
-          },
-          setPositionState: () => {}
-        }};
-        """)
-        context.evaluateScript(ApplePlaybackSessionPolicy.trailer.webMediaSessionSuppressionScript)
-        #expect(context.exception == nil)
-        #expect(context.evaluateScript("Object.values(handlers).every(handler => handler === null)")?.toBool() == true)
-        context.evaluateScript("""
-        navigator.mediaSession.metadata = {title: 'Provider rewrite'};
-        navigator.mediaSession.playbackState = 'playing';
-        navigator.mediaSession.setActionHandler('play', () => {});
-        handlers.seekto = () => {};
-        events.play();
-        """)
-        #expect(context.exception == nil)
-        #expect(context.evaluateScript("navigator.mediaSession.metadata === null")?.toBool() == true)
-        #expect(context.evaluateScript("navigator.mediaSession.playbackState === 'none'")?.toBool() == true)
-        #expect(context.evaluateScript("Object.values(handlers).every(handler => handler === null)")?.toBool() == true)
-    }
-    #endif
 }

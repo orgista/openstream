@@ -32,8 +32,7 @@ final class AppleTVStubSmokeUITests: OpenStreamUITestCase {
         configureFixtureLaunch(app)
         app.launch()
         sampleLoadingIndicators("discover", for: 6)
-        let posterID = "home.media.movie:tt0000002"
-        XCTAssertTrue(focus(posterID, pressing: .down), "Discover poster never took focus")
+        XCTAssertTrue(focus(Self.serverShelfItem("jf-movie-5"), pressing: .down), "Discover poster never took focus")
         remote.press(.select)
         sampleLoadingIndicators("detail", for: 6)
         let play = element("detail.play")
@@ -91,7 +90,7 @@ final class AppleTVStubSmokeUITests: OpenStreamUITestCase {
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30), "OpenStream did not become foreground")
         sampleLoadingIndicators("device-discover", for: 6)
-        XCTAssertTrue(focus(NSPredicate(format: "identifier BEGINSWITH 'home.media.'"), pressing: .down))
+        XCTAssertTrue(focus(NSPredicate(format: "identifier BEGINSWITH 'home.ms.'"), pressing: .down))
         remote.press(.select)
         sampleLoadingIndicators("device-detail", for: 6)
         XCTAssertTrue(element("detail.play").waitForExistence(timeout: 45))
@@ -118,8 +117,11 @@ final class AppleTVStubSmokeUITests: OpenStreamUITestCase {
         var attachedDuplicateHierarchy = false
         repeat {
             // tvOS exposes a circular ProgressView and its UIKit spinner as nested indicators.
+            // On screen by frame: `isHittable` fails the test for an indicator with no activation point.
+            let screen = app.frame
             let indicators = app.activityIndicators.allElementsBoundByAccessibilityElement.filter {
-                $0.isHittable && $0.descendants(matching: .activityIndicator).count == 0
+                guard let frame = (try? $0.snapshot())?.frame, !frame.isEmpty, screen.intersects(frame) else { return false }
+                return $0.descendants(matching: .activityIndicator).count == 0
             }
             maximum = max(maximum, indicators.count)
             let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
@@ -150,20 +152,20 @@ final class AppleTVStubSmokeUITests: OpenStreamUITestCase {
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
 
         XCTAssertTrue(focusedElement.waitForExistence(timeout: 60), "Discover never took focus")
-        // f82ef99 deduplicates the previous three rows: Movie One is already
-        // in Your Library, so the catalog shelf starts with Movie Two.
-        let posterID = "home.media.movie:tt0000002"
-        let poster = element(posterID)
+        // Stub Movie Five leads the fixture server's Latest row: Six, the newest,
+        // is in Continue Watching, and Discover shows a title once.
+        let posterMatch = Self.serverShelfItem("jf-movie-5")
+        let poster = app.descendants(matching: .any).matching(posterMatch).firstMatch
 
         // Walk focus down from the hero until the poster holds it (the shelf
         // is lazy and only enters the hierarchy as focus reaches it), then open.
-        let focusedPoster = app.descendants(matching: .any).matching(NSPredicate(
-            format: "hasFocus == true AND identifier == %@", posterID)).firstMatch
+        let focusedPoster = app.descendants(matching: .any).matching(NSCompoundPredicate(
+            andPredicateWithSubpredicates: [NSPredicate(format: "hasFocus == true"), posterMatch])).firstMatch
         for _ in 0 ..< 10 where !focusedPoster.exists {
             remote.press(.down)
             _ = focusedPoster.waitForExistence(timeout: 2)
         }
-        XCTAssertTrue(focusedPoster.exists, "focus never reached the stub poster; sits on '\(focusedElement.identifier)'")
+        XCTAssertTrue(focusedPoster.exists, "focus never reached the fixture server's poster; sits on '\(focusedElement.identifier)'")
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = "discover-stub-movies-tv"
         shot.lifetime = .keepAlways
@@ -172,7 +174,7 @@ final class AppleTVStubSmokeUITests: OpenStreamUITestCase {
 
         let play = element("detail.play")
         XCTAssertTrue(play.waitForExistence(timeout: 30), "the title page never opened")
-        XCTAssertTrue(app.staticTexts["Stub Movie Two"].firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Stub Movie Five"].firstMatch.waitForExistence(timeout: 10))
 
         remote.press(.menu)
         XCTAssertTrue(poster.waitForExistence(timeout: 30), "Discover did not come back")
@@ -199,10 +201,12 @@ final class AppleTVStubSmokeUITests: OpenStreamUITestCase {
 
     /// Library → Unmatched → Match picks a title, which leaves the shelf with
     /// its art; Use Automatic Match on the title page puts it back.
-    func testUnmatchedShelfMatchesAndReverts() {
+    func testUnmatchedShelfMatchesAndReverts() throws {
         // The reset clears metadata keys and lookup caches left on the
-        // simulator, so the fixture's misses cache as no-matches.
+        // simulator, so the fixture's misses cache as no-matches. Match
+        // searches TMDB, answered from the stub files.
         app.launchArguments = ["-OpenStreamLibraryTitlesFixture"] + Self.stubbedLaunchArguments
+            + (try tmdbFixtureKeyLaunchArguments())
         app.launchEnvironment["OPENSTREAM_LIBRARY_FIXTURE_PATH"] = Self.stubDirectory + "/library-unmatched"
         app.launch()
         func shot(_ name: String) {

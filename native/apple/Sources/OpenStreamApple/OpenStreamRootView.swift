@@ -664,9 +664,6 @@ public struct OpenStreamRootView: View {
         .task(id: sourceAvailabilityIdentity) {
             await reconcileMediaAvailability()
         }
-        .task(id: arrConfigurationIdentity) {
-            await reconcileMediaAvailability()
-        }
         .task(id: mediaIndex.records) {
             await AppleSpotlightIndexer.shared.synchronize(
                 records: mediaIndex.records,
@@ -684,13 +681,6 @@ public struct OpenStreamRootView: View {
             settingsStore: settingsStore))
     }
 
-    private var arrConfigurationIdentity: String {
-        ApplePlaybackIdentity.digest(for: [
-            settingsStore.radarrURL, settingsStore.radarrAPIKey,
-            settingsStore.sonarrURL, settingsStore.sonarrAPIKey,
-        ].joined(separator: "\u{1f}"))
-    }
-
     private var sourceAvailabilityIdentity: String {
         ApplePlaybackIdentity.digest(for: sourceStore.sources.map {
             "\($0.id.uuidString)|\($0.kind.rawValue)|\($0.isEnabled)|\($0.configurationRevision)"
@@ -699,15 +689,7 @@ public struct OpenStreamRootView: View {
 
     private func reconcileMediaAvailability() async {
         await mediaIndex.load()
-        var active = Set(sourceStore.sources.filter(\.isEnabled).map(\.id))
-        if AppleArrClient.isValidAPIKey(settingsStore.radarrAPIKey),
-           let id = AppleArrInstanceIdentity.id(kind: .radarr, baseURL: settingsStore.radarrURL) {
-            active.insert(id)
-        }
-        if AppleArrClient.isValidAPIKey(settingsStore.sonarrAPIKey),
-           let id = AppleArrInstanceIdentity.id(kind: .sonarr, baseURL: settingsStore.sonarrURL) {
-            active.insert(id)
-        }
+        let active = Set(sourceStore.sources.filter(\.isEnabled).map(\.id))
         try? await mediaIndex.retainAvailability(for: active)
     }
 
@@ -871,8 +853,6 @@ public struct OpenStreamRootView: View {
         "restrictions": .restrictions,
         "playback-settings": .playback,
         "metadata": .metadata,
-        "server-downloads": .serverDownloads,
-        "trakt": .trakt,
         "watch-providers": .watchProviders,
         "discover-rows": .discoverRows,
         "privacy": .privacy,

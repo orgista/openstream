@@ -166,10 +166,6 @@ public final class AppleChannelHealthStore {
         lineup.filter { results[AppleChannelHealthResult.storageID($0.id)]?.bucket == .online }.count
     }
 
-    public func workingM3U(includesCredentials: Bool = false) -> String {
-        AppleWorkingM3UExport.text(lineup: lineup, health: results, includesCredentials: includesCredentials)
-    }
-
     /// Runs the phase-1 sweep with its defaults over the current lineup.
     public func startSweep() {
         startSweep(channels: lineup)

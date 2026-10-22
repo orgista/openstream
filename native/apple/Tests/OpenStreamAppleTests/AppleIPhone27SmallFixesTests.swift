@@ -42,7 +42,7 @@ import Testing
     @Test func theLiveErrorHasOneFullStop() {
         let message = AppleIPTVError.unreachable("The request timed out.").errorDescription ?? ""
         #expect(!message.contains(".."))
-        #expect(message.hasPrefix("Could not reach the IPTV panel: The request timed out. Check"))
+        #expect(message.hasPrefix("Could not reach the provider's server: The request timed out. Check"))
     }
 
     @Test func engineInternalsBecomeAPlainSentence() {

@@ -7,10 +7,10 @@ import Testing
 /// engine at once, and one whose stock-playable streams all fail falls back to
 /// it; "Playback Unavailable" only when the OpenStream engine fails as well.
 @Suite struct ApplePlaybackEngineFallbackTests {
-    private func stream(_ name: String, notWebReady: Bool = false, live: Bool = false) -> ApplePlaybackRequest {
+    private func stream(_ name: String, live: Bool = false) -> ApplePlaybackRequest {
         ApplePlaybackRequest(url: URL(string: "https://fixture.example/\(name)")!, isLive: live,
             mediaID: "tt0000001", sourceKind: .catalog,
-            hints: .init(notWebReady: notWebReady, filename: name))
+            hints: .init(filename: name))
     }
 
     private let failed = ApplePlaybackFailure(kind: .unsupportedMedia,
@@ -25,12 +25,6 @@ import Testing
     func nativeKeepsTheStockPlayerWhenOneStreamIsStockPlayable(_ playable: String) {
         let streams = [stream("a.mkv"), stream(playable), stream("b.ts")]
         #expect(ApplePlaybackEngineFallback.engine(preferred: .native, for: streams) == .native)
-    }
-
-    @Test func aGatewayMP4DoesNotCountAsStockPlayable() {
-        let streams = [stream("a.mkv"), stream("e.mp4", notWebReady: true)]
-        #expect(!ApplePlaybackEngineFallback.stockPlayable(streams[1]))
-        #expect(ApplePlaybackEngineFallback.engine(preferred: .native, for: streams) == .openStream)
     }
 
     @Test func theOpenStreamSettingLiveStreamsAndNoStreamsAreLeftAlone() {

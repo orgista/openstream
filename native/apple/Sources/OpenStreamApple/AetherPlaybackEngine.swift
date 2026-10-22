@@ -458,6 +458,9 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         )
         options.forwardBufferSegments = liveBuffer.forwardBufferSegments(isLive: request.isLive)
         options.preferredDecodePath = .automatic
+        // No Dolby encoding on the device (licence audit 2026-10-22): audio
+        // the engine has to re-encode (TrueHD, DTS) goes out as FLAC.
+        options.audioBridgeMode = .lossless
         options.prepareNativeSubtitles = declaresNativeSubtitleRenditions
         // Live HLS from an extension-less URL: AVPlayer plays the origin
         // directly; the raw live path would hand it to FFmpeg and fail.
@@ -710,12 +713,7 @@ public final class AetherPlaybackEngine: ApplePlaybackEngine {
         case .hlg: range = .hlg
         }
         let track = audioTracks.first { $0.id == activeAudioTrackID }
-        // A decoded TrueHD/PCM bridge drops Atmos objects. Claim Atmos only
-        // when the engine reports an Atmos stream-copy pipeline.
-        let atmos = track?.isAtmos == true &&
-            aether.activeAudioDecoder?.contains("Stream-copy") == true &&
-            aether.activeAudioDecoder?.contains("Atmos") == true
-        return ApplePlaybackOutputInfo(dynamicRange: range, channels: track?.channels ?? 0, isAtmos: atmos)
+        return ApplePlaybackOutputInfo(dynamicRange: range, channels: track?.channels ?? 0)
     }
 
     // MARK: - Combine bridging

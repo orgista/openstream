@@ -4,7 +4,6 @@ import Foundation
 public enum ApplePlaybackRoute: Equatable, Sendable {
     case direct(URL)
     case nativeOfflineExport(URL)
-    case gatewayTranscode(URL)
     case requiresExternalDemux(URL)
     case unavailable([String])
 }
@@ -52,8 +51,7 @@ public enum ApplePlaybackRoutePolicy {
     public static func route(
         sourceURL: URL,
         decision: OpenStreamPlaybackDecision,
-        suitability: AppleAssetSuitability? = nil,
-        gatewayConfigured: Bool = false
+        suitability: AppleAssetSuitability? = nil
     ) -> ApplePlaybackRoute {
         if let suitability, suitability.isProtected {
             return suitability.supportsDirectPlayback
@@ -61,29 +59,24 @@ public enum ApplePlaybackRoutePolicy {
                 : .unavailable(unavailableReasons(decision, fallback: "Protected media is not playable on this device."))
         }
         // The engine demuxes Matroska and MPEG-TS in-app; never route these to
-        // the gateway or the native exporter.
+        // the native exporter.
         if isMatroska(sourceURL) || isMPEGTransportStream(sourceURL) {
             return .direct(sourceURL)
         }
         if suitability?.supportsDirectPlayback == true { return .direct(sourceURL) }
 
-        if suitability?.isReadable == false {
-            return gatewayConfigured ? .gatewayTranscode(sourceURL) : .requiresExternalDemux(sourceURL)
-        }
+        if suitability?.isReadable == false { return .requiresExternalDemux(sourceURL) }
 
         if let suitability {
             if sourceURL.isFileURL && suitability.supportsNativeOfflineExport {
                 return .nativeOfflineExport(sourceURL)
             }
-            if gatewayConfigured, decision.support == .unsupported { return .gatewayTranscode(sourceURL) }
             return .unavailable(unavailableReasons(decision, fallback: "The asset failed the system playback checks."))
         }
 
         return switch decision.support {
         case .supported, .runtimeCheck:
             .direct(sourceURL)
-        case .unsupported where gatewayConfigured:
-            .gatewayTranscode(sourceURL)
         case .unsupported:
             .unavailable(unavailableReasons(decision, fallback: "The asset requires runtime inspection."))
         }
@@ -91,16 +84,10 @@ public enum ApplePlaybackRoutePolicy {
 
     public static func inspectAndRoute(
         sourceURL: URL,
-        decision: OpenStreamPlaybackDecision,
-        gatewayConfigured: Bool = false
+        decision: OpenStreamPlaybackDecision
     ) async throws -> ApplePlaybackRoute {
         let inspection = try await AppleAssetInspector.inspect(url: sourceURL)
-        return route(
-            sourceURL: sourceURL,
-            decision: decision,
-            suitability: inspection.suitability,
-            gatewayConfigured: gatewayConfigured
-        )
+        return route(sourceURL: sourceURL, decision: decision, suitability: inspection.suitability)
     }
 
     private static func isMatroska(_ url: URL) -> Bool {

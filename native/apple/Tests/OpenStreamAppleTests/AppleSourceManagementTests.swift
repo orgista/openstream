@@ -99,7 +99,7 @@ import Testing
         decision: .init(support: .unsupported, reasons: ["audio codec"]),
         suitability: .init(isPlayable: false, isReadable: true, isExportable: true, isProtected: false)
     ) == .nativeOfflineExport(localMP4))
-    // The engine demuxes Matroska in-app; the gateway is no longer on the
+    // The engine demuxes Matroska in-app; it is never on the
     // playback path for it, so the route is direct even when unreadable.
     #expect(ApplePlaybackRoutePolicy.route(
         sourceURL: localMKV,
@@ -108,7 +108,6 @@ import Testing
     ) == .direct(localMKV))
     #expect(ApplePlaybackRoutePolicy.route(
         sourceURL: remoteURL,
-        decision: .init(support: .unsupported, reasons: ["codec"]),
-        gatewayConfigured: true
+        decision: .init(support: .unsupported, reasons: ["codec"])
     ) == .direct(remoteURL))
 }

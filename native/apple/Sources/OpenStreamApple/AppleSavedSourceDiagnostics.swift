@@ -3,7 +3,6 @@ import Foundation
 public enum AppleSavedSourceDiagnosticProbeKind: String, Codable, CaseIterable, Sendable {
     case iptv
     case smb
-    case arr
     case search
     case trailer
 }
@@ -20,10 +19,6 @@ public enum AppleSavedSourceDiagnosticStage: String, Codable, CaseIterable, Send
     case firstRead
     case rangeRead
     case manifest
-    case library
-    case roots
-    case profiles
-    case lookup
     case firstResultTiming
     case timing
     case audio
@@ -185,7 +180,7 @@ public struct AppleSavedSourceDiagnosticsRunner: Sendable {
 
     private static func errorCategory(for error: Error) -> String {
         if error is URLError { return "network" }
-        if error is AppleIPTVError || error is AppleSMBError || error is AppleArrClientError {
+        if error is AppleIPTVError || error is AppleSMBError {
             return "provider"
         }
         return "unknown"
@@ -194,7 +189,6 @@ public struct AppleSavedSourceDiagnosticsRunner: Sendable {
     private static let plan: [(AppleSavedSourceDiagnosticProbeKind, [AppleSavedSourceDiagnosticStage])] = [
         (.iptv, [.authenticate, .categories, .channels, .guide, .playbackRequest, .headers]),
         (.smb, [.dnsSD, .authenticate, .browse, .firstRead, .rangeRead]),
-        (.arr, [.authenticate, .library, .roots, .profiles, .lookup]),
         (.search, [.firstResultTiming]),
         (.trailer, [.timing, .audio, .captions, .playButton]),
     ]
@@ -216,13 +210,9 @@ public struct AppleSavedSourceDiagnosticsProductionOperations: AppleSavedSourceD
     private let sources: [AppleSource]
     private let iptvCredentials: [AppleSource.ID: AppleIPTVCredentials]
     private let networkCredentials: [AppleSource.ID: AppleSMBCredentials]
-    private let radarrURL: String
-    private let radarrAPIKey: String
-    private let sonarrURL: String
-    private let sonarrAPIKey: String
 
     @MainActor
-    public init(sourceStore: AppleSourceStore, settings: AppleSettingsStore) {
+    public init(sourceStore: AppleSourceStore) {
         sources = sourceStore.sources
         var loadedIPTVCredentials: [AppleSource.ID: AppleIPTVCredentials] = [:]
         var loadedNetworkCredentials: [AppleSource.ID: AppleSMBCredentials] = [:]
@@ -236,10 +226,6 @@ public struct AppleSavedSourceDiagnosticsProductionOperations: AppleSavedSourceD
         }
         iptvCredentials = loadedIPTVCredentials
         networkCredentials = loadedNetworkCredentials
-        radarrURL = settings.radarrURL
-        radarrAPIKey = settings.radarrAPIKey
-        sonarrURL = settings.sonarrURL
-        sonarrAPIKey = settings.sonarrAPIKey
     }
 
     public func run(
@@ -251,8 +237,6 @@ public struct AppleSavedSourceDiagnosticsProductionOperations: AppleSavedSourceD
             try await runIPTV(stage: stage)
         case .smb:
             try await runSMB(stage: stage)
-        case .arr:
-            try await runARR(stage: stage)
         case .search:
             guard sources.contains(where: { $0.isEnabled }) else {
                 throw AppleSavedSourceDiagnosticsError.noConfiguredSource
@@ -319,29 +303,6 @@ public struct AppleSavedSourceDiagnosticsProductionOperations: AppleSavedSourceD
             )
             let range: Range<UInt64> = stage == .firstRead ? 0 ..< 1_024 : 1_024 ..< 2_048
             _ = try await client.read(url: fileURL, credentials: credentials, range: range)
-        default:
-            throw AppleSavedSourceDiagnosticsError.unsupportedStage
-        }
-    }
-
-    private func runARR(stage: AppleSavedSourceDiagnosticStage) async throws {
-        let values: [(AppleArrKind, String, String)] = [
-            (.radarr, radarrURL, radarrAPIKey),
-            (.sonarr, sonarrURL, sonarrAPIKey),
-        ]
-        guard let (kind, baseURL, apiKey) = values.first(where: {
-            !$0.1.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && AppleArrClient.isValidAPIKey($0.2)
-        }) else {
-            throw AppleSavedSourceDiagnosticsError.noConfiguredSource
-        }
-        let client = AppleArrClient()
-        switch stage {
-        case .authenticate:
-            _ = try await client.test(kind: kind, baseURL: baseURL, apiKey: apiKey)
-        case .library:
-            _ = try await client.library(kind: kind, baseURL: baseURL, apiKey: apiKey)
-        case .roots, .profiles, .lookup:
-            throw AppleSavedSourceDiagnosticsError.unsupportedStage
         default:
             throw AppleSavedSourceDiagnosticsError.unsupportedStage
         }

@@ -2,6 +2,7 @@ import Foundation
 import MediaAccessibility
 import Observation
 import SwiftUI
+import Synchronization
 import Testing
 #if os(iOS) || os(tvOS)
 import UIKit
@@ -462,4 +463,36 @@ func topTenListsRequireAnOptInAndRememberIt() {
     #expect(AppleSettingsStore(defaults: defaults, keychain: StubCredentialStore()).top10ListsEnabled)
     store.top10ListsEnabled = false
     #expect(!AppleSettingsStore(defaults: defaults, keychain: StubCredentialStore()).top10ListsEnabled)
+}
+
+/// Records what is stored, so the retired services' cleanup can be seen.
+private final class RecordingCredentialStore: AppleCredentialStoring {
+    let stored = Mutex<[String: String]>([:])
+    var values: [String: String] { stored.withLock { $0 } }
+    func string(for account: String) throws -> String? { stored.withLock { $0[account] } }
+    func set(_ value: String, for account: String) throws { stored.withLock { $0[account] = value } }
+    func remove(_ account: String) throws { stored.withLock { $0[account] = nil } }
+}
+
+/// Radarr, Sonarr, Trakt and the transcode gateway left the app (2026-10-22):
+/// what they saved is deleted once, and a restore cannot bring it back.
+@MainActor
+@Test
+func retiredServiceSettingsAreDeletedAndNeverRestored() throws {
+    let defaults = makeIsolatedDefaults()
+    let keychain = RecordingCredentialStore()
+    for key in AppleSettingsStore.RetiredKey.defaults { defaults.set("https://fixture.example/retired", forKey: key) }
+    for account in AppleSettingsStore.RetiredKey.secrets { try keychain.set("fixture-secret", for: account) }
+    try keychain.set("fixture-tmdb", for: "metadata.tmdb.apiKey")
+
+    let store = AppleSettingsStore(defaults: defaults, keychain: keychain)
+    #expect(AppleSettingsStore.RetiredKey.defaults.allSatisfy { defaults.object(forKey: $0) == nil })
+    #expect(keychain.values == ["metadata.tmdb.apiKey": "fixture-tmdb"])
+
+    let old = try PropertyListSerialization.data(fromPropertyList: ["https://fixture.example/radarr"], format: .binary, options: 0)
+    try store.restoreConfiguration(["openstream.settings.radarr.url.v1": old])
+    try store.restoreConfigurationCredentials(["downloads.radarr.apiKey": "fixture-radarr", "metadata.tmdb.apiKey": "fixture-tmdb-2"])
+    #expect(defaults.object(forKey: "openstream.settings.radarr.url.v1") == nil)
+    #expect(keychain.values["downloads.radarr.apiKey"] == nil)
+    #expect(store.tmdbAPIKey == "fixture-tmdb-2")
 }
