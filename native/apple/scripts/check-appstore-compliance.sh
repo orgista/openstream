@@ -56,6 +56,25 @@ scan() {
             echo "  file name $rel"; hits=$((hits + 1))
         fi
         text="$(file_text "$file")"
+        if [[ "$file" == *.json ]] && python3 - "$file" <<'PY'
+import json
+import sys
+try:
+    with open(sys.argv[1]) as source:
+        value = json.load(source)
+except (OSError, ValueError):
+    sys.exit(1)
+channels = value.get("channels") if isinstance(value, dict) else None
+is_lineup = isinstance(value, dict) and value.get("format") == "ostream-lineup"
+is_lineup |= isinstance(channels, list) and bool(channels) and all(
+    isinstance(channel, dict) and {"number", "name", "category"} <= channel.keys()
+    for channel in channels
+)
+sys.exit(0 if is_lineup else 1)
+PY
+        then
+            echo "  bundled channel lineup in $rel"; hits=$((hits + 1))
+        fi
         [[ -n "$text" ]] || continue
         found="$( { LC_ALL=C grep -Eio "$words" <<< "$text" | tr '[:upper:]' '[:lower:]'
                     LC_ALL=C grep -Eo "$visible_words" <<< "$text"
@@ -69,8 +88,9 @@ scan() {
     else
         echo "PASS: $(basename "$product")"
     fi
-    if find "$product" -name 'complete-us.json' -print -quit | grep -q .; then
-        echo "  note: complete-us.json is still bundled (owner decision pending)."
+    if find "$product" \( -iname 'ChannelLineup' -o -iname '*.oslineup' -o -iname 'complete-us.json' \) -print -quit | grep -q .; then
+        echo "FAIL: $(basename "$product") contains a bundled channel lineup."
+        failed=1
     fi
     if (( release )); then
         bash "$repo_root/scripts/sdk-floor-check.sh" "$product" >/dev/null || { echo "FAIL: SDK floors for $(basename "$product")."; failed=1; }

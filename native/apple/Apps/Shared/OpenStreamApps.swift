@@ -120,6 +120,12 @@ struct OpenStreamPlatformApp: App {
             // it." Green toggles stay (system on/off), red stays destructive.
             .tint(.white)
             .onOpenURL { router.open($0) }
+            .alert("Channel Lineup", isPresented: Binding(
+                get: { router.lineupImportMessage != nil },
+                set: { if !$0 { router.lineupImportMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: { Text(router.lineupImportMessage ?? "") }
             .task { router.consumePendingSharedLink() }
             .onChange(of: scenePhase) {
                 if scenePhase == .active { router.consumePendingSharedLink() }

@@ -29,7 +29,8 @@ public enum AppleWebManagementPage {
         sources: [AppleSource] = [],
         address: String? = nil,
         sourceType: String = defaultSourceType,
-        draft: [String: String] = [:]
+        draft: [String: String] = [:],
+        lineupName: String? = nil
     ) -> String {
         let feedback = error.map {
             "<p class=\"feedback error\" role=\"alert\">\(escape($0))</p>"
@@ -49,6 +50,15 @@ public enum AppleWebManagementPage {
                 <div class="lead">\(addressRow)</div>
             \(feedback.isEmpty ? "" : "<section>\(feedback)</section>")
             \(addCard(sourceType: sourceType, draft: draft))
+                <section>
+                  <h2>Channel Lineup</h2>
+                  \(lineupName.map { "<p>" + escape($0) + "</p>" } ?? "")
+                  <form method="post" action="/lineup" enctype="multipart/form-data">
+                    <label for="lineup">Lineup file</label>
+                    <input id="lineup" name="lineup" type="file" accept=".oslineup,.json,application/json" required>
+                    <button type="submit">Import Lineup</button>
+                  </form>
+                </section>
                 <section>
                   <h2>Sources</h2>
                   \(sourceList(sources))
@@ -222,11 +232,11 @@ public enum AppleWebManagementPage {
           if (input.id === 'username' || input.id === 'password') input.value = sanitizeCredential(input.value);
         }
         if (!pairing) pendingDraft = captureDraft();
-        const data = new URLSearchParams(new FormData(form));
+        const data = form.enctype === 'multipart/form-data' ? new FormData(form) : new URLSearchParams(new FormData(form));
         const buttons = Array.from(form.querySelectorAll('button[type="submit"]'));
         buttons.forEach(button => { button.disabled = true; });
         try {
-          const response = await fetch('/', {method: 'POST', body: data, credentials: 'same-origin'});
+          const response = await fetch(form.getAttribute('action') || '/', {method: 'POST', body: data, credentials: 'same-origin'});
           const page = new DOMParser().parseFromString(await response.text(), 'text/html');
           const next = page.querySelector('main');
           if (!next) throw new Error('Session unavailable');

@@ -95,14 +95,14 @@ private func edgeChannel(
     ).map(\.id).sorted() == ["filler", "ppv"])
 }
 
-@Test func visibleChannelsAcceptsARegionalZIPCodeButNeverExcludesRegionalChannels() {
+@Test func visibleChannelsAcceptsARegionalZIPCodeButNeverExcludesRegionalChannels() throws {
     // Suspected bug: regionalZIPCode is threaded from AppleSettingsStore through
     // groupedChannels into visibleChannels, but visibleChannels's filter closure never reads
     // it — AppleChannelVisibilityPolicy.isRegional(_:zipCode:) is never consulted here, so a
     // channel the policy itself calls regional for that ZIP still passes through.
     let regional = edgeChannel("Local News 90210", id: "regional", group: "Broadcast")
 
-    #expect(AppleChannelVisibilityPolicy.isRegional(regional, zipCode: "90210") == true)
+    #expect(AppleChannelVisibilityPolicy.isRegional(regional, zipCode: "90210", lineup: try fixtureLineup()) == true)
     #expect(AppleChannelVisibilityPolicy.visibleChannels(
         from: [regional],
         scope: .providerLineup,

@@ -1,5 +1,6 @@
 import XCTest
 import UIKit
+import Vision
 
 /// The owner's own content on DevPlus: imports their backup through Settings ›
 /// Backup & Sync › Import, then checks Library (the SMB share), Live (the
@@ -498,5 +499,168 @@ final class AppleOwnerContentUITests: OpenStreamUITestCase {
         shot.name = name
         shot.lifetime = .keepAlways
         add(shot)
+    }
+}
+
+
+@MainActor
+final class AppleLineupImportUITests: OpenStreamUITestCase {
+    private let app = XCUIApplication(bundleIdentifier: "com.orgista.openstream")
+    private var lineupFile: URL?
+
+    override func setUpWithError() throws {
+        guard let path = ProcessInfo.processInfo.environment["OPENSTREAM_LINEUP_FILE"], !path.isEmpty else {
+            throw XCTSkip("Requires the protected lineup import run.")
+        }
+        lineupFile = URL(fileURLWithPath: path)
+        continueAfterFailure = false
+    }
+
+    override func tearDown() { app.terminate() }
+
+    private func launch(_ screen: String, extra: [String] = []) {
+        app.terminate()
+        app.launchArguments = ["-OpenStreamVisionScreen", screen, "-OpenStreamTrace", "YES",
+            "-OpenStreamMuteAudio", "YES", "-openstream.backup.icloud.enabled.v1", "NO",
+            "-openstream.firstRunGuidanceSeen", "YES"] + extra
+        app.launch()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
+    }
+
+    private func lineupSourceFile() throws -> URL {
+        let playlist = try XCTUnwrap(ProcessInfo.processInfo.environment["OPENSTREAM_LINEUP_PLAYLIST_URL"])
+        let seed = FileManager.default.temporaryDirectory.appendingPathComponent("lineup-source-\(UUID()).json")
+        try JSONSerialization.data(withJSONObject: ["version": 1, "sources": [
+            ["kind": "m3u", "name": "Lineup Fixture", "playlistURL": playlist]
+        ]]).write(to: seed)
+        return seed
+    }
+
+    func testAImportFromFilesAndKeepAfterRelaunch() throws {
+        launch("channels")
+        XCTAssertTrue(app.staticTexts["lineup.empty"].waitForExistence(timeout: 30))
+        let package = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Package' OR label == 'Everything'")).firstMatch
+        XCTAssertTrue(package.waitForExistence(timeout: 10))
+        package.tap()
+        XCTAssertFalse(app.buttons["Complete Guide"].exists)
+        app.buttons["Everything"].firstMatch.tap()
+        let button = app.buttons["lineup.import.file"]
+        scrollToControl(button, in: app)
+        button.tap()
+        let stem = try XCTUnwrap(lineupFile).deletingPathExtension().lastPathComponent
+        let file = app.descendants(matching: .any).matching(NSPredicate(
+            format: "label BEGINSWITH %@ OR identifier BEGINSWITH %@", stem, stem)).firstMatch
+        if !file.waitForExistence(timeout: 5) {
+            for label in ["Browse", "On My iPhone", "oStream"] {
+                let control = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label))
+                    .allElementsBoundByIndex.first { $0.isHittable }
+                control?.tap()
+                if file.waitForExistence(timeout: 3) { break }
+            }
+        }
+        XCTAssertTrue(file.waitForExistence(timeout: 10), "Staged lineup file is missing from Files")
+        file.tap()
+        XCTAssertTrue(app.alerts.staticTexts["Lineup imported."].waitForExistence(timeout: 15))
+        app.alerts.buttons["OK"].tap()
+        XCTAssertEqual(app.staticTexts["lineup.name"].label, "Complete US")
+        launch("channels")
+        XCTAssertTrue(app.staticTexts["lineup.name"].waitForExistence(timeout: 30))
+        XCTAssertEqual(app.staticTexts["lineup.name"].label, "Complete US")
+        let picker = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Package' OR label == 'Everything'")).firstMatch
+        picker.tap()
+        XCTAssertTrue(app.buttons["Complete Guide"].waitForExistence(timeout: 10))
+        app.buttons["Complete Guide"].tap()
+        let seed = try lineupSourceFile()
+        defer { try? FileManager.default.removeItem(at: seed) }
+        launch("live", extra: ["-OpenStreamDevSources", seed.path,
+            "-openstream.settings.live.scope.v1", "providerLineup"])
+        XCTAssertTrue(app.buttons["live.guide"].waitForExistence(timeout: 45))
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'guide.play.'")).firstMatch.waitForExistence(timeout: 45))
+        let importedLineup = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: XCTUnwrap(lineupFile))) as? [String: Any])
+        let channels = try XCTUnwrap(importedLineup["channels"] as? [[String: Any]])
+        let categories = Set(channels.compactMap { $0["category"] as? String })
+        let visibleCategories = Set(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'live.category.'"))
+            .allElementsBoundByIndex.map { String($0.identifier.dropFirst("live.category.".count)) })
+        XCTAssertGreaterThanOrEqual(categories.intersection(visibleCategories).count, 2)
+        XCTAssertFalse(visibleCategories.contains("Playlist Group"))
+        app.buttons["live.guide"].tap()
+        let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'guide.play.'")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        let channel = try XCTUnwrap(channels.first { "Play " + ($0["name"] as? String ?? "") == row.label })
+        let number = try XCTUnwrap(channel["number"] as? Int)
+        let text = VNRecognizeTextRequest()
+        text.recognitionLevel = .accurate
+        try VNImageRequestHandler(cgImage: XCTUnwrap(row.screenshot().image.cgImage)).perform([text])
+        XCTAssertTrue(text.results?.contains { $0.topCandidates(1).first?.string == String(number) } == true)
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "lineup-import-live"
+        shot.lifetime = .keepAlways
+        add(shot)
+    }
+
+    func testBPairedWebUploadChangesTheLineupAndPersists() async throws {
+        launch("web-management", extra: ["-OpenStreamStartWebManagement", "YES"])
+        let address = app.staticTexts["webmanagement.address"]
+        let code = app.staticTexts["webmanagement.pairingCode"]
+        XCTAssertTrue(address.waitForExistence(timeout: 30))
+        XCTAssertTrue(code.waitForExistence(timeout: 10))
+        let base = try XCTUnwrap(URL(string: address.label))
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        let (_, paired) = try await session.data(from: try XCTUnwrap(URL(string: "?pair=" + code.label, relativeTo: base)))
+        XCTAssertEqual((paired as? HTTPURLResponse)?.statusCode, 200)
+        let original = try Data(contentsOf: XCTUnwrap(lineupFile))
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: original) as? [String: Any])
+        object["name"] = "Web Lineup"
+        let boundary = "openstream-lineup-ui"
+        var request = URLRequest(url: base.appendingPathComponent("lineup"))
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=" + boundary, forHTTPHeaderField: "Content-Type")
+        func body(_ data: Data) -> Data {
+            Data(("--" + boundary + "\r\nContent-Disposition: form-data; name=\"lineup\"; filename=\"Complete US.oslineup\"\r\nContent-Type: application/json\r\n\r\n").utf8)
+                + data + Data(("\r\n--" + boundary + "--\r\n").utf8)
+        }
+        request.httpBody = body(try JSONSerialization.data(withJSONObject: object))
+        let (page, response) = try await session.data(for: request)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+        XCTAssertTrue(String(decoding: page, as: UTF8.self).contains("Web Lineup"))
+        request.httpBody = body(original)
+        let (_, restored) = try await session.data(for: request)
+        XCTAssertEqual((restored as? HTTPURLResponse)?.statusCode, 200)
+        launch("channels")
+        XCTAssertTrue(app.staticTexts["lineup.name"].waitForExistence(timeout: 30))
+        XCTAssertEqual(app.staticTexts["lineup.name"].label, "Complete US")
+    }
+
+    func testCURLImportContinuesAfterItsRowsScrollOffScreen() async throws {
+        let base = try XCTUnwrap(ProcessInfo.processInfo.environment["OPENSTREAM_LINEUP_SERVER"].flatMap(URL.init(string:)))
+        let seed = try lineupSourceFile()
+        defer { try? FileManager.default.removeItem(at: seed) }
+        launch("channels", extra: ["-OpenStreamDevSources", seed.path,
+            "-openstream.settings.live.package.v1", "custom", "-openstream.settings.live.scope.v1", "providerLineup"])
+        let selected = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Remove '")).firstMatch
+        scrollToControl(selected, in: app)
+        XCTAssertTrue(selected.exists)
+        for _ in 0..<4 { app.swipeDown() }
+        let field = app.textFields["lineup.url"]
+        scrollToControl(field, in: app)
+        field.tap()
+        field.typeText(base.appendingPathComponent("delayed-lineup.oslineup").absoluteString)
+        let importButton = app.buttons["lineup.import.url"]
+        scrollToControl(importButton, in: app)
+        importButton.tap()
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        let (_, started) = try await session.data(from: base.appendingPathComponent("wait-for-lineup"))
+        XCTAssertEqual((started as? HTTPURLResponse)?.statusCode, 200)
+        for _ in 0..<6 where field.isHittable { app.swipeUp() }
+        XCTAssertFalse(field.isHittable)
+        let (_, released) = try await session.data(from: base.appendingPathComponent("release-lineup"))
+        XCTAssertEqual((released as? HTTPURLResponse)?.statusCode, 200)
+        XCTAssertTrue(app.alerts.staticTexts["Lineup imported."].waitForExistence(timeout: 15))
+        app.alerts.buttons["OK"].tap()
+        launch("channels")
+        XCTAssertTrue(app.staticTexts["lineup.name"].waitForExistence(timeout: 30))
+        XCTAssertEqual(app.staticTexts["lineup.name"].label, "Complete US")
     }
 }

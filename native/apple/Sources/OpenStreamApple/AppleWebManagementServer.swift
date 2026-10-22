@@ -110,6 +110,7 @@ public final class AppleWebManagementServer {
     public var onStop: (@MainActor @Sendable (AppleWebManagementServerStopReason) -> Void)?
 
     private let configuration: Configuration
+    private let lineupStore: AppleChannelLineupStore
     private let iptvClient: AppleIPTVClient
     private let networkQueue = DispatchQueue(label: "com.orgista.openstream.web-management", qos: .userInitiated)
 
@@ -126,8 +127,10 @@ public final class AppleWebManagementServer {
     public init(
         configuration: Configuration = Configuration(),
         iptvClient: AppleIPTVClient = AppleIPTVClient(),
-        now: @escaping @MainActor () -> Date = { Date() }
+        now: @escaping @MainActor () -> Date = { Date() },
+        lineupStore: AppleChannelLineupStore = .shared
     ) {
+        self.lineupStore = lineupStore
         self.now = now
         self.configuration = configuration
         self.iptvClient = iptvClient
@@ -426,7 +429,11 @@ public final class AppleWebManagementServer {
         }
 
         do {
-            let request = try await AppleWebManagementHTTPReader.read(from: connection)
+            let request = try await AppleWebManagementHTTPReader.read(
+                from: connection,
+                acceptsBody: { ["/", "/openstream", "/lineup"].contains($0) },
+                bodyLimitForPath: { $0 == "/lineup" ? 4 * 1024 * 1024 : AppleWebManagementHTTPReader.maxBodyBytes }
+            )
             timeout.cancel()
             traceWeb("\(request.method) portal request from \(remoteHost)")
             guard generation == acceptedGeneration, let activeSession = session else {
@@ -462,7 +469,7 @@ public final class AppleWebManagementServer {
         session activeSession: AppleWebManagementSession,
         remoteHost: String
     ) async -> (response: AppleWebManagementHTTPResponse, stopAfterSending: Bool) {
-        guard request.path == "/" || request.path == "/openstream" || request.path == "/diagnostics" else {
+        guard request.path == "/" || request.path == "/openstream" || request.path == "/diagnostics" || request.path == "/lineup" else {
             return (.plain(404, "Not Found", "Not found."), false)
         }
         refreshLifetimes()
@@ -482,6 +489,24 @@ public final class AppleWebManagementServer {
         }
 
         let browserToken = authenticatedBrowser(headers: request.headers)
+
+        if request.path == "/lineup" {
+            guard request.method == "POST" else {
+                return (.plain(405, "Method Not Allowed", "Use POST.", headers: ["Allow": "POST"]), false)
+            }
+            guard let browserToken else {
+                return (.plain(401, "Pairing Required", "Pair this browser first."), false)
+            }
+            let cookie = pairingCookies(browserToken)
+            do {
+                let data = try Self.uploadedLineup(body: request.rawBody, contentType: request.headers["content-type"])
+                try lineupStore.importData(data)
+                return (.html(200, "OK", page(session: activeSession, paired: true, notice: "Lineup imported."), cookies: cookie), false)
+            } catch {
+                let message = (error as? AppleChannelLineupError)?.errorDescription ?? "Could not import the lineup."
+                return (.html(400, "Lineup Not Imported", page(session: activeSession, paired: true, error: message), cookies: cookie), false)
+            }
+        }
 
         // The trace log, readable from a machine on the same network.
         //
@@ -650,7 +675,8 @@ public final class AppleWebManagementServer {
             sources: sourceStore?.sources ?? [],
             address: Self.displayAddress(for: activeSession),
             sourceType: sourceType,
-            draft: draft
+            draft: draft,
+            lineupName: lineupStore.current?.name
         )
     }
 
@@ -678,6 +704,30 @@ public final class AppleWebManagementServer {
         }
     }
 
+
+    static func uploadedLineup(body: Data, contentType: String?) throws -> Data {
+        guard body.count <= 4 * 1024 * 1024 else { throw AppleChannelLineupError.tooLarge }
+        if contentType?.split(separator: ";").first?.trimmingCharacters(in: .whitespaces).lowercased() == "application/json" {
+            return body
+        }
+        guard let contentType, let boundary = AppleWebManagementProtocol.multipartBoundary(contentType),
+              let text = String(data: body, encoding: .utf8) else { throw AppleChannelLineupError.invalidFile }
+        var uploaded: Data?
+        for part in text.components(separatedBy: "--" + boundary).dropFirst() {
+            if part.hasPrefix("--") { break }
+            guard part.hasPrefix("\r\n"), let separator = part.range(of: "\r\n\r\n") else {
+                throw AppleChannelLineupError.invalidFile
+            }
+            let headers = part[..<separator.lowerBound].lowercased()
+            guard headers.contains("content-disposition: form-data;"), headers.contains("name=\"lineup\""),
+                  headers.contains("filename=\""), part.hasSuffix("\r\n"), uploaded == nil else {
+                throw AppleChannelLineupError.invalidFile
+            }
+            uploaded = Data(part[separator.upperBound...].utf8.dropLast(2))
+        }
+        guard let uploaded else { throw AppleChannelLineupError.invalidFile }
+        return uploaded
+    }
 
     private func pairingCookies(_ token: String) -> [String] {
         ["openstream_token=\(token); Max-Age=\(Int(Self.browserInactivityDuration)); SameSite=Strict; HttpOnly; Path=/"]
@@ -948,7 +998,8 @@ enum AppleWebManagementHTTPReader {
     static func read(
         from connection: NWConnection,
         maxBodyBytes bodyLimit: Int = maxBodyBytes,
-        acceptsBody: @Sendable (String) -> Bool = { $0 == "/" || $0 == "/openstream" }
+        acceptsBody: @Sendable (String) -> Bool = { $0 == "/" || $0 == "/openstream" },
+        bodyLimitForPath: (@Sendable (String) -> Int)? = nil
     ) async throws -> AppleWebManagementHTTPRequest {
         var buffer = Data()
         var streamIsComplete = false
@@ -959,6 +1010,7 @@ enum AppleWebManagementHTTPReader {
                 guard headerData.count <= maxHeaderBytes else { throw AppleWebManagementHTTPReadError.tooLarge }
                 let partial = try parseHead(Data(headerData))
                 let bodyOffset = terminator.upperBound
+                let limit = bodyLimitForPath?(partial.path) ?? bodyLimit
 
                 guard partial.method == "POST", acceptsBody(partial.path) else {
                     return partial.withBody(Data())
@@ -968,7 +1020,7 @@ enum AppleWebManagementHTTPReader {
                 }
                 guard let lengthValue = partial.headers["content-length"],
                       let contentLength = Int(lengthValue),
-                      (1 ... bodyLimit).contains(contentLength) else {
+                      (1 ... limit).contains(contentLength) else {
                     throw AppleWebManagementHTTPReadError.tooLarge
                 }
 
@@ -977,7 +1029,7 @@ enum AppleWebManagementHTTPReader {
                     let bodyData = buffer[bodyOffset ..< bodyOffset + contentLength]
                     return partial.withBody(Data(bodyData))
                 }
-                guard buffer.count <= bodyOffset + bodyLimit else {
+                guard buffer.count <= bodyOffset + limit else {
                     throw AppleWebManagementHTTPReadError.tooLarge
                 }
             } else if buffer.count > maxHeaderBytes {

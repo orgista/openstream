@@ -8,7 +8,7 @@ import Testing
         AppleIPTVChannel(id: "news", sourceID: source, name: "CNN HD", group: "News", streamURL: URL(string: "https://fixture.example/news.ts")!),
         AppleIPTVChannel(id: "sports", sourceID: source, name: "ESPN (EAST)", group: "Sports", streamURL: URL(string: "https://fixture.example/sports.ts")!)
     ]
-    let entries = try AppleChannelLineupPresets.completeUS()
+    let entries = try fixtureLineup().channels
     let snapshot = AppleLiveChannelSnapshot.build(groups: [.init(name: "All", channels: channels)],
         package: .everything, custom: .init(), entries: entries, favoriteIDs: ["sports"], category: "Favorites")
     #expect(snapshot.channels.map(\.id) == ["sports"])
@@ -214,9 +214,9 @@ struct AppleLiveChannelDisplayCapTests {
     let groups = [AppleIPTVChannelGroup(name: "All", channels: channels)]
     let all = AppleLiveChannelSnapshot.build(groups: groups, package: .everything, custom: .init(),
         entries: [], favoriteIDs: [], category: "All")
-    #expect(all.categories == ["All", "Favorites", "News", "Sports"])
+    #expect(all.categories == ["All", "Favorites", "News", "Random 24/7", "US| SPORTS HD"])
     let sports = AppleLiveChannelSnapshot.build(groups: groups, package: .everything, custom: .init(),
-        entries: [], favoriteIDs: [], category: "Sports")
+        entries: [], favoriteIDs: [], category: "US| SPORTS HD")
     #expect(sports.channelIDs == ["b"])
     #expect(AppleLiveCategoryPolicy.category(forPlaylistGroup: "Newsmax") == nil)
     #expect(AppleLiveCategoryPolicy.category(forPlaylistGroup: "UK | Kids") == "Kids")

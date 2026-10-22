@@ -9,41 +9,41 @@ struct AppleChannelLineupPresetsTests {
 
     @Test("Tests JSON Loading and preset logic")
     func testCompleteUS() throws {
-        let entries = try AppleChannelLineupPresets.completeUS()
-        #expect(entries.count >= 300)
+        let entries = try fixtureLineup().channels
+        #expect(entries.count == 31)
     }
 
     @Test("Tests Exact name match")
     func testMatchExactName() throws {
-        let entries = try AppleChannelLineupPresets.completeUS()
+        let entries = try fixtureLineup().channels
         let match = AppleChannelLineupPresets.match(channelName: "ESPN", in: entries)
         #expect(match?.number == 206)
     }
 
     @Test("Tests alias match")
     func testMatchAlias() throws {
-        let entries = try AppleChannelLineupPresets.completeUS()
+        let entries = try fixtureLineup().channels
         let match = AppleChannelLineupPresets.match(channelName: "ESPN HD", in: entries)
         #expect(match?.number == 206)
     }
 
     @Test("Tests normalization US prefix")
     func testMatchUSPrefix() throws {
-        let entries = try AppleChannelLineupPresets.completeUS()
+        let entries = try fixtureLineup().channels
         let match = AppleChannelLineupPresets.match(channelName: "US: CNN", in: entries)
         #expect(match?.number == 202)
     }
 
     @Test("Tests normalization suffix")
     func testMatchEastSuffix() throws {
-        let entries = try AppleChannelLineupPresets.completeUS()
+        let entries = try fixtureLineup().channels
         let match = AppleChannelLineupPresets.match(channelName: "HBO East", in: entries)
         #expect(match?.number == 501)
     }
     
     @Test("Tests normalization of punctuation")
     func testMatchPunctuation() throws {
-        let entries = try AppleChannelLineupPresets.completeUS()
+        let entries = try fixtureLineup().channels
         // 205 is Sports Mix in the real guide; Fox News Channel is 360.
         let match = AppleChannelLineupPresets.match(channelName: "Fox-News!", in: entries)
         #expect(match?.number == 360)
@@ -51,8 +51,8 @@ struct AppleChannelLineupPresetsTests {
 
     @Test("Tests local matching")
     func testLocalMatches() throws {
-        let entries = try AppleChannelLineupPresets.completeUS()
-        let chicagoMatches = AppleChannelLineupPresets.localMatches(zip: "60614", entries: entries)
+        let entries = try fixtureLineup().channels
+        let chicagoMatches = AppleChannelLineupPresets.localMatches(zip: "60614", entries: entries, markets: try fixtureLineup().markets)
         // Should include locals (which apply to all markets according to our simple model, or specifically Chicago)
         // AND the RSNs for Chicago
         let rsn = chicagoMatches.first { $0.number == 665 }
@@ -65,7 +65,7 @@ struct AppleChannelLineupPresetsTests {
 
     @Test("Unknown name returns nil")
     func testUnknownName() throws {
-        let entries = try AppleChannelLineupPresets.completeUS()
+        let entries = try fixtureLineup().channels
         let match = AppleChannelLineupPresets.match(channelName: "Some Random Unknown Channel", in: entries)
         #expect(match == nil)
     }
@@ -78,14 +78,14 @@ struct AppleChannelLineupPresetsTests {
 
     @Test(arguments: [0, 1, 7, 8, 9, 19, 20, 21])
     func automaticPackageUsesTheSnapshotConfidenceThreshold(count: Int) throws {
-        let entries = Array(try AppleChannelLineupPresets.completeUS().prefix(count))
+        let entries = Array(try fixtureLineup().channels.prefix(count))
         let channels = entries.map {
             AppleIPTVChannel(id: String($0.number), sourceID: UUID(), name: $0.name, group: "All",
                              streamURL: URL(string: "https://fixture.example/channel.ts")!)
         }
-        #expect(AppleLiveChannelPackage.defaultPackage(for: channels) ==
+        #expect(AppleLiveChannelPackage.defaultPackage(for: channels, entries: entries) ==
                 (count >= AppleLiveChannelSnapshot.minimumLineupMatches ? .completeGuide : .everything))
-        #expect(AppleLiveChannelPackage.defaultPackage(for: Array(repeating: channels.first, count: 30).compactMap { $0 }) == .everything)
+        #expect(AppleLiveChannelPackage.defaultPackage(for: Array(repeating: channels.first, count: 30).compactMap { $0 }, entries: entries) == .everything)
     }
 
     @Test func unrelatedPlaylistKeepsItsChannelsUnderEverything() throws {
@@ -93,16 +93,16 @@ struct AppleChannelLineupPresetsTests {
             AppleIPTVChannel(id: String($0), sourceID: UUID(), name: "Kanal \($0)", group: "All",
                              streamURL: URL(string: "https://fixture.example/\($0).ts")!)
         }
-        let package = AppleLiveChannelPackage.defaultPackage(for: channels)
+        let package = AppleLiveChannelPackage.defaultPackage(for: channels, entries: [])
         #expect(package == .everything)
         let snapshot = AppleLiveChannelSnapshot.build(groups: [.init(name: "All", channels: channels)],
-            package: package, custom: .init(), entries: try AppleChannelLineupPresets.completeUS(),
+            package: package, custom: .init(), entries: try fixtureLineup().channels,
             favoriteIDs: [], category: "All")
         #expect(Set(snapshot.channelIDs) == Set(channels.map(\.id)))
     }
 
     @Test func lineupCannotCreatePlaylistChannels() throws {
-        let entries = try AppleChannelLineupPresets.completeUS()
+        let entries = try fixtureLineup().channels
         #expect(AppleChannelProjection.completeGuideGroups(from: [], entries: entries).isEmpty)
         let snapshot = AppleLiveChannelSnapshot.build(groups: [], package: .completeGuide, custom: .init(),
                                                       entries: entries, favoriteIDs: [], category: "All")

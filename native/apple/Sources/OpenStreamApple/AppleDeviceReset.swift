@@ -75,6 +75,7 @@ public enum AppleDeviceReset {
         ApplePlaybackBlobStorage.discardAfterReset()
         AppleLocalLibraryStore.shared.discardAfterReset()
         AppleChannelHealthStore.shared.discardAfterReset()
+        AppleChannelLineupStore.shared.discardAfterReset()
         ApplePlaybackFailureHistory.shared.removeAll()
         ApplePlaybackProgressFeed.shared.storeDidChange()
         AppleRemoteImageCache.shared.removeAllCached()
@@ -168,17 +169,18 @@ public enum AppleDeviceReset {
     /// subfolders are wiped.
     static func containerDirectories(_ fileManager: FileManager) -> [URL] {
         let temporary = fileManager.temporaryDirectory
+        let lineups = [AppleChannelLineupStore.defaultDirectory, AppleChannelLineupStore.fallbackDirectory]
         #if os(macOS)
         if ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] == nil {
             let bundle = Bundle.main.bundleIdentifier ?? "com.orgista.openstream"
             return [.applicationSupportDirectory, .cachesDirectory].compactMap {
                 fileManager.urls(for: $0, in: .userDomainMask).first?.appendingPathComponent(bundle)
-            }
+            } + lineups
         }
         #endif
         let documents = fileManager.urls(for: .documentDirectory, in: .userDomainMask)
         let library = fileManager.urls(for: .libraryDirectory, in: .userDomainMask).first
-        return documents + (library.map { libraryTree(library: $0) } ?? []) + [temporary]
+        return documents + (library.map { libraryTree(library: $0) } ?? []) + [temporary] + lineups
     }
 
     /// A container root, its Library, and the Library folders that are

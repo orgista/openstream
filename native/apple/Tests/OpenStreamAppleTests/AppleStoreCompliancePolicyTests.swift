@@ -94,13 +94,17 @@ struct AppleStoreCompliancePolicyTests {
         #expect(!ids.contains(AppleDiscoverRowOrder.top10Shows))
     }
 
-    // MARK: B6 — bundled organisation preset, never a channel source
-
-    @Test("Every build bundles Complete Guide")
-    func resourceBundleContainsChannelLineup() throws {
-        let bundle = AppleChannelLineupPresets.resourceBundle
-        #expect(bundle.url(forResource: "complete-us", withExtension: "json", subdirectory: "ChannelLineup") != nil)
-        #expect(try AppleChannelLineupPresets.readFile().channels.count >= 300)
+    @Test("No channel lineup ships in the resource bundle")
+    func resourceBundleContainsNoChannelLineup() throws {
+        let products = Bundle(for: AppleSettingsStore.self).bundleURL.deletingLastPathComponent()
+        let bundles = try FileManager.default.contentsOfDirectory(at: products, includingPropertiesForKeys: nil)
+        let root = try #require(bundles.first { $0.lastPathComponent == "OpenStreamApple_OpenStreamApple.bundle" })
+        let paths = try #require(FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil))
+        for case let url as URL in paths {
+            #expect(url.lastPathComponent != "ChannelLineup")
+            #expect(url.lastPathComponent != "complete-us.json")
+            #expect(url.pathExtension != "oslineup")
+        }
     }
 
     @Test("A missing lineup falls back to the viewer's playlist")
@@ -114,19 +118,20 @@ struct AppleStoreCompliancePolicyTests {
                              streamURL: URL(string: "http://x/2")!),
         ]
         let groups = AppleChannelProjection.completeGuideGroups(from: channels, entries: [])
-        #expect(groups.map(\.name) == ["Other"])
-        #expect(groups.flatMap(\.channels).map(\.id) == ["1", "2"])
+        #expect(groups.map(\.name) == ["News", "Sports"])
+        #expect(Set(groups.flatMap(\.channels).map(\.id)) == ["1", "2"])
         let snapshot = AppleLiveChannelSnapshot.build(groups: groups, package: .completeGuide, custom: .init(),
                                                       entries: [], favoriteIDs: [], category: "All")
-        #expect(snapshot.channels.map(\.id) == ["1", "2"])
-        #expect(snapshot.channels.first?.logoURL == URL(string: "http://x/espn.png"))
+        #expect(snapshot.channels.map(\.id) == ["2", "1"])
+        #expect(snapshot.channels.first(where: { $0.id == "1" })?.logoURL == URL(string: "http://x/espn.png"))
         // The playlist's own groups still give the chips (Apple TV pass 2026-10-02).
         #expect(snapshot.categories == ["All", "Favorites", "News", "Sports"])
     }
 
     @Test("Package picker titles are the same in every build")
-    func packageChoicesFollowTheLineup() {
-        #expect(AppleLiveChannelPackage.available.map(\.title) == ["Complete Guide", "Everything", "Custom"])
+    func packageChoicesFollowTheLineup() throws {
+        #expect(AppleLiveChannelPackage.available(entries: []).map(\.title) == ["Everything", "Custom"])
+        #expect(AppleLiveChannelPackage.available(entries: try fixtureLineup().channels).map(\.title) == ["Complete Guide", "Everything", "Custom"])
         #expect(AppleLiveChannelPackage.defaultPackage(for: []) == .everything)
     }
 }

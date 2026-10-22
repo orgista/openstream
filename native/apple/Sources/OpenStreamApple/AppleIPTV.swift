@@ -204,18 +204,14 @@ public enum AppleChannelVisibilityPolicy {
         "metro channels"
     ]
 
-    public static func isRegional(_ channel: AppleIPTVChannel, zipCode: String? = nil) -> Bool {
-        if let zipCode {
+    public static func isRegional(_ channel: AppleIPTVChannel, zipCode: String? = nil,
+                                  lineup: AppleChannelLineupFile? = AppleChannelLineupStore.shared.current) -> Bool {
+        if let zipCode, let lineup {
             guard let normalizedZIP = AppleZIPCodePolicy.normalize(zipCode) else { return false }
             let text = normalizedRegionalText("\(channel.name) \(channel.group)")
             return text.contains(normalizedZIP) || text.contains("local") ||
-                (try? AppleChannelLineupPresets.completeUS()).map {
-                    AppleChannelLineupPresets.matchesLocalChannel(
-                        name: channel.name,
-                        zip: normalizedZIP,
-                        entries: $0
-                    )
-                } ?? false
+                AppleChannelLineupPresets.matchesLocalChannel(
+                    name: channel.name, zip: normalizedZIP, entries: lineup.channels, markets: lineup.markets)
         }
         let normalized = normalizedRegionalText("\(channel.name) \(channel.group)")
         guard !normalized.isEmpty else { return false }
@@ -327,6 +323,10 @@ public enum AppleChannelProjection {
     }
 
     public static func completeGuideGroups(from channels: [AppleIPTVChannel], entries: [AppleChannelLineupEntry]) -> [AppleIPTVChannelGroup] {
+        guard !entries.isEmpty else {
+            return Dictionary(grouping: channels, by: \.group).map { .init(name: $0.key, channels: $0.value) }
+                .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        }
         let index = AppleChannelLineupIndex(entries)
         let east = AppleChannelVisibilityPolicy.deduplicatedEastChannels(channels)
         var seenLineupNumbers = Set<Int>()
