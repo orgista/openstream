@@ -127,8 +127,8 @@ private final class Top10WeekCacheProtocol: URLProtocol {
     #expect(Top10WeekCacheProtocol.requests.count == 1)
 
     // The kept week is there at launch without the network, before the refresh may run.
-    #expect(await AppleNetflixTop10Client(session: session, fileURL: file).storedWeek(now: now) == first)
-    #expect(await AppleNetflixTop10Client(session: session).storedWeek(now: now) == nil)
+    #expect(await AppleNetflixTop10Client(session: session, fileURL: file).storedWeek() == first)
+    #expect(await AppleNetflixTop10Client(session: session).storedWeek() == nil)
     #expect(Top10WeekCacheProtocol.requests.count == 1)
 
     // A day later it asks with the file's validator; 304 keeps the saved week.
@@ -138,6 +138,15 @@ private final class Top10WeekCacheProtocol: URLProtocol {
     #expect(Top10WeekCacheProtocol.requests.count == 2)
     #expect(Top10WeekCacheProtocol.requests.last?.value(forHTTPHeaderField: "If-None-Match") == "\"week-41\"")
 
+    // A failed refresh keeps showing the saved week, with nothing to say about it (owner rule: no
+    // explainer text). The week used to come back marked stale and Discover drew a note under the rows
+    // from that mark; the rows now get only what they draw.
+    Top10WeekCacheProtocol.status = 500
+    let failed = try await relaunch.latestWeek(now: now.addingTimeInterval(3 * AppleNetflixTop10Client.refreshInterval))
+    #expect(failed == first)
+    #expect(Mirror(reflecting: failed).children.map(\.label) == ["week", "films", "tv"])
+    #expect(Top10WeekCacheProtocol.requests.count == 3)
+
     // Two callers at once share one download.
     Top10WeekCacheProtocol.status = 200
     let fresh = AppleNetflixTop10Client(session: session)
@@ -145,5 +154,5 @@ private final class Top10WeekCacheProtocol: URLProtocol {
     async let two = fresh.latestWeek(now: now)
     let both = try await [one, two]
     #expect(both.allSatisfy { $0.films.map(\.title) == ["First"] })
-    #expect(Top10WeekCacheProtocol.requests.count == 3)
+    #expect(Top10WeekCacheProtocol.requests.count == 4)
 }

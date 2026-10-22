@@ -677,6 +677,8 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         XCTAssertTrue(bar.waitForExistence(timeout: 10))
         XCTAssertEqual(bar.frame.minY, stageFrame.maxY, accuracy: 1,
                        "Categories sit directly below the stage")
+        // Paramount+ on DevPlus (2026-10-21): an 81 pt flat strip from the stage to the first row.
+        XCTAssertEqual(bar.frame.height, 81, accuracy: 1)
         XCTAssertEqual(stageFrame.minX, app.frame.minX, accuracy: 1)
         XCTAssertEqual(stageFrame.width, app.frame.width, accuracy: 1)
         if app.statusBars.firstMatch.exists {
@@ -725,17 +727,34 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         XCTAssertTrue(all.waitForExistence(timeout: 30))
         let barFrame = bar.frame
         let allFrame = all.frame
+        // Paramount+ on DevPlus: the labels sit in the middle of the strip, not at its top.
+        XCTAssertEqual(allFrame.midY, barFrame.midY, accuracy: 1, "chip \(allFrame) in strip \(barFrame)")
         attach("live-categories-before-scroll")
         for _ in 0..<3 {
             list.swipeUp()
             XCTAssertEqual(bar.frame.minY, barFrame.minY, accuracy: 1)
             XCTAssertEqual(all.frame.minY, allFrame.minY, accuracy: 1)
         }
-        let start = all.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 35)),
-                    withVelocity: .slow, thenHoldForDuration: 1)
-        XCTAssertEqual(all.frame.minY, allFrame.minY, accuracy: 1)
         attach("live-categories-after-scroll")
+        // Owner 2026-10-21: the bar "floats". A vertical drag that starts on a chip, down past the strip
+        // and back up, leaves the chips where they were.
+        let chip = all.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        for dy in [120.0, -60.0] {
+            chip.press(forDuration: 0.05, thenDragTo: chip.withOffset(CGVector(dx: 0, dy: dy)),
+                       withVelocity: .slow, thenHoldForDuration: 1)
+            XCTAssertEqual(all.frame.minY, allFrame.minY, accuracy: 1, "drag \(dy) pt on the chip")
+            XCTAssertEqual(bar.frame.minY, barFrame.minY, accuracy: 1)
+        }
+        attach("live-categories-after-drag-on-bar")
+        // Owner 2026-10-21: the bar still "floats". Pulled past the list's top, the rows
+        // rubber-band under a strip that stays put.
+        for _ in 0..<3 { list.swipeDown() }
+        let listTop = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.1))
+        listTop.press(forDuration: 0.05, thenDragTo: listTop.withOffset(CGVector(dx: 0, dy: 160)),
+                      withVelocity: .slow, thenHoldForDuration: 2)
+        XCTAssertEqual(bar.frame.minY, barFrame.minY, accuracy: 1)
+        XCTAssertEqual(all.frame.minY, allFrame.minY, accuracy: 1)
+        attach("live-categories-after-pull-down")
         let favorites = app.buttons["live.category.Favorites"].firstMatch
         if favorites.exists, isSafelyHittable(favorites) {
             let before = favorites.frame

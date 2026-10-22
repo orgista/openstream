@@ -104,7 +104,6 @@ struct AppleDiscoverView: View {
     @State private var recommendations = RecommendationResult()
     @State private var recommendationsRevision: String?
     @State private var top10Week: AppleNetflixTop10Week?
-    @State private var top10Error: String?
     @State private var library = AppleLocalLibraryStore.shared
     /// Wordmark art for the rotating heroes, keyed by media id. The prefetcher
     /// already warms these into the preview-assets cache for the home screen;
@@ -545,7 +544,7 @@ struct AppleDiscoverView: View {
         }
         .onChange(of: settings.top10ListsEnabled) { _, enabled in
             if enabled { loadTop10() }
-            else { top10Week = nil; top10Error = nil }
+            else { top10Week = nil }
         }
         // A deep link, widget, Spotlight result or App Intent moves Discover's
         // own navigation state. The stack itself keeps its identity: it used
@@ -1162,7 +1161,6 @@ struct AppleDiscoverView: View {
         case topPicks
         case becauseWatched
         case top10(String)
-        case top10StaleNote
         case catalog(String)
         var id: Self { self }
 
@@ -1175,7 +1173,6 @@ struct AppleDiscoverView: View {
             case .topPicks: AppleDiscoverRowOrder.topPicks
             case .becauseWatched: "becauseWatched"
             case .top10(let type): type == "movie" ? AppleDiscoverRowOrder.top10Movies : AppleDiscoverRowOrder.top10Shows
-            case .top10StaleNote: "top10StaleNote"
             case .catalog(let id): AppleDiscoverRowOrder.catalogID(id)
             }
         }
@@ -1217,7 +1214,7 @@ struct AppleDiscoverView: View {
             let isRanked = AppleCatalogShelfPolicy.style(for: section.catalog) == .ranked
             rails.append((.catalog(section.id), isRanked ? .still : .poster))
         }
-        var ordered: [DiscoverRail]
+        let ordered: [DiscoverRail]
         if let custom = customRowOrder {
             // The viewer's order wins over the A4 rhythm. Media-server
             // shelves share one id and move together, in their own order.
@@ -1231,10 +1228,6 @@ struct AppleDiscoverView: View {
             ordered = discoverRowStyle != nil
                 ? AppleDiscoverRailRhythm.order(rails.map(\.1)).map { rails[$0].0 }
                 : rails.map(\.0)
-        }
-        if settings.top10ListsEnabled, top10Week?.isStale == true {
-            let lastTop10 = ordered.lastIndex { if case .top10 = $0 { true } else { false } }
-            ordered.insert(.top10StaleNote, at: lastTop10.map { $0 + 1 } ?? ordered.count)
         }
         return AppleRecommendationRowPolicy.appendingSeed(recommendations.seedHeading == nil ? nil : .becauseWatched, to: ordered)
     }
@@ -1271,15 +1264,10 @@ struct AppleDiscoverView: View {
                 let items = AppleCatalogShelfPolicy.style(for: section.catalog) == .ranked ? Array(section.items.prefix(10)) : section.items
                 let source = sourceStore.sources.first { $0.id == section.sourceID }
                 return items.map { rowIdentity($0, source: source) }
-            case .top10StaleNote: return []
             }
         }
-        // A status note is not a collection and does not consume the window.
-        let content = rails.indices.filter { rails[$0] != .top10StaleNote }
-        let deduped = AppleCatalogShelfPolicy.deduplicatedRows(content.map { keys[$0] })
-        var allowed: [Int: Set<String>] = [:]
-        for (index, row) in zip(content, deduped) { allowed[index] = Set(row) }
-        return rails.indices.map { DisplayedRail(rail: rails[$0], allowed: allowed[$0] ?? []) }
+        let deduped = AppleCatalogShelfPolicy.deduplicatedRows(keys)
+        return zip(rails, deduped).map { DisplayedRail(rail: $0, allowed: Set($1)) }
     }
 
     private func rowItems<Value>(_ values: [Value], allowed: Set<String>, item: (Value) -> AppleCatalogItem,
@@ -1347,11 +1335,6 @@ struct AppleDiscoverView: View {
             } else {
                 top10Shelf(title: "Top 10 Shows in the US", entries: top10Week?.tv ?? [], type: "series", allowed: allowed)
             }
-        case .top10StaleNote:
-            Text("Top 10 lists are stale because the latest update could not be downloaded.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 16)
         case .catalog(let id):
             if let section = visibleSections.first(where: { $0.id == id }),
                let source = sourceStore.sources.first(where: { $0.id == section.sourceID }) {
@@ -1430,10 +1413,9 @@ struct AppleDiscoverView: View {
             try? await Task.sleep(for: AppleLaunchWorkPolicy.remainingLaunchWindow(processAge: AppleLaunchMarks.launchAge()))
             do {
                 top10Week = try await AppleNetflixTop10Client.shared.latestWeek()
-                top10Error = nil
                 appleTrace("discover top 10 loaded")
             } catch {
-                top10Error = error.localizedDescription
+                AppleInteractionTrace.record(.network, "discover top 10 failed \(appleErrorLabel(error))")
             }
         }
     }

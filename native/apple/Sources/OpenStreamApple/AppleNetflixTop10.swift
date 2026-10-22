@@ -18,16 +18,12 @@ public struct AppleNetflixTop10Week: Codable, Sendable, Equatable {
     public let week: Date
     public let films: [AppleNetflixTop10Entry]
     public let tv: [AppleNetflixTop10Entry]
-    public let isStale: Bool
 
-    public init(week: Date, films: [AppleNetflixTop10Entry], tv: [AppleNetflixTop10Entry], isStale: Bool = false) {
+    public init(week: Date, films: [AppleNetflixTop10Entry], tv: [AppleNetflixTop10Entry]) {
         self.week = week
         self.films = films
         self.tv = tv
-        self.isStale = isStale
     }
-
-    func marked(stale: Bool) -> Self { .init(week: week, films: films, tv: tv, isStale: stale) }
 }
 
 /// Netflix publishes the chart once a week as one file of every week and country (tens of MB).
@@ -38,7 +34,6 @@ public actor AppleNetflixTop10Client {
         .urls(for: .cachesDirectory, in: .userDomainMask)[0]
         .appending(path: "OpenStream", directoryHint: .isDirectory).appending(path: "netflix-top10-v1.json"))
     static let refreshInterval: TimeInterval = 86_400
-    static let staleAfter: TimeInterval = 30 * 3600
 
     private struct Stored: Codable {
         let country: String
@@ -67,15 +62,15 @@ public actor AppleNetflixTop10Client {
 
     /// The week kept on disk by an earlier launch, without asking the network, so the rows can draw at launch while
     /// `latestWeek` waits.
-    func storedWeek(now: Date = .now) -> AppleNetflixTop10Week? {
+    func storedWeek() -> AppleNetflixTop10Week? {
         readDiskOnce()
-        return stored.map { $0.week.marked(stale: now.timeIntervalSince($0.fetchedAt) > Self.staleAfter) }
+        return stored?.week
     }
 
     public func latestWeek(now: Date = .now) async throws -> AppleNetflixTop10Week {
         readDiskOnce()
         if let stored, now.timeIntervalSince(stored.fetchedAt) < Self.refreshInterval {
-            return stored.week.marked(stale: false)
+            return stored.week
         }
         if let inFlight { return try await inFlight.value }
         let task = Task { try await download(now: now) }
@@ -113,7 +108,7 @@ public actor AppleNetflixTop10Client {
             if response.statusCode == 304, let previous = stored {
                 save(Stored(country: country, week: previous.week, fetchedAt: now,
                             entityTag: previous.entityTag, lastModified: previous.lastModified))
-                return previous.week.marked(stale: false)
+                return previous.week
             }
             guard (200...299).contains(response.statusCode) else { throw URLError(.badServerResponse) }
             var parser = AppleNetflixTop10Parser(country: country)
@@ -137,8 +132,10 @@ public actor AppleNetflixTop10Client {
                         lastModified: response.value(forHTTPHeaderField: "Last-Modified")))
             return week
         } catch {
+            // The last good week stays on screen; the failure only goes to the trace.
             if let stored {
-                return stored.week.marked(stale: now.timeIntervalSince(stored.fetchedAt) > Self.staleAfter)
+                AppleInteractionTrace.record(.network, "top 10 refresh failed \(appleErrorLabel(error)), kept week of \(stored.fetchedAt.formatted(.iso8601))")
+                return stored.week
             }
             throw error
         }
