@@ -45,7 +45,7 @@ struct AppleLiveOnNowList: View {
                 }
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-                .listRowBackground(Color.black)
+                .listRowBackground(panel)
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("live.sourceError")
             }
@@ -58,7 +58,7 @@ struct AppleLiveOnNowList: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 24)
-                    .listRowBackground(Color.black)
+                    .listRowBackground(panel)
                     .listRowSeparator(.hidden)
             }
             if hiddenCount > 0 {
@@ -66,7 +66,7 @@ struct AppleLiveOnNowList: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
-                    .listRowBackground(Color.black)
+                    .listRowBackground(panel)
                     .listRowSeparator(.hidden)
                     .accessibilityIdentifier("live.cap.notice")
             }
@@ -74,7 +74,7 @@ struct AppleLiveOnNowList: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .scrollIndicators(.hidden)
-        .background(Color.black)
+        .background(panel)
         .environment(\.defaultMinListRowHeight, AppleDesignTokens.minimumActionSize)
         .task(id: appearedRevision) {
             guard !appeared.isEmpty else { return }
@@ -85,6 +85,9 @@ struct AppleLiveOnNowList: View {
         }
         .accessibilityIdentifier("live.list")
     }
+
+    /// The phone's Live panel continues the category strip's flat colour under the rows.
+    private var panel: Color { usesPhoneLayout ? AppleLiveStagePolicy.phonePanel : .black }
 
     private func row(_ channel: AppleIPTVChannel) -> some View {
         let isFavorite = favoriteIDs.contains(channel.id)
@@ -97,7 +100,7 @@ struct AppleLiveOnNowList: View {
         }
         .buttonStyle(.plain)
         .appleHoverAffordance()
-        .listRowBackground(usesPhoneLayout && isWatching ? AppleDesignTokens.surface : Color.black)
+        .listRowBackground(usesPhoneLayout && isWatching ? AppleDesignTokens.surface : panel)
         .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
         .accessibilityLabel("Play \(channel.name)")
         .accessibilityValue(title ?? "")

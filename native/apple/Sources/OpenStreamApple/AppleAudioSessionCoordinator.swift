@@ -132,6 +132,7 @@ public final class AppleAudioSessionCoordinator: NSObject {
     private let session: AVAudioSession
     private let access: AppleAudioSessionAccess
     private var hasPlaybackRequest = false
+    private var playbackClaim: UInt64?
 
     public init(session: AVAudioSession = .sharedInstance()) {
         self.session = session
@@ -192,7 +193,7 @@ public final class AppleAudioSessionCoordinator: NSObject {
     public func prepareForPlayback() async throws {
         try Task.checkCancellation()
         hasPlaybackRequest = true
-        ApplePlaybackSessionPolicy.activeAudioPolicy = .playback
+        playbackClaim = ApplePlaybackSessionPolicy.claimPlaybackAudio()
         let access = access
         try await AppleAudioSessionWorkQueue.shared.perform { try access.prepare() }
         refreshState()
@@ -200,8 +201,8 @@ public final class AppleAudioSessionCoordinator: NSObject {
 
     public func deactivate() {
         hasPlaybackRequest = false
-        guard ApplePlaybackSessionPolicy.activeAudioPolicy == .playback else { return }
-        ApplePlaybackSessionPolicy.activeAudioPolicy = nil
+        defer { playbackClaim = nil }
+        guard ApplePlaybackSessionPolicy.releasePlaybackAudio(playbackClaim) else { return }
         let access = access
         AppleAudioSessionWorkQueue.shared.enqueue { try? access.deactivate() }
     }

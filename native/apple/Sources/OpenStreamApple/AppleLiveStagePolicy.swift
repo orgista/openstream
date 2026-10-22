@@ -8,7 +8,14 @@ enum AppleLiveStagePolicy {
     static let phoneLogoSize = CGSize(width: 50, height: 50)
     static let phoneChannelRowHeight: CGFloat = 88
     static let phoneProgrammeLineHeight: CGFloat = 3
-    static let phoneCategoryHeight: CGFloat = 52
+    /// Paramount+ on DevPlus (2026-10-21): one flat #121212 panel from the stage's bottom edge
+    /// carries the category strip and the rows; the strip is 81 pt from the stage to the first row,
+    /// its underline 1 pt, as wide as the label, 6 pt under it; labels about 40 pt apart.
+    static let phoneCategoryHeight: CGFloat = 81
+    static let phoneCategorySpacing: CGFloat = 40
+    static let phoneCategoryUnderlineHeight: CGFloat = 1
+    static let phoneCategoryUnderlineGap: CGFloat = 6
+    static let phonePanel = Color(white: 18 / 255)
     static let phoneGuideRowHeight: CGFloat = 64
 
     /// iPad windows split when wide enough in landscape. A large phone window
