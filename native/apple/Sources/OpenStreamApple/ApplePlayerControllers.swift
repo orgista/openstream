@@ -2,6 +2,36 @@ import AVFoundation
 import AVKit
 import Foundation
 
+#if os(iOS)
+import SwiftUI
+
+final class ApplePlayerPictureInPictureView: UIView {
+    let playerLayer = AVPlayerLayer()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        layer.addSublayer(playerLayer)
+        isUserInteractionEnabled = false
+        accessibilityElementsHidden = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        playerLayer.frame = bounds
+    }
+}
+
+struct ApplePlayerPictureInPictureLayer: UIViewRepresentable {
+    let view: ApplePlayerPictureInPictureView
+
+    func makeUIView(context: Context) -> ApplePlayerPictureInPictureView { view }
+    func updateUIView(_ uiView: ApplePlayerPictureInPictureView, context: Context) {}
+}
+#endif
+
 #if os(visionOS)
 /// visionOS 2 through 25 receives the standard AVKit player. visionOS 26 adds
 /// an opt-in immersive experience without changing the baseline controller.

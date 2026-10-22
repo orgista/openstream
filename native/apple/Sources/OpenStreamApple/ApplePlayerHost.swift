@@ -3,13 +3,9 @@ import AVKit
 import Foundation
 
 /// Vends the platform AVKit controller bound to the coordinator's engine.
-/// On `.avPlayer` routes the controller's `player` is kept in sync with
-/// `engine.avPlayer` so the system player UI — transport, captions, audio,
-/// AirPlay, Picture-in-Picture, and Apple's HDR/Atmos pipeline — stays intact.
-/// No custom overlay is drawn; nothing is inserted into
-/// `contentOverlayView`. On `.surface` routes the controller is idle — the
-/// surface view draws the frames and `AppleTransportOverlay` vends the
-/// minimal transport UI.
+/// On `.avPlayer` routes the controller's `player` follows `engine.avPlayer`.
+/// Hosts choose between AVKit's controls and `AppleTransportOverlay`.
+/// On `.surface` routes the controller is idle while the surface draws frames.
 @MainActor
 public final class ApplePlayerHost {
     private let coordinator: ApplePlaybackCoordinator
@@ -35,6 +31,10 @@ public final class ApplePlayerHost {
     /// Picture in Picture and external screens, for the caption handoff.
     private let pictureInPicture = ApplePictureInPictureWatcher()
     private var externalPictureActive = false
+    #endif
+    #if os(iOS)
+    let pictureInPictureLayerView = ApplePlayerPictureInPictureView()
+    private var customPictureInPicture: AVPictureInPictureController?
     #endif
     #if os(tvOS)
     /// Picture in Picture: the stock controller's own window on demand, and
@@ -88,11 +88,6 @@ public final class ApplePlayerHost {
         _playerView = view
         #else
         let controller = AVPlayerViewController()
-        // Owner decision (plan Task 7e): the stock Apple transport UI on every
-        // AVKit route. The app draws overlay subtitles; the iOS full-screen
-        // bridge can hand a chosen legible rendition to AVKit, as PiP and
-        // AirPlay do. The only thing removed is Live Text
-        // (`allowsVideoFrameAnalysis = false` below).
         controller.showsPlaybackControls = true
         controller.allowsPictureInPicturePlayback = true
         #if os(visionOS)
@@ -206,6 +201,11 @@ public final class ApplePlayerHost {
     /// Stops the engine, tears down the AVKit binding, and deactivates the
     /// shared audio session. Called from the player view's `onDisappear`.
     public func teardown(deactivateAudioSession: Bool = true) {
+        #if os(iOS)
+        customPictureInPicture?.stopPictureInPicture()
+        customPictureInPicture = nil
+        pictureInPictureLayerView.playerLayer.player = nil
+        #endif
         bindTimer?.invalidate()
         bindTimer = nil
         audioSession.onInterruption = nil
@@ -321,6 +321,26 @@ public final class ApplePlayerHost {
     }
     #endif
 
+    #if os(iOS)
+    func startPictureInPicture() async {
+        guard let player = coordinator.engine.avPlayer,
+              AVPictureInPictureController.isPictureInPictureSupported() else { return }
+        let layer = pictureInPictureLayerView.playerLayer
+        layer.player = player
+        let controller = customPictureInPicture
+            ?? AVPictureInPictureController(contentSource: .init(playerLayer: layer))
+        controller.delegate = pictureInPicture
+        customPictureInPicture = controller
+        for _ in 0..<30 where !controller.isPictureInPicturePossible {
+            do { try await Task.sleep(for: .milliseconds(100)) }
+            catch { layer.player = nil; return }
+        }
+        guard controller.isPictureInPicturePossible, customPictureInPicture === controller,
+              coordinator.route == .avPlayer, !Task.isCancelled else { layer.player = nil; return }
+        controller.startPictureInPicture()
+    }
+    #endif
+
     #if os(tvOS)
     /// Opens the window from the live player's layer
     /// (`AppleTVPictureInPictureLayerView`, mounted under the stock
@@ -379,6 +399,11 @@ public final class ApplePlayerHost {
         AppleDevicePlaybackBeacon.shared.publish()
         #endif
         let player = coordinator.engine.avPlayer
+        #if os(iOS)
+        if pictureInPictureLayerView.playerLayer.player != nil {
+            pictureInPictureLayerView.playerLayer.player = player
+        }
+        #endif
         #if os(tvOS)
         _viewController.appliesPreferredDisplayCriteriaAutomatically = AppleDisplayCriteriaPolicy.automaticAVKitMatching(engine: coordinator.engine.kind)
         // AVKit's window button only where the window can show the picture.

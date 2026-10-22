@@ -1,4 +1,7 @@
 import AVFoundation
+#if os(iOS)
+import AVKit
+#endif
 import SwiftUI
 
 /// Transport controls for decoded video surfaces and the full-screen Live player.
@@ -140,7 +143,8 @@ struct AppleTransportOverlay: View {
         self.sharePlayMenu = sharePlayMenu
         let model = AppleTransportOverlayModel(
             coordinator: coordinator,
-            isLive: request.isLive
+            isLive: request.isLive,
+            usesSystemControls: false
         )
         if let nextEpisode {
             // The choices made in this episode go with it to the next.
@@ -435,7 +439,9 @@ struct AppleTransportOverlay: View {
                     Image(systemName: onRequestFullScreen == nil ? "xmark" : "arrow.up.left.and.arrow.down.right")
                         .font(.system(size: 20, weight: .semibold))
                         .frame(width: 36, height: 36)
+                        #if !os(iOS)
                         .overlay(Circle().stroke(.white.opacity(0.5), lineWidth: 1))
+                        #endif
                         .frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
                         .contentShape(.rect)
                 }
@@ -445,6 +451,22 @@ struct AppleTransportOverlay: View {
                 .accessibilityIdentifier(onRequestFullScreen == nil ? "player.close" : "player.fullscreen")
             }
 
+            #if os(iOS)
+            if !request.isLive {
+                if let onPictureInPicture {
+                    Button("Picture in Picture", systemImage: "pip.enter", action: onPictureInPicture)
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.plain)
+                        .frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
+                        .accessibilityIdentifier("player.pip")
+                }
+                if model.showsAirPlay {
+                    AppleRoutePicker()
+                        .frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
+                        .accessibilityIdentifier("player.airplay")
+                }
+            }
+            #endif
             if let onShowChannels {
                 Button {
                     model.bumpActivity()
@@ -483,54 +505,12 @@ struct AppleTransportOverlay: View {
                         onMenuItemDisappeared: { model.menuItemDisappeared() }
                     )
                 }
-                if controls.contains(.otherSourcesMenu) {
-                    Menu {
-                        if let onStartOver {
-                            Button("Start Over", action: onStartOver)
-                                .appleMenuPresence(model)
-                                .accessibilityIdentifier("live.player.startOver")
-                        }
-                        if let onWatchLive {
-                            Button("Back to Live", action: onWatchLive)
-                                .appleMenuPresence(model)
-                                .accessibilityIdentifier("live.player.backToLive")
-                        }
-                        AppleSleepTimerMenu(coordinator: coordinator, isLive: request.isLive, transport: model)
-                        if !model.chapters.isEmpty {
-                            Menu("Chapters", systemImage: "list.bullet") {
-                                ForEach(Array(model.chapters.enumerated()), id: \.offset) { _, chapter in
-                                    Button {
-                                        Task { await model.jump(to: chapter) }
-                                    } label: {
-                                        Text(chapter.title)
-                                        Text(AppleTransportOverlayModel.timeText(chapter.start))
-                                    }
-                                    .appleMenuPresence(model)
-                                }
-                            }
-                            .appleMenuPresence(model)
-                            .accessibilityIdentifier("player.chapters")
-                        }
-                        if let otherSources {
-                            Button("Quality", systemImage: "slider.horizontal.3", action: otherSources)
-                                .appleMenuPresence(model)
-                                .accessibilityIdentifier("player.quality")
-                        }
-                        if liveTopControls, let sharePlayMenu, controls.contains(.sharePlayMenu) {
-                            Button(sharePlayMenu.primaryTitle, action: sharePlayMenu.primaryAction)
-                            if let title = sharePlayMenu.secondaryTitle, let action = sharePlayMenu.secondaryAction {
-                                Button(title, role: .destructive, action: action)
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis").frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
-                            .contentShape(.rect)
-                    }
-                    .appleBareMenu()
-                    .accessibilityLabel("More")
-                    .accessibilityIdentifier("player.options")
+                if controls.contains(.otherSourcesMenu), !optionsInBottomBar {
+                    AppleTransportOptionsMenu(coordinator: coordinator, model: model,
+                        otherSources: otherSources, onStartOver: onStartOver, onWatchLive: onWatchLive,
+                        sharePlayMenu: liveTopControls ? sharePlayMenu : nil)
                 }
-                if let sharePlayMenu, controls.contains(.sharePlayMenu),
+                if let sharePlayMenu, controls.contains(.sharePlayMenu), !optionsInBottomBar,
                    !liveTopControls || !controls.contains(.otherSourcesMenu) {
                     Menu {
                         Button(sharePlayMenu.primaryTitle, action: sharePlayMenu.primaryAction)
@@ -610,6 +590,14 @@ struct AppleTransportOverlay: View {
         .simultaneousGesture(TapGesture().onEnded { if model.controlsVisible { model.bumpActivity() } })
     }
     #endif
+
+    private var optionsInBottomBar: Bool {
+        #if os(iOS)
+        !request.isLive
+        #else
+        false
+        #endif
+    }
 
     private var liveTopControls: Bool {
         #if os(iOS) || os(visionOS)
@@ -798,6 +786,24 @@ struct AppleTransportOverlay: View {
 
     private var bottomBar: some View {
         VStack(spacing: 10) {
+            if optionsInBottomBar {
+                HStack {
+                    if let title = request.title {
+                        Text(title)
+                            .font(.headline)
+                            .lineLimit(2)
+                            .accessibilityIdentifier("player.title")
+                    }
+                    Spacer(minLength: 0)
+                    if (coordinator.engine as? AetherPlaybackEngine)?.discMenu.state != nil {
+                        AppleDiscMenuControl(coordinator: coordinator)
+                    }
+                    if controls.contains(.captions) { trackMenu }
+                    AppleTransportOptionsMenu(coordinator: coordinator, model: model,
+                        otherSources: otherSources, onStartOver: onStartOver, onWatchLive: onWatchLive,
+                        sharePlayMenu: sharePlayMenu)
+                }
+            }
             if controls.contains(.scrubber) {
                 #if os(tvOS)
                 AppleTransportScrubberRow(
@@ -813,41 +819,46 @@ struct AppleTransportOverlay: View {
                 AppleTransportScrubberRow(model: model, height: chrome.scrubberHeight)
                 #endif
             }
-            HStack {
-                if liveTopControls { liveBadge }
-                if (coordinator.engine as? AetherPlaybackEngine)?.discMenu.state != nil {
-                    AppleDiscMenuControl(coordinator: coordinator)
+            if !optionsInBottomBar {
+                HStack {
+                    if liveTopControls { liveBadge }
+                    if (coordinator.engine as? AetherPlaybackEngine)?.discMenu.state != nil {
+                        AppleDiscMenuControl(coordinator: coordinator)
+                            #if os(tvOS)
+                            .focused($tvFocus, equals: .discMenu)
+                            #endif
+                    }
+                    Spacer()
+                    if controls.contains(.captions), !liveTopControls {
+                        // One captions control, as in the Apple TV app: the menu
+                        // holds Off, every track and the audio languages.
+                        // Every track, not `menuSubtitleTracks`: the menu splits
+                        // them into the viewer's languages and "More…", which the
+                        // filtered list left empty (Apple TV verification 2026-10-01).
+                        trackMenu
                         #if os(tvOS)
-                        .focused($tvFocus, equals: .discMenu)
+                        .focused($tvFocus, equals: .captions)
                         #endif
-                }
-                Spacer()
-                if controls.contains(.captions), !liveTopControls {
-                    // One captions control, as in the Apple TV app: the menu
-                    // holds Off, every track and the audio languages.
-                    // Every track, not `menuSubtitleTracks`: the menu splits
-                    // them into the viewer's languages and "More…", which the
-                    // filtered list left empty (Apple TV verification 2026-10-01).
-                    AppleTransportTrackMenu(
-                        audioTracks: model.audioTracks,
-                        selectedAudioID: model.selectedAudioID,
-                        subtitleTracks: model.subtitleTracks,
-                        preferredSubtitleLanguages: model.preferredSubtitleLanguages,
-                        selectedSubtitleID: model.selectedSubtitleID,
-                        onSelectAudio: { model.selectAudio($0) },
-                        onSelectSubtitle: { model.selectSubtitle($0) },
-                        subtitleTiming: model.subtitleTiming,
-                        onChangeSubtitleTiming: { model.changeSubtitleTiming($0) },
-                        onMenuItemAppeared: { model.menuItemAppeared() },
-                        onMenuItemDisappeared: { model.menuItemDisappeared() }
-                    )
-                    #if os(tvOS)
-                    .focused($tvFocus, equals: .captions)
-                    #endif
+                    }
                 }
             }
         }
         .padding(.horizontal, 8)
+    }
+
+    private var trackMenu: some View {
+        AppleTransportTrackMenu(
+            audioTracks: model.audioTracks,
+            selectedAudioID: model.selectedAudioID,
+            subtitleTracks: model.subtitleTracks,
+            preferredSubtitleLanguages: model.preferredSubtitleLanguages,
+            selectedSubtitleID: model.selectedSubtitleID,
+            onSelectAudio: { model.selectAudio($0) },
+            onSelectSubtitle: { model.selectSubtitle($0) },
+            subtitleTiming: model.subtitleTiming,
+            onChangeSubtitleTiming: { model.changeSubtitleTiming($0) },
+            onMenuItemAppeared: { model.menuItemAppeared() },
+            onMenuItemDisappeared: { model.menuItemDisappeared() })
     }
 
     /// Big centered play/pause flanked by 10 s skip buttons.
@@ -1039,6 +1050,117 @@ private struct AppleTransportScrubberRow: View {
     #endif
 }
 
+@MainActor
+private struct AppleTransportOptionsMenu: View {
+    let coordinator: ApplePlaybackCoordinator
+    let model: AppleTransportOverlayModel
+    let otherSources: (() -> Void)?
+    let onStartOver: (() -> Void)?
+    let onWatchLive: (() -> Void)?
+    let sharePlayMenu: AppleTransportOverlay.SharePlayMenu?
+
+    var body: some View {
+        #if os(iOS)
+        AppleTransportMenuButton(title: "More", systemImage: "ellipsis", identifier: "player.options",
+            menu: uiMenu, onOpen: model.menuItemAppeared, onClose: model.menuItemDisappeared)
+            .frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
+        #else
+        Menu {
+            if let onStartOver {
+                Button("Start Over", action: onStartOver)
+                    .appleMenuPresence(model)
+                    .accessibilityIdentifier("live.player.startOver")
+            }
+            if let onWatchLive {
+                Button("Back to Live", action: onWatchLive)
+                    .appleMenuPresence(model)
+                    .accessibilityIdentifier("live.player.backToLive")
+            }
+            AppleSleepTimerMenu(coordinator: coordinator, isLive: model.isLive, transport: model)
+            if !model.chapters.isEmpty {
+                Menu("Chapters", systemImage: "list.bullet") {
+                    ForEach(Array(model.chapters.enumerated()), id: \.offset) { _, chapter in
+                        Button {
+                            Task { await model.jump(to: chapter) }
+                        } label: {
+                            Text(chapter.title)
+                            Text(AppleTransportOverlayModel.timeText(chapter.start))
+                        }
+                        .appleMenuPresence(model)
+                    }
+                }
+                .appleMenuPresence(model)
+                .accessibilityIdentifier("player.chapters")
+            }
+            if let otherSources {
+                Button("Quality", systemImage: "slider.horizontal.3", action: otherSources)
+                    .appleMenuPresence(model)
+                    .accessibilityIdentifier("player.quality")
+            }
+            if let sharePlayMenu {
+                Button(sharePlayMenu.primaryTitle, action: sharePlayMenu.primaryAction)
+                    .appleMenuPresence(model)
+                if let title = sharePlayMenu.secondaryTitle, let action = sharePlayMenu.secondaryAction {
+                    Button(title, role: .destructive, action: action)
+                        .appleMenuPresence(model)
+                }
+            }
+        } label: {
+            Label("More", systemImage: "ellipsis")
+                .labelStyle(.iconOnly)
+                .frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
+                .contentShape(.rect)
+        }
+        .appleBareMenu()
+        .accessibilityIdentifier("player.options")
+        #endif
+    }
+
+    #if os(iOS)
+    private var uiMenu: UIMenu {
+        var items: [UIMenuElement] = []
+        if let onStartOver {
+            let action = UIAction(title: "Start Over") { _ in onStartOver() }
+            action.accessibilityIdentifier = "live.player.startOver"
+            items.append(action)
+        }
+        if let onWatchLive {
+            let action = UIAction(title: "Back to Live") { _ in onWatchLive() }
+            action.accessibilityIdentifier = "live.player.backToLive"
+            items.append(action)
+        }
+        items.append(AppleSleepTimerMenu.uiMenu(coordinator: coordinator, isLive: model.isLive))
+        if !model.isLive {
+            let speeds = AVPlaybackSpeed.systemDefaultSpeeds.filter { $0.rate <= coordinator.engine.maximumPlaybackRate }
+            let menu = UIMenu(title: "Playback Speed", options: .singleSelection, children: speeds.map { speed in
+                UIAction(title: speed.localizedName, state: model.playbackRate == speed.rate ? .on : .off) { _ in
+                    model.playbackRate = speed.rate
+                }
+            })
+            menu.accessibilityIdentifier = "player.speed"
+            items.append(menu)
+        }
+        if !model.chapters.isEmpty {
+            let menu = UIMenu(title: "Chapters", image: UIImage(systemName: "list.bullet"),
+                             children: model.chapters.map { chapter in
+                let action = UIAction(title: chapter.title) { _ in Task { await model.jump(to: chapter) } }
+                action.subtitle = AppleTransportOverlayModel.timeText(chapter.start)
+                return action
+            })
+            menu.accessibilityIdentifier = "player.chapters"
+            items.append(menu)
+        }
+        if let otherSources {
+            let action = UIAction(title: "Quality", image: UIImage(systemName: "slider.horizontal.3")) { _ in otherSources() }
+            action.accessibilityIdentifier = "player.quality"
+            items.append(action)
+        }
+        if let sharePlayMenu { items.append(sharePlayMenu.uiMenu) }
+        return UIMenu(children: items)
+    }
+    #endif
+}
+
 /// The single captions control: an "Audio & Subtitles" menu grouping the
 /// audio track choices and the subtitle (Off + tracks) choices, like the
 /// Apple TV app's. A separate CC key beside it made two captions controls
@@ -1054,17 +1176,24 @@ struct AppleTransportTrackMenu: View {
     let subtitleTracks: [ApplePlaybackTrack]
     let preferredSubtitleLanguages: [String]
     let selectedSubtitleID: Int?
-    let onSelectAudio: (Int) -> Void
-    let onSelectSubtitle: (Int?) -> Void
+    let onSelectAudio: @MainActor (Int) -> Void
+    let onSelectSubtitle: @MainActor (Int?) -> Void
     /// The per-play subtitle delay and frame-rate fix; the rows show only
     /// while a subtitle is on and a handler is given.
     var subtitleTiming = AppleSubtitleTiming()
-    var onChangeSubtitleTiming: ((AppleSubtitleTiming.Change) -> Void)? = nil
+    var onChangeSubtitleTiming: (@MainActor (AppleSubtitleTiming.Change) -> Void)? = nil
     /// Each row reports itself so the chrome stays up while the menu is open.
     var onMenuItemAppeared: () -> Void = {}
     var onMenuItemDisappeared: () -> Void = {}
 
     var body: some View {
+        #if os(iOS)
+        AppleTransportMenuButton(title: "Audio & Subtitles",
+            systemImage: selectedSubtitleID == nil ? "captions.bubble" : "captions.bubble.fill",
+            identifier: "player.captions", value: selectedSubtitleID == nil ? "Subtitles off" : "Subtitles on",
+            menu: uiMenu, onOpen: onMenuItemAppeared, onClose: onMenuItemDisappeared)
+            .frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
+        #else
         Menu {
             let audio = AppleAudioTrackMenu.entries(audioTracks, activeTrackID: selectedAudioID)
             if audio.count > 1 {
@@ -1134,8 +1263,38 @@ struct AppleTransportTrackMenu: View {
         .menuStyle(.button)
         .buttonStyle(AppleTVGlyphStyle())
         #endif
+        #endif
     }
 
+    #if os(iOS)
+    private var uiMenu: UIMenu {
+        var sections: [UIMenuElement] = []
+        let audio = AppleAudioTrackMenu.entries(audioTracks, activeTrackID: selectedAudioID)
+        if audio.count > 1 {
+            sections.append(UIMenu(title: "Audio", options: [.displayInline, .singleSelection], children: audio.map { entry in
+                let action = UIAction(title: entry.title, state: entry.isSelected ? .on : .off) { _ in
+                    onSelectAudio(entry.trackID)
+                }
+                action.accessibilityIdentifier = "player.audio.track.\(entry.id)"
+                return action
+            }))
+        }
+        let subtitles = AppleSubtitleCueLayerPolicy.uiMenuChildren(
+            entries: AppleSubtitleCueLayerPolicy.menuEntries(
+                tracks: subtitleTracks, preferredLanguages: preferredSubtitleLanguages,
+                languagesAreExplicit: false, activeTrackID: selectedSubtitleID),
+            more: AppleSubtitleCueLayerPolicy.moreMenuEntries(
+                tracks: subtitleTracks, preferredLanguages: preferredSubtitleLanguages,
+                activeTrackID: selectedSubtitleID), select: onSelectSubtitle)
+        sections.append(UIMenu(title: "Subtitles", options: [.displayInline, .singleSelection], children: subtitles))
+        if let onChangeSubtitleTiming,
+           AppleSubtitleTimingMenu.isOffered(subtitleSelected: selectedSubtitleID != nil) {
+            let timing = AppleSubtitleTimingMenu.uiMenus(timing: subtitleTiming, apply: onChangeSubtitleTiming)
+            sections.append(UIMenu(title: "", options: .displayInline, children: timing))
+        }
+        return UIMenu(children: sections)
+    }
+    #else
     private func subtitleButton(_ entry: AppleSubtitleCueLayerPolicy.MenuEntry) -> some View {
         Button { onSelectSubtitle(entry.trackID) } label: {
             if entry.isSelected {
@@ -1150,7 +1309,69 @@ struct AppleTransportTrackMenu: View {
         .onAppear(perform: onMenuItemAppeared)
         .onDisappear(perform: onMenuItemDisappeared)
     }
+    #endif
 }
+
+#if os(iOS)
+struct AppleTransportMenuButton: UIViewRepresentable {
+    let title: String
+    let systemImage: String
+    let identifier: String
+    var value: String? = nil
+    let menu: UIMenu
+    let onOpen: () -> Void
+    let onClose: () -> Void
+
+    func makeUIView(context: Context) -> AppleTransportUIButton {
+        let button = AppleTransportUIButton(type: .system)
+        button.showsMenuAsPrimaryAction = true
+        button.tintColor = .white
+        return button
+    }
+
+    func updateUIView(_ button: AppleTransportUIButton, context: Context) {
+        button.setImage(UIImage(systemName: systemImage,
+                                withConfiguration: UIImage.SymbolConfiguration(pointSize: 22)), for: .normal)
+        button.accessibilityLabel = title
+        button.accessibilityIdentifier = identifier
+        button.accessibilityValue = value
+        button.onOpen = onOpen
+        button.onClose = onClose
+        button.nextMenu = menu
+        if !button.menuIsPresented { button.menu = menu }
+    }
+}
+
+final class AppleTransportUIButton: UIButton {
+    var onOpen: (() -> Void)?
+    var onClose: (() -> Void)?
+    var nextMenu: UIMenu?
+    private(set) var menuIsPresented = false
+
+    // SwiftUI menu-row onDisappear is not delivered reliably on iOS 18.
+    override func contextMenuInteraction(_ interaction: UIContextMenuInteraction,
+                                        willDisplayMenuFor configuration: UIContextMenuConfiguration,
+                                        animator: (any UIContextMenuInteractionAnimating)?) {
+        super.contextMenuInteraction(interaction, willDisplayMenuFor: configuration, animator: animator)
+        guard !menuIsPresented else { return }
+        menuIsPresented = true
+        onOpen?()
+    }
+
+    override func contextMenuInteraction(_ interaction: UIContextMenuInteraction,
+                                        willEndFor configuration: UIContextMenuConfiguration,
+                                        animator: (any UIContextMenuInteractionAnimating)?) {
+        super.contextMenuInteraction(interaction, willEndFor: configuration, animator: animator)
+        let finish = { [weak self] in
+            guard let self, self.menuIsPresented else { return }
+            self.menuIsPresented = false
+            self.menu = self.nextMenu
+            self.onClose?()
+        }
+        if let animator { animator.addCompletion(finish) } else { finish() }
+    }
+}
+#endif
 
 private extension View {
     /// A row of a transport menu: holds the auto-hide while it is on screen.

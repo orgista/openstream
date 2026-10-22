@@ -21,7 +21,7 @@ struct AppleLiveOnNowList: View {
     /// flashes before the rows arrive.
     let showsEmptyText: Bool
     let sourceProblems: [SourceProblem]
-    var usesPhoneLayout = false
+    var usesParamountStyle = false
     let onSelect: (AppleIPTVChannel) -> Void
     let onToggleFavorite: (String) -> Void
     let onHide: (AppleIPTVChannel) -> Void
@@ -45,7 +45,7 @@ struct AppleLiveOnNowList: View {
                 }
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-                .listRowBackground(Color.black)
+                .listRowBackground(panel)
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("live.sourceError")
             }
@@ -58,7 +58,7 @@ struct AppleLiveOnNowList: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 24)
-                    .listRowBackground(Color.black)
+                    .listRowBackground(panel)
                     .listRowSeparator(.hidden)
             }
             if hiddenCount > 0 {
@@ -66,7 +66,7 @@ struct AppleLiveOnNowList: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
-                    .listRowBackground(Color.black)
+                    .listRowBackground(panel)
                     .listRowSeparator(.hidden)
                     .accessibilityIdentifier("live.cap.notice")
             }
@@ -74,7 +74,7 @@ struct AppleLiveOnNowList: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .scrollIndicators(.hidden)
-        .background(Color.black)
+        .background(panel)
         .environment(\.defaultMinListRowHeight, AppleDesignTokens.minimumActionSize)
         .task(id: appearedRevision) {
             guard !appeared.isEmpty else { return }
@@ -86,6 +86,9 @@ struct AppleLiveOnNowList: View {
         .accessibilityIdentifier("live.list")
     }
 
+    /// The Paramount+ panel continues the category strip's flat colour under the rows.
+    private var panel: Color { usesParamountStyle ? AppleLiveStagePolicy.phonePanel : .black }
+
     private func row(_ channel: AppleIPTVChannel) -> some View {
         let isFavorite = favoriteIDs.contains(channel.id)
         let programme = guide.nowAndNext(channelID: channel.id).now
@@ -93,11 +96,11 @@ struct AppleLiveOnNowList: View {
         let isWatching = channel.id == currentChannelID
         return Button { onSelect(channel) } label: {
             AppleLiveOnNowRow(channel: channel, programme: programme,
-                              isWatching: isWatching, usesPhoneLayout: usesPhoneLayout)
+                              isWatching: isWatching, usesParamountStyle: usesParamountStyle)
         }
         .buttonStyle(.plain)
         .appleHoverAffordance()
-        .listRowBackground(usesPhoneLayout && isWatching ? AppleDesignTokens.surface : Color.black)
+        .listRowBackground(usesParamountStyle && isWatching ? AppleDesignTokens.surface : panel)
         .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
         .accessibilityLabel("Play \(channel.name)")
         .accessibilityValue(title ?? "")
@@ -136,15 +139,15 @@ private struct AppleLiveOnNowRow: View {
     let channel: AppleIPTVChannel
     let programme: AppleIPTVProgramme?
     let isWatching: Bool
-    let usesPhoneLayout: Bool
+    let usesParamountStyle: Bool
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         HStack(spacing: 12) {
             if !dynamicTypeSize.isAccessibilitySize {
                 AppleLiveLogoMark(url: channel.logoURL,
-                    height: usesPhoneLayout ? AppleLiveStagePolicy.phoneLogoSize.height : 32,
-                    maxWidth: usesPhoneLayout ? AppleLiveStagePolicy.phoneLogoSize.width : 48)
+                    height: usesParamountStyle ? AppleLiveStagePolicy.phoneLogoSize.height : 32,
+                    maxWidth: usesParamountStyle ? AppleLiveStagePolicy.phoneLogoSize.width : 48)
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(channel.name)
@@ -155,7 +158,7 @@ private struct AppleLiveOnNowRow: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-                if usesPhoneLayout, let programme {
+                if usesParamountStyle, let programme {
                     AppleLiveProgrammeLine(programme: programme,
                         lineHeight: AppleLiveStagePolicy.phoneProgrammeLineHeight)
                         .padding(.top, 4)
@@ -172,8 +175,8 @@ private struct AppleLiveOnNowRow: View {
                     .accessibilityHidden(true)
             }
         }
-        .padding(.vertical, usesPhoneLayout ? AppleDesignTokens.spacingSmall : 0)
-        .frame(minHeight: usesPhoneLayout ? AppleLiveStagePolicy.phoneChannelRowHeight : 60)
+        .padding(.vertical, usesParamountStyle ? AppleDesignTokens.spacingSmall : 0)
+        .frame(minHeight: usesParamountStyle ? AppleLiveStagePolicy.phoneChannelRowHeight : 60)
         .contentShape(.rect)
     }
 }

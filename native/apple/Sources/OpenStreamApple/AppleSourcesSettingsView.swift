@@ -423,6 +423,12 @@ private struct AppleAddFilesView: View {
             if let raw = UserDefaults.standard.string(forKey: "OpenStreamVisionPlaybackURL"),
                let url = AppleDirectPlaybackInput.url(raw) ?? URL(string: raw).flatMap({ $0.isFileURL ? $0 : nil }) {
                 let mediaID = ApplePlaybackIdentity.digest(for: url.absoluteString)
+                if UserDefaults.standard.bool(forKey: "OpenStreamClearFixturePlayback") {
+                    guard url.lastPathComponent == "e2e-long.mp4", url.user == nil, url.password == nil else { return }
+                    ApplePlaybackStore().clear(mediaID: mediaID)
+                    AppleInteractionTrace.record(.playback, "fixture playback progress cleared")
+                    return
+                }
                 var request: ApplePlaybackRequest
                 if UserDefaults.standard.bool(forKey: "OpenStreamVisionPlaybackIsLive") {
                     request = AppleIPTVChannel(id: mediaID, sourceID: UUID(), name: "Caption fixture",

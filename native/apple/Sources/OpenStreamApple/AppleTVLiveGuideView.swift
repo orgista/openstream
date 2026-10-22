@@ -1728,7 +1728,7 @@ struct AppleTVLivePlayerScreen: View {
         ZStack {
             Color.black.ignoresSafeArea()
             playbackLayer
-            if coordinator.isReconnectingLive {
+            if coordinator.isReconnectingLive, coordinator.route != .surface {
                 // A channel that was playing and dropped: say so, quietly,
                 // while the coordinator reopens it (`AppleLiveReconnectPolicy`).
                 VStack(spacing: 16) {
@@ -1748,12 +1748,14 @@ struct AppleTVLivePlayerScreen: View {
                 // The previous picture is released on a switch (one-connection
                 // providers), so the new channel's logo holds the screen.
                 if !hasPlayed { AppleLiveConnectingArtwork(logoURL: channel.logoURL) }
-                AppleLiveTuningDelay(id: channel.id) {
-                    ProgressView()
-                        .progressViewStyle(.circular)
-                        .tint(.white)
-                        .controlSize(.large)
-                        .accessibilityLabel("Loading")
+                if coordinator.route != .surface {
+                    AppleLiveTuningDelay(id: channel.id) {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .tint(.white)
+                            .controlSize(.large)
+                            .accessibilityLabel("Loading")
+                    }
                 }
             }
         }
@@ -1973,8 +1975,10 @@ struct AppleTVLivePlayerScreen: View {
                     .ignoresSafeArea()
                     .accessibilityHidden(true)
             }
-            AppleTVLivePlayerControllerRepresentable(viewController: host.viewController)
-                .ignoresSafeArea()
+            if coordinator.route == .avPlayer || coordinator.route == .audioOnly {
+                AppleTVLivePlayerControllerRepresentable(viewController: host.viewController)
+                    .ignoresSafeArea()
+            }
 
             // Below the invisible focus button so it can never be a focus or
             // press target; the strip lifts it rather than covering it.

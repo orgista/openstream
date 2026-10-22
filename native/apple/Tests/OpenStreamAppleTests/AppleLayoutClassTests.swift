@@ -82,10 +82,10 @@ struct AppleLayoutClassTests {
         #expect(AppleLiveStagePolicy.showsSchedule(sideBySide: sideBySide, expandsPhoneLayout: true) == expected)
     }
 
-    @Test func onlyIPadsShowTheStageWithoutASchedule() {
+    @Test func anIPadOnItsSideStacksWithoutASchedule() {
         let landscape = CGSize(width: 1376, height: 1032)
-        let sideBySide = AppleLiveStagePolicy.sideBySide(isRegularWidth: true, size: landscape)
-        #expect(sideBySide)
+        let sideBySide = AppleLiveStagePolicy.sideBySide(isRegularWidth: true, size: landscape, isPad: true)
+        #expect(sideBySide == false)
         #expect(AppleLiveStagePolicy.showsSchedule(sideBySide: sideBySide, expandsPhoneLayout: false) == false)
     }
 
@@ -102,8 +102,8 @@ struct AppleLayoutClassTests {
         let landscape = CGSize(width: 1376, height: 1032)
         #expect(AppleLayoutClass.settingsUseSplitView(size: portrait, isRegularWidth: true, isPad: true) == false)
         #expect(AppleLayoutClass.settingsUseSplitView(size: landscape, isRegularWidth: true, isPad: true))
-        #expect(AppleLiveStagePolicy.sideBySide(isRegularWidth: true, size: portrait) == false)
-        #expect(AppleLiveStagePolicy.sideBySide(isRegularWidth: true, size: landscape))
+        #expect(AppleLiveStagePolicy.sideBySide(isRegularWidth: true, size: portrait, isPad: true) == false)
+        #expect(AppleLiveStagePolicy.sideBySide(isRegularWidth: true, size: landscape, isPad: true) == false)
         #expect(AppleLayoutClass.settingsUseSplitView(size: CGSize(width: 430, height: 932),
             isRegularWidth: false, isPad: false) == false)
         #expect(AppleLiveStagePolicy.sideBySide(isRegularWidth: true, size: CGSize(width: 430, height: 932),

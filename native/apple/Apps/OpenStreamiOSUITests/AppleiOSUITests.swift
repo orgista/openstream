@@ -495,15 +495,9 @@ final class AppleiOSUITests: OpenStreamUITestCase {
             XCTAssertTrue(app.descendants(matching: .any)["player.disc.title.active"].firstMatch.waitForExistence(timeout: 30),
                           "Activating a DVD menu button did not reach title playback")
             let returnToMenu = app.buttons["player.disc.menu"].firstMatch
-            if returnToMenu.exists {
-                returnToMenu.tap()
-            } else {
-                app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.1)).tap()
-                let more = app.buttons["player.more"].firstMatch
-                XCTAssertTrue(more.waitForExistence(timeout: 5), "Title playback has no Disc Menu route")
-                more.tap()
-                app.buttons["Disc Menu"].firstMatch.tap()
-            }
+            if !returnToMenu.exists { XCTAssertTrue(revealPlayerControls()) }
+            XCTAssertTrue(returnToMenu.waitForExistence(timeout: 5), "Title playback has no Disc Menu route")
+            returnToMenu.tap()
             XCTAssertTrue(menu.waitForExistence(timeout: 15), "Disc Menu did not return from title playback")
             capture("returned-menu")
             app.buttons["player.disc.menu.button.1"].firstMatch.tap()
@@ -677,6 +671,8 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         XCTAssertTrue(bar.waitForExistence(timeout: 10))
         XCTAssertEqual(bar.frame.minY, stageFrame.maxY, accuracy: 1,
                        "Categories sit directly below the stage")
+        // Paramount+ on DevPlus (2026-10-21): an 81 pt flat strip from the stage to the first row.
+        XCTAssertEqual(bar.frame.height, 81, accuracy: 1)
         XCTAssertEqual(stageFrame.minX, app.frame.minX, accuracy: 1)
         XCTAssertEqual(stageFrame.width, app.frame.width, accuracy: 1)
         if app.statusBars.firstMatch.exists {
@@ -711,6 +707,59 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         XCTAssertTrue(guide.waitForExistence(timeout: 10))
     }
 
+    /// Owner 2026-10-21 ("live on ipad needs to full screen"): Paramount+'s iPad
+    /// stack in both orientations. The stage spans the window, the flat strip
+    /// sits on it and the list fills the rest with room for three rows. The
+    /// playing row and Full Screen still open the full-screen player.
+    func testIPadLiveStacksLikeParamountPlus() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            throw XCTSkip("iPad Live layout")
+        }
+        continueAfterFailure = true
+        defer { XCUIDevice.shared.orientation = .portrait }
+        for orientation in [UIDeviceOrientation.portrait, .landscapeLeft] {
+            let name = orientation == .portrait ? "portrait" : "landscape"
+            XCUIDevice.shared.orientation = orientation
+            app.terminate()
+            app.launchArguments = ["-OpenStreamMuteAudio", "YES", "-OpenStreamHoldPlayerChrome", "YES"]
+            launch(screen: "live")
+            let player = app.descendants(matching: .any).matching(identifier: "live.stage.player").firstMatch
+            XCTAssertTrue(player.waitForExistence(timeout: 60))
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "value == %@", "Playing"), object: player)], timeout: 60), .completed)
+            attach("ipad-live-\(name)")
+            let bar = app.descendants(matching: .any).matching(identifier: "live.categories").firstMatch
+            let list = app.descendants(matching: .any).matching(identifier: "live.list").firstMatch
+            XCTAssertTrue(bar.exists && list.exists)
+            let stage = player.frame
+            XCTAssertEqual(stage.minX, app.frame.minX, accuracy: 1)
+            XCTAssertEqual(stage.width, app.frame.width, accuracy: 1)
+            XCTAssertEqual(bar.frame.minY, stage.maxY, accuracy: 1, "The strip sits directly on the stage")
+            XCTAssertEqual(bar.frame.width, app.frame.width, accuracy: 1)
+            XCTAssertEqual(bar.frame.height, 81, accuracy: 1)
+            XCTAssertGreaterThanOrEqual(list.frame.maxY - bar.frame.maxY, 3 * 88 - 1, "Three rows fit under the strip")
+            XCTAssertEqual(list.frame.maxY, app.frame.maxY, accuracy: 1, "The list reaches the bottom")
+            let frames = XCTAttachment(string: "app: \(app.frame)\nstage: \(stage)\nbar: \(bar.frame)\nlist: \(list.frame)")
+            frames.name = "ipad-live-\(name)-frames"
+            frames.lifetime = .keepAlways
+            add(frames)
+        }
+        let watching = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND selected == true",
+                                                        "guide.play.")).firstMatch
+        XCTAssertTrue(watching.waitForExistence(timeout: 10))
+        watching.tap()
+        let close = app.buttons["player.close"].firstMatch
+        XCTAssertTrue(close.waitForExistence(timeout: 10), "The playing row opens full screen on iPad")
+        attach("ipad-live-playing-row-full-screen")
+        close.tap()
+        XCTAssertTrue(revealInlineLiveControls(timeout: 30))
+        let fullScreen = app.buttons["player.fullscreen"].firstMatch
+        XCTAssertTrue(isSafelyHittable(fullScreen))
+        fullScreen.tap()
+        XCTAssertTrue(close.waitForExistence(timeout: 10), "Full Screen still opens the player")
+        close.tap()
+    }
+
     func testLiveCategoryBarStaysFixedWhileScrolling() throws {
         guard UIDevice.current.userInterfaceIdiom == .phone else {
             throw XCTSkip("Phone Live layout")
@@ -725,17 +774,34 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         XCTAssertTrue(all.waitForExistence(timeout: 30))
         let barFrame = bar.frame
         let allFrame = all.frame
+        // Paramount+ on DevPlus: the labels sit in the middle of the strip, not at its top.
+        XCTAssertEqual(allFrame.midY, barFrame.midY, accuracy: 1, "chip \(allFrame) in strip \(barFrame)")
         attach("live-categories-before-scroll")
         for _ in 0..<3 {
             list.swipeUp()
             XCTAssertEqual(bar.frame.minY, barFrame.minY, accuracy: 1)
             XCTAssertEqual(all.frame.minY, allFrame.minY, accuracy: 1)
         }
-        let start = all.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 35)),
-                    withVelocity: .slow, thenHoldForDuration: 1)
-        XCTAssertEqual(all.frame.minY, allFrame.minY, accuracy: 1)
         attach("live-categories-after-scroll")
+        // Owner 2026-10-21: the bar "floats". A vertical drag that starts on a chip, down past the strip
+        // and back up, leaves the chips where they were.
+        let chip = all.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        for dy in [120.0, -60.0] {
+            chip.press(forDuration: 0.05, thenDragTo: chip.withOffset(CGVector(dx: 0, dy: dy)),
+                       withVelocity: .slow, thenHoldForDuration: 1)
+            XCTAssertEqual(all.frame.minY, allFrame.minY, accuracy: 1, "drag \(dy) pt on the chip")
+            XCTAssertEqual(bar.frame.minY, barFrame.minY, accuracy: 1)
+        }
+        attach("live-categories-after-drag-on-bar")
+        // Owner 2026-10-21: the bar still "floats". Pulled past the list's top, the rows
+        // rubber-band under a strip that stays put.
+        for _ in 0..<3 { list.swipeDown() }
+        let listTop = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.1))
+        listTop.press(forDuration: 0.05, thenDragTo: listTop.withOffset(CGVector(dx: 0, dy: 160)),
+                      withVelocity: .slow, thenHoldForDuration: 2)
+        XCTAssertEqual(bar.frame.minY, barFrame.minY, accuracy: 1)
+        XCTAssertEqual(all.frame.minY, allFrame.minY, accuracy: 1)
+        attach("live-categories-after-pull-down")
         let favorites = app.buttons["live.category.Favorites"].firstMatch
         if favorites.exists, isSafelyHittable(favorites) {
             let before = favorites.frame
@@ -2126,9 +2192,7 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         attach("watched-6-cta-after-unwatch")
     }
 
-    /// The app menu offers every non-forced subtitle. AVKit's iOS
-    /// picker cannot be hidden: selecting there must display a cue, and Off
-    /// must remove it, including after the app menu was used first.
+    /// The captions menu's selection agrees with the rendered cue and Off removes it.
     func testCaptionSelectionMatchesRendered608() throws {
         let env = ProcessInfo.processInfo.environment
         guard let fixture = env["OPENSTREAM_SUBTITLE_FIXTURE_URL"],
@@ -2173,7 +2237,7 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         }
         XCTAssertTrue(try cueVisible(), "Default-on 608 did not render")
         func showControls() {
-            let transport = app.buttons["Play/Pause"].firstMatch
+            let transport = app.buttons["player.play-pause"].firstMatch
             for _ in 0..<3 {
                 if transport.exists, transport.frame.width > 0 { return }
                 app.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.4)).tap()
@@ -2181,61 +2245,22 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         }
         func openMenu() {
             showControls()
-            let transport = app.buttons["Play/Pause"].firstMatch
+            let transport = app.buttons["player.play-pause"].firstMatch
             if transport.label == "Pause" {
                 transport.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
                 XCTAssertTrue(app.buttons["Play"].firstMatch.waitForExistence(timeout: 5))
             }
-            let more = app.buttons["player.more"].firstMatch
-            XCTAssertTrue(more.waitForExistence(timeout: 5))
-            more.tap()
-            let subtitles = app.descendants(matching: .any).matching(identifier: "player.subtitles").firstMatch
-            XCTAssertTrue(subtitles.waitForExistence(timeout: 5))
-            subtitles.tap()
+            let captions = app.buttons["player.captions"].firstMatch
+            XCTAssertEqual(app.buttons.matching(identifier: "player.captions").count, 1)
+            XCTAssertFalse(app.buttons["Overflow Menu"].exists)
+            XCTAssertTrue(tapIfPossible(captions))
             XCTAssertTrue(app.buttons["Off"].firstMatch.waitForExistence(timeout: 5))
         }
         openMenu()
         capture("n6-ios-english")
         XCTAssertTrue(app.buttons[expectedTrack].firstMatch.isSelected, "Rendered track must be checked at startup")
         XCTAssertTrue(try cueVisible())
-        if URL(string: fixture)?.pathExtension == "m3u8" {
-            // Dismiss the app menu without reselecting its already checked row.
-            app.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.4)).tap()
-            showControls()
-            let nativeButton = app.buttons.matching(NSPredicate(format:
-                "(label BEGINSWITH 'Subtitles' OR label == 'Show Subtitles' OR identifier == 'Subtitles' OR identifier == 'Legible Options') AND identifier != 'player.subtitles'" )).firstMatch
-            if !nativeButton.exists {
-                let overflow = app.buttons["Overflow Menu"].firstMatch
-                XCTAssertTrue(overflow.waitForExistence(timeout: 5))
-                overflow.tap()
-            }
-            XCTAssertTrue(nativeButton.waitForExistence(timeout: 5))
-            nativeButton.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-            let nativeTrack = app.buttons.matching(NSPredicate(format:
-                "label CONTAINS[c] %@ AND NOT label CONTAINS[c] 'Transcribed'", expectedTrack)).firstMatch
-            XCTAssertTrue(nativeTrack.waitForExistence(timeout: 5))
-            capture("n6-ios-native-english")
-            XCTAssertTrue(nativeTrack.isSelected)
-            app.buttons["Off"].firstMatch.tap()
-            Thread.sleep(forTimeInterval: 2)
-            XCTAssertFalse(try cueVisible(), "AVKit Off left a caption drawn")
-            openMenu()
-            XCTAssertTrue(app.buttons["Off"].firstMatch.isSelected, "App menu did not mirror AVKit Off")
-            capture("n6-ios-native-off")
-            app.buttons[expectedTrack].firstMatch.tap()
-            showControls()
-            let transport = app.buttons["Play/Pause"].firstMatch
-            if transport.label == "Play" {
-                transport.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-            }
-            let deadline = Date().addingTimeInterval(20)
-            while Date() < deadline {
-                if try cueVisible() { break }
-                Thread.sleep(forTimeInterval: 0.5)
-            }
-            XCTAssertTrue(try cueVisible())
-            openMenu()
-        }
+
         app.buttons["Off"].firstMatch.tap()
         Thread.sleep(forTimeInterval: 2)
         XCTAssertFalse(try cueVisible(), "Off left a caption drawn")
@@ -2414,14 +2439,11 @@ final class AppleiOSUITests: OpenStreamUITestCase {
             "-openstream.settings.subtitle.languages.v1", "(en)"
         ]
         launch(screen: "add-files")
-        let more = app.buttons["player.more"].firstMatch
-        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "player.stockCueLayer").firstMatch.waitForExistence(timeout: 45), "stock player did not appear")
+        XCTAssertTrue(app.descendants(matching: .any)["player.playback.ready"].firstMatch
+            .waitForExistence(timeout: 45), "The player did not become ready")
         func showControls() {
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.4)).tap()
         }
-        // More appears before the demuxer has published its tracks. Give the
-        // local fixture time to start, then reset the controls' hide timer.
-        Thread.sleep(forTimeInterval: 8)
         showControls()
         attach("captions-initial-controls")
         let hierarchy = XCTAttachment(string: app.debugDescription)
@@ -2429,16 +2451,16 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         hierarchy.lifetime = .keepAlways
         add(hierarchy)
         func ensureControlsVisible() {
-            let transport = app.buttons["Play/Pause"].firstMatch
+            let transport = app.buttons["player.play-pause"].firstMatch
             for _ in 0..<3 {
                 if transport.exists, transport.frame.width > 0 { return }
                 showControls()
             }
-            XCTAssertTrue(transport.exists, "stock transport controls are missing")
+            XCTAssertTrue(transport.exists, "transport controls are missing")
         }
         func pausePlayback() {
             ensureControlsVisible()
-            let transport = app.buttons["Play/Pause"].firstMatch
+            let transport = app.buttons["player.play-pause"].firstMatch
             if transport.label == "Pause" {
                 transport.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
                 XCTAssertTrue(app.buttons["Play"].firstMatch.waitForExistence(timeout: 5), "Pause did not change the transport state")
@@ -2446,7 +2468,7 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         }
         func resumePlayback() {
             ensureControlsVisible()
-            let transport = app.buttons["Play/Pause"].firstMatch
+            let transport = app.buttons["player.play-pause"].firstMatch
             if transport.label == "Play" {
                 transport.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
                 XCTAssertTrue(app.buttons["Pause"].firstMatch.waitForExistence(timeout: 5), "Play did not change the transport state")
@@ -2454,20 +2476,22 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         }
         func openAppSubtitles() {
             pausePlayback()
-            if !more.exists { showControls() }
-            XCTAssertTrue(more.waitForExistence(timeout: 5))
-            more.tap()
-            let subtitles = app.descendants(matching: .any).matching(identifier: "player.subtitles").firstMatch
-            XCTAssertTrue(subtitles.waitForExistence(timeout: 5), "Subtitles row missing: " + app.debugDescription)
-            subtitles.tap()
+            let captions = app.buttons["player.captions"].firstMatch
+            XCTAssertEqual(app.buttons.matching(identifier: "player.captions").count, 1)
+            XCTAssertFalse(app.buttons["Overflow Menu"].exists)
+            XCTAssertTrue(tapIfPossible(captions))
         }
         openAppSubtitles()
-        let rows = app.buttons.matching(NSPredicate(format: "label IN %@", ["Off", "English", "Spanish", "English SDH"]))
-        XCTAssertEqual(Set(rows.allElementsBoundByIndex.map(\.label)), Set(["Off", "English", "Spanish", "English SDH"]))
+        let rows = app.buttons.matching(NSPredicate(format: "label IN %@", ["Off", "English", "English SDH"]))
+        XCTAssertEqual(Set(rows.allElementsBoundByIndex.map(\.label)), Set(["Off", "English", "English SDH"]))
         let preferredLabel = "Spanish"
+        if !app.buttons[preferredLabel].firstMatch.exists {
+            app.buttons["player.subtitle.more"].firstMatch.tap()
+        }
+        XCTAssertTrue(app.buttons[preferredLabel].firstMatch.waitForExistence(timeout: 5))
         attach("n5-ios-full-menu")
         app.buttons[preferredLabel].firstMatch.tap()
-        // Menu actions dismiss on selection; restore the stock transport.
+        // Menu actions dismiss on selection; resume the picture before checking cues.
         resumePlayback()
         // AVKit's caption layer is not consistently exposed as static text.
         // Count rendered cues so native and app layers cannot silently double up.
@@ -2498,37 +2522,7 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         app.buttons["Off"].firstMatch.tap()
         XCTAssertTrue(try waitForCue(false), "app Off left a cue visible")
 
-        // Exercise the actual AVKit control, not a debug selection shortcut.
-        func openNativeSubtitles() {
-            pausePlayback()
-            let button = app.buttons.matching(NSPredicate(format:
-                "(label BEGINSWITH 'Subtitles' OR label == 'Show Subtitles' OR identifier == 'Subtitles') AND identifier != 'player.subtitles'" )).firstMatch
-            if !button.exists || !button.isHittable {
-                let overflow = app.buttons["Overflow Menu"].firstMatch
-                ensureControlsVisible()
-                XCTAssertTrue(overflow.exists, "AVKit More Controls missing")
-                overflow.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-            }
-            XCTAssertTrue(button.waitForExistence(timeout: 10), "AVKit subtitles control missing: " + app.debugDescription)
-            button.tap()
-        }
-        openNativeSubtitles()
-        attach("captions-avkit-menu")
-        let nativeTrack = app.buttons.matching(NSPredicate(format:
-            "(label CONTAINS[c] %@ OR label CONTAINS[c] 'Closed Captions') AND NOT label CONTAINS[c] 'Transcribed'", preferredLabel)).firstMatch
-        XCTAssertTrue(nativeTrack.waitForExistence(timeout: 5), "AVKit fixture track missing")
-        nativeTrack.tap()
-        resumePlayback()
-        XCTAssertTrue(try waitForCue(true), "AVKit selection did not display the fixture cue")
-        attach("captions-avkit-cue")
-        pausePlayback()
-        attach("captions-controls-and-cue")
-        openNativeSubtitles()
-        attach("captions-avkit-before-off")
-        app.buttons["Off"].firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-        resumePlayback()
-        XCTAssertTrue(try waitForCue(false), "AVKit Off left a cue visible")
-        attach("captions-avkit-off")
+        XCTAssertFalse(app.buttons["player.more"].exists)
     }
 
     /// Media servers (owner, 2026-09-17): signs in to the Emby test server on the
@@ -3537,6 +3531,93 @@ final class AppleiOSUITests: OpenStreamUITestCase {
             CrawlScreen(route: "live", opener: .livePlayer),
             CrawlScreen(route: "live", opener: .livePlayer, landscape: true),
         ])
+    }
+
+    func testVODHasOneMoreMenuAndOneCaptionsControlThatHideTogether() throws {
+        let base = try XCTUnwrap(ProcessInfo.processInfo.environment["OPENSTREAM_STUB_MEDIA_BASE"])
+        if UIDevice.current.userInterfaceIdiom == .pad { XCUIDevice.shared.orientation = .landscapeLeft }
+        for engine in ["native", "engine"] {
+            app.launchArguments = ["-OpenStreamVisionScreen", "add-files",
+                "-OpenStreamVisionPlaybackURL", base + "/media/e2e-long.mp4",
+                "-OpenStreamVisionPlaybackIsLive", "NO", "-openstream.playback.engine", engine,
+                "-OpenStreamMuteAudio", "YES"]
+            configureFixtureLaunch(app)
+            app.launch()
+            XCTAssertTrue(app.descendants(matching: .any)["player.playback.ready"].firstMatch
+                .waitForExistence(timeout: 60))
+            assertOnePlayerMenuThatHidesWithCaptions()
+            let captions = app.buttons["player.captions"].firstMatch
+            XCTAssertTrue(tapIfPossible(captions))
+            XCTAssertTrue(app.buttons["English"].firstMatch.waitForExistence(timeout: 5))
+            XCTAssertTrue(app.buttons["Off"].firstMatch.exists)
+            app.buttons["English"].firstMatch.tap()
+            XCTAssertTrue(revealPlayerControls())
+            XCTAssertTrue(tapIfPossible(captions))
+            XCTAssertTrue(app.buttons["English"].firstMatch.isSelected)
+            app.buttons["Off"].firstMatch.tap()
+            app.terminate()
+        }
+    }
+
+    func testLiveHasOneMoreMenuAndOneCaptionsControlThatHideTogether() throws {
+        let base = try XCTUnwrap(ProcessInfo.processInfo.environment["OPENSTREAM_STUB_MEDIA_BASE"])
+        app.launchArguments = ["-OpenStreamInlineLiveFixture",
+            "-OpenStreamVisionPlaybackURL", base + "/live/cbs.ts",
+            "-OpenStreamVisionPlaybackIsLive", "YES", "-OpenStreamMuteAudio", "YES"]
+        configureFixtureLaunch(app)
+        app.launch()
+        let fullScreen = app.buttons["player.fullscreen"].firstMatch
+        XCTAssertTrue(fullScreen.waitForExistence(timeout: 60))
+        fullScreen.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        if UIDevice.current.userInterfaceIdiom == .pad { XCUIDevice.shared.orientation = .landscapeLeft }
+        assertOnePlayerMenuThatHidesWithCaptions()
+    }
+
+    private func assertOnePlayerMenuThatHidesWithCaptions() {
+        let more = app.buttons.matching(NSPredicate(format:
+            "identifier IN %@ OR label == 'More Controls' OR identifier == 'Overflow Menu'",
+            ["player.options", "player.more"]))
+        let captions = app.buttons.matching(identifier: "player.captions")
+        let toggle = app.buttons["player.play-pause"].firstMatch
+        for _ in 0..<3 {
+            XCTAssertTrue(revealPlayerControls())
+            if toggle.exists {
+                if toggle.label == "Pause" { toggle.tap() }
+                break
+            }
+        }
+        let paused = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            toggle.exists && toggle.label == "Play"
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [paused], timeout: 5), .completed)
+        XCTAssertEqual(more.count, 1, "The player must expose exactly one ellipsis")
+        XCTAssertEqual(captions.count, 1, "The player must expose exactly one captions control")
+        XCTAssertTrue(tapIfPossible(more.firstMatch), "More does not accept a touch")
+        XCTAssertTrue(app.buttons["player.sleepTimer"].firstMatch.waitForExistence(timeout: 5))
+        attach("player-dots-single-more-menu")
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35)).tap()
+        let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            !self.app.buttons["player.sleepTimer"].firstMatch.exists
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 5), .completed)
+        XCTAssertTrue(revealPlayerControls())
+        if toggle.label == "Play" { toggle.tap() }
+        let playing = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            toggle.exists && toggle.label == "Pause"
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [playing], timeout: 5), .completed)
+        let hidden = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            more.count == 0 && captions.count == 0
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 10), .completed,
+            "More and captions must leave the control layer together")
+        XCTAssertFalse(more.firstMatch.exists && more.firstMatch.isHittable)
+        XCTAssertFalse(captions.firstMatch.exists && captions.firstMatch.isHittable)
+        attach("player-dots-controls-hidden")
+        XCTAssertTrue(revealPlayerControls())
+        XCTAssertEqual(more.count, 1)
+        XCTAssertEqual(captions.count, 1)
+        attach("player-dots-controls-shown")
     }
 
     /// The iPad variant. A regular-width split layout puts a different set of
@@ -4758,8 +4839,14 @@ final class AppleiOSUITests: OpenStreamUITestCase {
     /// the whole walk.
     @discardableResult
     private func tapIfPossible(_ element: XCUIElement) -> Bool {
-        guard isSafelyHittable(element) else { return false }
-        element.tap()
+        guard element.exists else { return false }
+        if isSafelyHittable(element) {
+            element.tap()
+        } else if isTouchableMenuButton(element, identifier: element.identifier) {
+            element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        } else {
+            return false
+        }
         return true
     }
 

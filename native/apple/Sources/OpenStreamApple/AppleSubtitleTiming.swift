@@ -202,18 +202,26 @@ extension AppleSubtitleTimingMenu {
         apply: @escaping @MainActor (AppleSubtitleTiming.Change) -> Void
     ) -> [UIMenuElement] {
         var stepActions: [UIMenuElement] = steps.map { step in
-            UIAction(title: step.title, attributes: .keepsMenuPresented) { _ in apply(.nudge(step.seconds)) }
+            let action = UIAction(title: step.title, attributes: .keepsMenuPresented) { _ in apply(.nudge(step.seconds)) }
+            action.accessibilityIdentifier = "player.subtitle.delay.\(step.seconds)"
+            return action
         }
-        stepActions.append(UIAction(title: resetTitle,
-                                    attributes: timing.delay == 0 ? .disabled : []) { _ in apply(.resetDelay) })
+        let reset = UIAction(title: resetTitle,
+                             attributes: timing.delay == 0 ? .disabled : []) { _ in apply(.resetDelay) }
+        reset.accessibilityIdentifier = "player.subtitle.delay.reset"
+        stepActions.append(reset)
         let delayMenu = UIMenu(title: titleWithValue(timing), image: UIImage(systemName: "timer"),
                                children: stepActions)
         let rateMenu = UIMenu(title: frameRateTitle, options: .singleSelection,
                               children: AppleSubtitleTiming.FrameRateFix.allCases.map { fix in
-            UIAction(title: fix.title, state: timing.frameRateFix == fix ? .on : .off) { _ in
+            let action = UIAction(title: fix.title, state: timing.frameRateFix == fix ? .on : .off) { _ in
                 apply(.frameRate(fix))
             }
+            action.accessibilityIdentifier = "player.subtitle.fps.\(fix.rawValue)"
+            return action
         })
+        delayMenu.accessibilityIdentifier = "player.subtitle.delay"
+        rateMenu.accessibilityIdentifier = "player.subtitle.fps"
         return [delayMenu, rateMenu]
     }
 }

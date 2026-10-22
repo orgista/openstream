@@ -256,12 +256,7 @@ struct AppleLiveSystemChrome: View {
     }
 }
 
-/// More, in its own view: the chrome's body reads the live position and
-/// seekable range, which tick four times a second, and rebuilding an open
-/// menu at that rate kept it animating and lost the taps on its rows (iOS 27
-/// crawl, 2026-10-18). Load-bearing: SwiftUI skips this body only while the
-/// closures below arrive as stored values; wrapping one inline at the call
-/// site (as `onClose` is) brings the per-tick rebuild back.
+/// Keeps the live position's four updates per second out of menu construction.
 @MainActor
 private struct AppleLiveMoreMenu: View {
     let model: AppleTransportOverlayModel
@@ -272,35 +267,34 @@ private struct AppleLiveMoreMenu: View {
     let sharePlayMenu: AppleTransportOverlay.SharePlayMenu?
 
     var body: some View {
-        Menu {
-            if let onLastChannel {
-                Button("Last Channel", systemImage: "arrow.uturn.backward", action: onLastChannel)
-                    .appleLiveMenuPresence(model)
-                    .accessibilityIdentifier("live.player.lastChannel")
-            }
-            if let onStartOver {
-                Button("Start Over", systemImage: "backward.end", action: onStartOver)
-                    .appleLiveMenuPresence(model)
-                    .accessibilityIdentifier("live.player.startOver")
-            }
-            AppleSleepTimerMenu(coordinator: coordinator, isLive: isLive, transport: model)
-            if let sharePlayMenu {
-                Button(sharePlayMenu.primaryTitle, systemImage: "shareplay", action: sharePlayMenu.primaryAction)
-                    .appleLiveMenuPresence(model)
-                if let title = sharePlayMenu.secondaryTitle, let action = sharePlayMenu.secondaryAction {
-                    Button(title, role: .destructive, action: action)
-                }
-            }
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 20, weight: .semibold))
-                .appleTransportGlyphLegibility()
-                .frame(width: 44, height: 44)
-                .contentShape(.rect)
+        AppleTransportMenuButton(title: "More", systemImage: "ellipsis", identifier: "player.options",
+            menu: uiMenu, onOpen: model.menuItemAppeared, onClose: model.menuItemDisappeared)
+            .appleTransportGlyphLegibility()
+            .frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
+    }
+
+    private var uiMenu: UIMenu {
+        var items: [UIMenuElement] = []
+        if let onLastChannel {
+            let action = UIAction(title: "Last Channel", image: UIImage(systemName: "arrow.uturn.backward")) { _ in onLastChannel() }
+            action.accessibilityIdentifier = "live.player.lastChannel"
+            items.append(action)
         }
-        .appleBareMenu()
-        .accessibilityLabel("More")
-        .accessibilityIdentifier("player.options")
+        if let onStartOver {
+            let action = UIAction(title: "Start Over", image: UIImage(systemName: "backward.end")) { _ in onStartOver() }
+            action.accessibilityIdentifier = "live.player.startOver"
+            items.append(action)
+        }
+        items.append(AppleSleepTimerMenu.uiMenu(coordinator: coordinator, isLive: isLive))
+        if let sharePlayMenu {
+            items.append(UIAction(title: sharePlayMenu.primaryTitle, image: UIImage(systemName: "shareplay")) { _ in
+                sharePlayMenu.primaryAction()
+            })
+            if let title = sharePlayMenu.secondaryTitle, let action = sharePlayMenu.secondaryAction {
+                items.append(UIAction(title: title, attributes: .destructive) { _ in action() })
+            }
+        }
+        return UIMenu(children: items)
     }
 }
 
@@ -422,7 +416,7 @@ private struct AppleLiveScrubberRow: View {
 }
 
 /// The system AirPlay picker, white on the video.
-private struct AppleRoutePicker: UIViewRepresentable {
+struct AppleRoutePicker: UIViewRepresentable {
     func makeUIView(context: Context) -> AVRoutePickerView {
         let view = AVRoutePickerView()
         view.tintColor = .white
@@ -435,10 +429,4 @@ private struct AppleRoutePicker: UIViewRepresentable {
     func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
 }
 
-private extension View {
-    func appleLiveMenuPresence(_ model: AppleTransportOverlayModel) -> some View {
-        onAppear { model.menuItemAppeared() }
-            .onDisappear { model.menuItemDisappeared() }
-    }
-}
 #endif
