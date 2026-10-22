@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import OpenStreamApple
 
@@ -26,6 +27,40 @@ struct AppleWidgetSnapshotTests {
         value.progress = progress
         value.isFavorite = favorite
         return value
+    }
+
+    @Test func artworkStagingDoesNotNotifyUntilTheCompletedSnapshotIsSaved() async throws {
+        let root = temporaryContainer()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = AppleTopShelfSnapshotWriter.snapshotURL(in: root)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let notifications = Mutex<[AppleTopShelfSnapshot?]>([])
+        let writer = AppleTopShelfSnapshotWriter(containerProvider: { root },
+            snapshotLocation: { AppleTopShelfSnapshotWriter.snapshotURL(in: $0) },
+            artwork: nil, trailerFiles: nil, didChange: {
+                let snapshot = AppleTopShelfSnapshotReader(containerProvider: { root }).read()
+                notifications.withLock { $0.append(snapshot) }
+            })
+        var snapshot = AppleTopShelfSnapshot(version: 1, generatedAt: .now,
+            continueWatching: [], recentlyAdded: [], favorites: [])
+        try await writer.save(snapshot, to: url, notify: false)
+        #expect(notifications.withLock { $0.isEmpty })
+        #expect(AppleTopShelfSnapshotReader(containerProvider: { root }).read() == snapshot)
+
+        snapshot.widgetHero = AppleWidgetHeroArtwork(itemID: "fixture", backdropFile: "fixture.jpg", wordmarkFile: nil)
+        try await writer.save(snapshot, to: url)
+        #expect(notifications.withLock { $0 } == [snapshot])
+    }
+
+    @Test func aPublishNotifiesOnce() async throws {
+        let root = temporaryContainer()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try await confirmation(expectedCount: 1) { changed in
+            let writer = AppleTopShelfSnapshotWriter(containerProvider: { root },
+                snapshotLocation: { AppleTopShelfSnapshotWriter.snapshotURL(in: $0) },
+                artwork: nil, trailerFiles: nil, didChange: { changed() })
+            try await writer.write(records: [], enabled: true)
+        }
     }
 
     @Test func aWidgetReadsWhatTheAppWrote() async throws {

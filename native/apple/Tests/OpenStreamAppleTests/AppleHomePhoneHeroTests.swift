@@ -278,17 +278,24 @@ struct AppleHomePhoneHeroLayoutTests {
     }
 
     @Test(arguments: [
-        // iPhone SE, 16e, 16 Pro, 15 Pro Max, 16 Pro Max
-        AppleHomePhoneHeroLayout(containerHeight: 667, topInset: 72, bottomInset: 49),
+        // iPhone 16e, 16 Pro, 15 Pro Max, 16 Pro Max
         AppleHomePhoneHeroLayout(containerHeight: 844, topInset: 59, bottomInset: 83),
         AppleHomePhoneHeroLayout(containerHeight: 874, topInset: 62, bottomInset: 83),
         AppleHomePhoneHeroLayout(containerHeight: 932, topInset: 118, bottomInset: 83),
         AppleHomePhoneHeroLayout(containerHeight: 956, topInset: 118, bottomInset: 83),
     ])
-    func theFirstRowAlwaysPeeks(_ layout: AppleHomePhoneHeroLayout) {
+    func tallPhonesKeepTheFirstRowPeek(_ layout: AppleHomePhoneHeroLayout) {
         #expect(rowPeek(layout) >= AppleHomePhoneHeroLayout.minimumRowPeek)
         #expect(layout.artHeight <= layout.containerHeight * AppleHomePhoneHeroLayout.artFraction)
         #expect(layout.artHeight > 0)
+    }
+
+    @Test(arguments: [CGFloat(49), CGFloat(83)])
+    func shortPhonesKeepTheTitlePageArtHeight(bottomInset: CGFloat) {
+        let layout = AppleHomePhoneHeroLayout(containerHeight: 667, topInset: 72, bottomInset: bottomInset)
+        #expect(layout.artHeight == AppleTitlePageSlotArt.heroHeight(screenHeight: 667))
+        #expect(layout.artHeight >= AppleHomePhoneHeroLayout.minimumArtHeight)
+        #expect(rowPeek(layout) < AppleHomePhoneHeroLayout.minimumRowPeek)
     }
 
     @Test func anUnmeasuredScrollViewGetsTheFloor() {

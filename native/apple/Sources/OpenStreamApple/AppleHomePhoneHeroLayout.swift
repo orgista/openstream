@@ -1,8 +1,9 @@
 import CoreGraphics
 
 /// The iPhone landing hero shares the title page's 70% art target, with 40 pt
-/// below the art for landing controls and dots. The 90 pt first-row peek takes
-/// precedence on short screens. On the 874 pt reference screen, buttons remain
+/// below the art for landing controls and dots. Short screens keep the title
+/// page's height; taller screens leave a 90 pt first-row peek. On the 874 pt
+/// reference screen, buttons remain
 /// centred near 64% and dots near 70% of the screen height.
 public struct AppleHomePhoneHeroLayout: Equatable, Sendable {
     /// The scroll view's height: the whole screen, bars included.
@@ -19,7 +20,7 @@ public struct AppleHomePhoneHeroLayout: Equatable, Sendable {
     }
 
     public static let artFraction: CGFloat = 0.70
-    /// The least of the first row's tiles that must show above the tab bar.
+    /// The first-row peek above the tab bar when the title page's art floor fits.
     public static let minimumRowPeek: CGFloat = 90
     /// The bottom of the hero to the top of the first row's tiles: Discover's
     /// 32 pt row spacing less `trailingOverlap`, then the row's title line.
@@ -33,7 +34,7 @@ public struct AppleHomePhoneHeroLayout: Equatable, Sendable {
     /// The bottom of the hero to the bottom of the buttons.
     public static let copyBottomInset: CGFloat = 54
     static let titlePageCopyBottomInset: CGFloat = 14
-    /// Fallback before the scroll view has been measured.
+    /// The art floor shared with the title page, also used before measurement.
     public static let minimumArtHeight: CGFloat = 440
     /// Discover's rows are laid out 16 pt below the navigation bar
     /// (`padding(.vertical)`); the hero is pulled up past that too.
@@ -43,12 +44,12 @@ public struct AppleHomePhoneHeroLayout: Equatable, Sendable {
     public var heroHeight: CGFloat { artHeight + Self.footerHeight }
 
     /// The art's height from the top edge of the screen: 70 % of the screen,
-    /// held short enough that the first row still peeks above the tab bar.
+    /// held short for a row peek only when that preserves the shared art floor.
     public var artHeight: CGFloat {
         guard containerHeight > 0 else { return Self.minimumArtHeight }
         let target = AppleTitlePageSlotArt.heroHeight(screenHeight: containerHeight)
         let peekLimit = containerHeight - bottomInset - Self.minimumRowPeek - Self.firstRowLead - Self.footerHeight
-        return max(0, min(target, peekLimit))
+        return peekLimit < Self.minimumArtHeight ? target : min(target, peekLimit)
     }
 
     /// iOS 18's inline-large bar changes height as Discover appears and

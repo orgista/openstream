@@ -88,8 +88,9 @@ public final class AppleChannelHealthStore {
         #endif
     }
 
-    /// Settings can open before Live has saved any channels.
+    /// Settings reads saved channels; the health page and explicit checks may fetch a missing lineup.
     public func prepareLineupIfNeeded(settings: AppleSettingsStore, sourceStore: AppleSourceStore,
+                                     allowsNetwork: Bool = false,
                                      cache: AppleIPTVChannelCache = .shared,
                                      client: AppleIPTVClient = AppleIPTVClient()) async {
         guard !Task.isCancelled, await lineupGate.waitUntilIdle(), lineup.isEmpty, lineupGate.begin() else { return }
@@ -105,6 +106,7 @@ public final class AppleChannelHealthStore {
                 cached.append(contentsOf: snapshot.channels)
                 continue
             }
+            guard allowsNetwork else { continue }
             do {
                 let channels = try await client.channels(source: source, credentials: sourceStore.iptvCredentials(for: source))
                 guard !Task.isCancelled else { return }

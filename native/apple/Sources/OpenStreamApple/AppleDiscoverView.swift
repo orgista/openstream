@@ -153,8 +153,8 @@ struct AppleDiscoverView: View {
         var id: String { record.id }
     }
 
-    nonisolated static func showsLoadingContent(hasContent: Bool, hasRecommendations: Bool, isLoading: Bool) -> Bool {
-        isLoading && (!hasContent || !hasRecommendations)
+    nonisolated static func showsLoadingContent(hasContent: Bool, isLoading: Bool) -> Bool {
+        isLoading && !hasContent
     }
 
     struct RecommendationResult: Sendable {
@@ -252,8 +252,7 @@ struct AppleDiscoverView: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: sectionSpacing) {
-                        if Self.showsLoadingContent(hasContent: hasContent, hasRecommendations: recommendationsRevision != nil,
-                            isLoading: discoverIsLoading) || reviewLoadingState {
+                        if Self.showsLoadingContent(hasContent: hasContent, isLoading: discoverIsLoading) || reviewLoadingState {
                             AppleDiscoverLoadingContent(presentation: heroPresentation, viewport: viewportSize,
                                 phoneLayout: phoneHeroLayout, wideLayout: usesPadHero ? padHeroLayout : macHeroLayout,
                                 rowStyle: discoverRowStyle)

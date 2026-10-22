@@ -286,6 +286,10 @@ private struct AppleChannelHealthSettingsPage: View {
             }
         }
         .navigationTitle("Channel Health")
+        .task {
+            await AppleChannelHealthStore.shared.prepareLineupIfNeeded(
+                settings: settings, sourceStore: sourceStore, allowsNetwork: true)
+        }
     }
 }
 
