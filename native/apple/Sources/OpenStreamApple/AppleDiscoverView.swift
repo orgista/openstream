@@ -3577,7 +3577,7 @@ struct AppleCatalogItemDetailView: View {
                 // once the page scrolls, and the synopsis was drawn through the
                 // clock. Applied to the scroll view itself, not the group, because
                 // it reads that scroll view's offset.
-                .appleStatusBarShield(topInset: pageGeometry.safeAreaInsets.top, usesPhoneLayout: usesPhoneTitlePage)
+                .appleStatusBarShield(topInset: pageGeometry.safeAreaInsets.top, usesPhoneLayout: usesPhoneTitleChrome)
                 #endif
             }
         }
@@ -3625,7 +3625,7 @@ struct AppleCatalogItemDetailView: View {
         #if os(macOS) || os(iOS) || os(visionOS)
         .appleTitlePageToolbar(pageID: item.id, title: displayTitle, heroIsOffscreen: detailHeroIsOffscreen,
                               topInset: pageGeometry.safeAreaInsets.top,
-                              usesPhoneLayout: usesPhoneTitlePage,
+                              usesPhoneLayout: usesPhoneTitleChrome,
                               backIsBlocked: playbackUI.presentation != nil) { dismiss() }
         .environment(\.appleTabToolbar, tabToolbar)
         #endif
@@ -5426,7 +5426,7 @@ struct AppleCatalogItemDetailView: View {
 
     private func detailHeroFrameChanged(_ frame: CGRect) {
         #if os(iOS)
-        if usesPhoneTitlePage, frame != .zero {
+        if usesPhoneTitleChrome, frame != .zero {
             detailHeroIsOffscreen = frame.maxY <= AppleDesignTokens.minimumActionSize
         }
         #endif
@@ -9596,7 +9596,18 @@ extension AppleCatalogItemDetailView {
 
     var usesPhoneTitlePage: Bool {
         #if os(iOS)
-        !isLargeLayout && !isLandscapeLayout
+        horizontalSizeClass == .compact && !isLandscapeLayout
+        #else
+        false
+        #endif
+    }
+
+    /// The phone's back button, title and status-bar handling, in either
+    /// orientation: under a landscape player the page keeps the chrome it will
+    /// show when the player closes. Every iPad window is large.
+    var usesPhoneTitleChrome: Bool {
+        #if os(iOS)
+        !isLargeLayout
         #else
         false
         #endif

@@ -52,10 +52,10 @@ public struct AppleStreamDeviceCapabilities: Equatable, Sendable {
         self.automaticTierCap = automaticTierCap
     }
 
-    static func automaticTierCap(nativePixelSize: CGSize, isCostly: Bool) -> AppleStreamQualityTier {
+    static func automaticTierCap(isLargeLayout: Bool, nativePixelSize: CGSize, isCostly: Bool) -> AppleStreamQualityTier {
         let needsMoreThanFullHD = min(nativePixelSize.width, nativePixelSize.height)
             > CGFloat(AppleStreamQualityTier.fullHD.rawValue)
-        return needsMoreThanFullHD && !isCostly ? .uhd : .fullHD
+        return isLargeLayout && needsMoreThanFullHD && !isCostly ? .uhd : .fullHD
     }
 }
 

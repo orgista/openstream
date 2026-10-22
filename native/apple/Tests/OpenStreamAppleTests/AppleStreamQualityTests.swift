@@ -99,19 +99,24 @@ struct AppleStreamQualityTests {
 
     // MARK: Automatic and fallback order
 
+    /// Today's iPhones stay at 1080p; only a large window (an iPad, an
+    /// unfolded Duo) on an uncapped connection reaches for 4K.
     @Test(arguments: [
-        (CGSize(width: 1080, height: 2340), false, AppleStreamQualityTier.fullHD),
-        (CGSize(width: 2340, height: 1080), false, .fullHD),
-        (CGSize(width: 1081, height: 2400), false, .uhd),
-        (CGSize(width: 1290, height: 2796), false, .uhd),
-        (CGSize(width: 2208, height: 1840), false, .uhd),
-        (CGSize(width: 1840, height: 2208), false, .uhd),
-        (CGSize(width: 2208, height: 1840), true, .fullHD),
-        (CGSize.zero, false, .fullHD),
+        (CGSize(width: 1080, height: 2340), false, false, AppleStreamQualityTier.fullHD),
+        (CGSize(width: 1290, height: 2796), false, false, .fullHD),
+        (CGSize(width: 2796, height: 1290), false, false, .fullHD),
+        (CGSize(width: 1320, height: 2868), false, false, .fullHD),
+        (CGSize(width: 1398, height: 2034), false, false, .fullHD),
+        (CGSize(width: 2007, height: 2853), true, false, .uhd),
+        (CGSize(width: 1488, height: 2266), true, false, .uhd),
+        (CGSize(width: 2208, height: 1840), true, false, .uhd),
+        (CGSize(width: 2208, height: 1840), true, true, .fullHD),
+        (CGSize.zero, true, false, .fullHD),
     ])
-    func automaticUsesTheNativePanelAndNetworkCost(_ sample: (CGSize, Bool, AppleStreamQualityTier)) throws {
-        let (pixels, costly, expected) = sample
-        let cap = AppleStreamDeviceCapabilities.automaticTierCap(nativePixelSize: pixels, isCostly: costly)
+    func automaticUsesTheWindowPanelAndNetworkCost(_ sample: (CGSize, Bool, Bool, AppleStreamQualityTier)) throws {
+        let (pixels, isLargeLayout, costly, expected) = sample
+        let cap = AppleStreamDeviceCapabilities.automaticTierCap(isLargeLayout: isLargeLayout,
+                                                                 nativePixelSize: pixels, isCostly: costly)
         let device = AppleStreamDeviceCapabilities(supportsHDR: true, supportsDolbyVision: true,
                                                    automaticTierCap: cap)
         let first = try #require(AppleStremioCandidateRanking.playbackOrder(Self.sample, choice: .automatic,

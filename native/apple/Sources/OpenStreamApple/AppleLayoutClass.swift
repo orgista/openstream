@@ -12,9 +12,18 @@ enum AppleLayoutClass {
         isRegularWidth && min(size.width, size.height) >= minimumShortSide
     }
 
-    static func settingsUseSplitView(size: CGSize, isRegularWidth: Bool, preservesPortraitStack: Bool) -> Bool {
-        isLarge(size: size, isRegularWidth: isRegularWidth)
-            && (!preservesPortraitStack || size.width > size.height)
+    /// The app's large-layout flag. Every iPad window keeps the iPad's layout,
+    /// Slide Over, split view and short Stage Manager windows included; a phone
+    /// is large only while its window is (an unfolded Duo).
+    static func usesLargeLayout(isPad: Bool, size: CGSize, isRegularWidth: Bool) -> Bool {
+        isPad || isLarge(size: size, isRegularWidth: isRegularWidth)
+    }
+
+    /// iPads split Settings in a regular-width landscape window, as before;
+    /// a large phone window splits in either orientation.
+    static func settingsUseSplitView(size: CGSize, isRegularWidth: Bool, isPad: Bool) -> Bool {
+        if isPad { return isRegularWidth && AppleDetailMetrics.isLandscapeLayout(viewport: size) }
+        return isLarge(size: size, isRegularWidth: isRegularWidth)
     }
 
     /// Discover and Library keep the phone's landing chrome (no bar at rest, round
@@ -23,6 +32,14 @@ enum AppleLayoutClass {
     static func usesPadLandingChrome(isLarge: Bool, isPhone: Bool) -> Bool {
         isLarge && !isPhone
     }
+
+    #if os(iOS)
+    /// The key window of any connected scene, backgrounded ones included.
+    @MainActor static var keyWindow: UIWindow? {
+        UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows).first(where: \.isKeyWindow)
+    }
+    #endif
 }
 
 extension EnvironmentValues {

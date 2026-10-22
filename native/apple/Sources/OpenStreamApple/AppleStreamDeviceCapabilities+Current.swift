@@ -12,17 +12,20 @@ extension AppleStreamDeviceCapabilities {
     /// HDR and Dolby Vision come from the engine's display snapshot, the one
     /// its own routing reads (`AetherEngine.displayCapabilities`), so the
     /// picker never prefers a stream the engine would then tone-map. Automatic
-    /// follows the window's native display pixels, with a 1080p limit on a
-    /// cellular or Low Data connection.
+    /// stops at 1080p in a phone-sized window, whose screen shows no more, and
+    /// on a cellular or Low Data connection; an iPad or an unfolded Duo
+    /// reaches for 4K.
     @MainActor
     public static var current: AppleStreamDeviceCapabilities {
         let display = AetherEngine.displayCapabilities
         #if os(iOS)
-        let window = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-            .filter { $0.activationState == .foregroundActive }
-            .flatMap(\.windows).first(where: \.isKeyWindow)
-        let pixels = window?.windowScene?.screen.nativeBounds.size ?? .zero
-        let cap = automaticTierCap(nativePixelSize: pixels, isCostly: AppleNetworkCost.shared.isCostly)
+        let window = AppleLayoutClass.keyWindow
+        let isLargeLayout = AppleLayoutClass.usesLargeLayout(isPad: UIDevice.current.userInterfaceIdiom == .pad,
+            size: window?.bounds.size ?? .zero,
+            isRegularWidth: window?.traitCollection.horizontalSizeClass == .regular)
+        let cap = automaticTierCap(isLargeLayout: isLargeLayout,
+                                   nativePixelSize: window?.windowScene?.screen.nativeBounds.size ?? .zero,
+                                   isCostly: AppleNetworkCost.shared.isCostly)
         #else
         let cap: AppleStreamQualityTier = AppleNetworkCost.shared.isCostly ? .fullHD : .uhd
         #endif

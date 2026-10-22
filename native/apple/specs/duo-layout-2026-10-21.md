@@ -102,3 +102,46 @@ Evidence reviewed by the lead (design/2026-10-21-duo-layout/large-phone/, native
 5. Gates: serial swift test; iOS/tvOS/visionOS/macOS Debug + iOS Release; Duo smoke on 57B18C7A (Xcode 27.2);
    AppleiOSStubSmokeUITests + testB8DiscoverJank on 18.6; iPad reference test; code-anti-slop; zero-byte.
 Report per AGENTS.md §7 with before/after captures for 1–3.
+
+## Round 5 (lead, 21:30): Fable review — fix first (commit 17ecb4a is the base)
+Fix each P1/P2 with a test; P3s: take the cheap ones (topInset guard, seed controlsSize). Use your OWN simulator
+DerivedData `~/Developer/sim-dd-duo-r5` (another lane rebuilt the shared sim-dd-internal under round 4).
+- P1 quality: today's iPhones must keep the 1080p Automatic cap; only large windows (iPad, unfolded Duo) may reach UHD.
+  Flip the AppleStreamQualityTests 1290x2796 row; drop the foregroundActive-only window filter.
+- P1 iPads: iPads keep every old path in ALL window sizes (Slide Over, split, Stage Manager): define the environment
+  flag as `idiom == .pad || AppleLayoutClass.isLarge(...)`, revert the AppleDiscoverView compact check as suggested,
+  keep the old regular+landscape Settings rule on iPad, derive the full-screen picker from the same flag. Add tests
+  for an iPad compact window (e.g. 1/3 split) keeping the pad hero/chrome/Live behaviour.
+- P2: title-page chrome and status-bar shield gated on "phone device and not large" only (no landscape term).
+Same gates as round 4 (both Xcodes, Duo smoke, 18.6 via protected.py, iPad reference + a split-view iPad capture).
+NOTE: 8939801C (iPad), 57B18C7A (Duo) and 2E61439B are being loaded with the owner's data by another job right now —
+run anything on them ONLY through /Volumes/DevExt/dev/openstream-build/batch-1018a/protected.py.
+
+### Review text
+**VERDICT: fix first.** The size rule replaces iPad idiom checks as well as iPhone ones, and the Automatic quality cap was changed on today's Pro iPhones. Today's iPhones in portrait are otherwise unchanged; Release has no DEBUG host reference; tvOS, visionOS and macOS paths are untouched.
+
+**P1 — Automatic quality now reaches 4K on most of today's iPhones**
+- `Sources/OpenStreamApple/AppleStremioCandidateRanking+Device.swift:55-59`, `AppleStreamDeviceCapabilities+Current.swift:20-25`. Old rule: any iPhone caps Automatic at 1080p. New rule: UHD when the panel's short side exceeds 1080 px. iPhone X through 16 Pro Max (1125 to 1320 px wide) now rank 2160p streams first on Wi-Fi. `Tests/OpenStreamAppleTests/AppleStreamQualityTests.swift:106` asserts 1290x2796 gives `.uhd`, so this is intentional, and it contradicts the spec line "nothing changes on today's iPhones".
+- Fix: keep the phone cap unless the window is large (pass the idiom plus the large flag, or raise the pixel threshold to 1440 so phones stay below and iPad mini 1488 and the Duo 2007 stay above); flip the test row.
+- Same file line 20-22: the key window is taken only from `.foregroundActive` scenes, so a resolve while backgrounded gets `.zero` and 1080p on iPad too. Drop the activation filter.
+
+**P1 — iPads change in every non-full-screen window**
+Multitasking is on (all four iPad orientations, no `UIRequiresFullScreen`), so Slide Over, 1/3 and 1/2 split on 11", and short Stage Manager windows are compact or under 600 pt. `AppleLayoutClass.isLarge` is false there, and every consumer that used `idiom == .pad` before now takes the phone path:
+- `AppleHomePresentationPolicy.swift:13-15`: compact iPad window gets the `.phone` hero (was `.pad`); `.rotating` for a regular 900x500 window.
+- `ApplePhoneTitlePageChrome.swift:106-110` and `AppleAlignedTabTitle.swift:38-40`: Discover and Library lose the stock bar and title, gain round Search/Refresh and the gradient; `AppleDiscoverView.swift:425`, `AppleMediaSourceViews.swift:3256` hide the toolbar.
+- `AppleTabToolbarContext.swift:80-83` and `AppleDiscoverView.swift:3580`: title pages get the phone back button and lose the status-bar shield.
+- `AppleMediaSourceViews.swift:1430-1432`: Live uses the phone stack and `playFromList` stops opening full screen on a row tap (line 1570). `AppleMediaSourceViews.swift:2254-2256`: full-screen picker falls back to the panel.
+- `OpenStreamRootView.swift:359-363`: Settings split now also needs a 600 pt short side (was regular + landscape).
+- Fix: in `OpenStreamRootView.swift:351-353` define the environment flag as `idiom == .pad || AppleLayoutClass.isLarge(...)` so iPads keep their old paths, revert `AppleDiscoverView.swift:9597` to `horizontalSizeClass == .compact && !isLandscapeLayout` (that already excludes a regular-width unfolded Duo), keep the old regular + landscape rule for iPad Settings, and derive the full-screen picker from the same flag. Add an iPad compact-window test to `AppleLayoutClassTests`.
+
+**P2 — Title page chrome swaps under a landscape player on today's iPhones**
+- `AppleTabToolbarContext.swift:80-83`, `AppleDiscoverView.swift:3580,3628`. The chrome is now gated on `usesPhoneTitlePage`, which includes `!isLandscapeLayout`. The title page under the full-screen player lays out at 932x430, so the phone chrome is disabled and the stock bar with Back plus tab toolbar is mounted. Closing the player in landscape rotates back while that bar is visible, so it can flash before the geometry reads portrait. Previously the chrome never depended on landscape.
+- Fix: gate chrome and shield on "phone device and not large" only; leave the landscape test to the body layout.
+
+**P3**
+- `AppleDiscoverHeroLayoutReader.swift:61`: the settle task now draws a reading with `topInset == 0` after 750 ms; on phones that only happens with the status bar hidden, and the next reading corrects it. Transient, leave or restore the `topInset > 0` guard.
+- `AppleAlignedTabTitle.swift:38`: `legacyNavigationBackground` is now applied on iPhone (bar hidden by the chrome, so invisible); confirm on the iOS 18.6 Library screenshot.
+- `AppleMediaSourceViews.swift:2256`: `controlsSize` starts at zero, so the first body picks `.panel` and switches to the strip after the first geometry read; the picker opens 250 ms later, so no visible effect, but seed from the window size.
+- Duo only: unfolding swaps the Discover hero type (`.phone` to `.pad`), restarting its trailer, and `AppleSettingsView` drops the pushed page when the split appears. Live stage keeps identity across the switch, which is correct.
+
+**Checked, no finding:** root reader has no loop (size plus insets stays constant through keyboard and bars; the large flag changes nothing that resizes the root); `onChange(of: isLargeLayout)` never fires on fixed-size phones; orientation lock falls back to the old mask when `window` is nil; `AppleDebugLayoutHost.swift` and its call site are both inside `#if DEBUG && os(iOS)` with no other references; `AppleTrailerStartPolicy` keeps `.phone` on small phone windows; non-iOS platforms get the same values as before.

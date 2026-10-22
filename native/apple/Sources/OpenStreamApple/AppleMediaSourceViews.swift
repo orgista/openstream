@@ -2165,7 +2165,12 @@ private struct AppleLiveFullScreenControls: View {
     /// every path shares.
     @State private var lastChannelSwitch: ContinuousClock.Instant?
     @State private var pickerShowTask: Task<Void, Never>?
+    #if os(iOS)
+    /// Seeded from the window so the first body already picks the right picker.
+    @State private var controlsSize = AppleLayoutClass.keyWindow?.bounds.size ?? .zero
+    #else
     @State private var controlsSize: CGSize = .zero
+    #endif
     @Environment(\.horizontalSizeClass) private var pickerHorizontalSizeClass
     @State private var zapper = AppleLiveZapCoalescer()
     @Environment(\.scenePhase) private var scenePhase
@@ -2252,8 +2257,10 @@ private struct AppleLiveFullScreenControls: View {
         }
         #endif
         #if os(iOS)
-        let presentation = AppleLiveChannelPickerPresentation.choose(isLargeLayout:
-            AppleLayoutClass.isLarge(size: controlsSize, isRegularWidth: pickerHorizontalSizeClass == .regular))
+        // Hosted in UIKit, outside the root's environment: the root's rule, from this view's own size.
+        let presentation = AppleLiveChannelPickerPresentation.choose(isLargeLayout: AppleLayoutClass.usesLargeLayout(
+            isPad: UIDevice.current.userInterfaceIdiom == .pad, size: controlsSize,
+            isRegularWidth: pickerHorizontalSizeClass == .regular))
         #else
         let presentation = AppleLiveChannelPickerPresentation.panel
         #endif

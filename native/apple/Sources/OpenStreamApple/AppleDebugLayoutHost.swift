@@ -7,9 +7,11 @@ public struct AppleDebugLayoutHost<Canvas: View>: View {
     let content: Canvas
     @Environment(\.scenePhase) private var scenePhase
 
+    /// "width,height", or "width,height,compact" for a compact-width window (an iPad split).
+    private var request: String { UserDefaults.standard.string(forKey: "OpenStreamDebugLayoutSize") ?? "" }
+
     private var requestedSize: CGSize? {
-        let values = (UserDefaults.standard.string(forKey: "OpenStreamDebugLayoutSize") ?? "")
-            .split(separator: ",").compactMap { Double($0) }
+        let values = request.split(separator: ",").compactMap { Double($0) }
         guard values.count == 2, values.allSatisfy({ $0.isFinite && $0 > 0 }) else { return nil }
         return CGSize(width: values[0], height: values[1])
     }
@@ -19,7 +21,8 @@ public struct AppleDebugLayoutHost<Canvas: View>: View {
             AppleDebugLayoutCanvas(content: content.environment(\.scenePhase, scenePhase)
                 .tint(.white).preferredColorScheme(.dark)
                 .statusBarHidden().symbolEffectsRemoved()
-                .transaction { $0.animation = nil; $0.disablesAnimations = true }, size: size)
+                .transaction { $0.animation = nil; $0.disablesAnimations = true }, size: size,
+                isCompactWidth: request.hasSuffix(",compact"))
         } else {
             content
         }
@@ -35,9 +38,10 @@ public extension View {
 private struct AppleDebugLayoutCanvas<Canvas: View>: UIViewControllerRepresentable {
     let content: Canvas
     let size: CGSize
+    let isCompactWidth: Bool
 
     func makeUIViewController(context: Context) -> AppleDebugLayoutController<Canvas> {
-        AppleDebugLayoutController(content: content, size: size)
+        AppleDebugLayoutController(content: content, size: size, isCompactWidth: isCompactWidth)
     }
 
     func updateUIViewController(_ controller: AppleDebugLayoutController<Canvas>, context: Context) {
@@ -57,6 +61,7 @@ private final class AppleDebugCanvasWindow: UIWindow {
 private final class AppleDebugLayoutController<Canvas: View>: UIViewController {
     let host: UIHostingController<Canvas>
     private let expandedSize: CGSize
+    private let isCompactWidth: Bool
     private var canvasSize: CGSize
     private var isFolded = false
     private var isRotated = false
@@ -65,9 +70,10 @@ private final class AppleDebugLayoutController<Canvas: View>: UIViewController {
     private var canvasWindow: AppleDebugCanvasWindow?
     private weak var originalWindow: UIWindow?
 
-    init(content: Canvas, size: CGSize) {
+    init(content: Canvas, size: CGSize, isCompactWidth: Bool) {
         host = UIHostingController(rootView: content)
         expandedSize = size
+        self.isCompactWidth = isCompactWidth
         canvasSize = size
         super.init(nibName: nil, bundle: nil)
     }
@@ -137,7 +143,7 @@ private final class AppleDebugLayoutController<Canvas: View>: UIViewController {
     private func resizeCanvas() {
         canvasSize = isFolded ? CGSize(width: 466, height: 678)
             : (isRotated ? CGSize(width: expandedSize.height, height: expandedSize.width) : expandedSize)
-        canvasWindow?.traitOverrides.horizontalSizeClass = isFolded ? .compact : .regular
+        canvasWindow?.traitOverrides.horizontalSizeClass = isFolded || isCompactWidth ? .compact : .regular
         captureButton.accessibilityValue = canvasDescription
         resizeWindow()
     }
@@ -161,7 +167,7 @@ private final class AppleDebugLayoutController<Canvas: View>: UIViewController {
 
     private var canvasDescription: String {
         let idiom = host.traitCollection.userInterfaceIdiom == .phone ? "phone" : "pad"
-        return "\(Int(canvasSize.width))x\(Int(canvasSize.height)) \(idiom) \(isFolded ? "compact" : "regular")"
+        return "\(Int(canvasSize.width))x\(Int(canvasSize.height)) \(idiom) \(isFolded || isCompactWidth ? "compact" : "regular")"
     }
 
     private func splitGeometry(in controller: UIViewController) -> [String] {

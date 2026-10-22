@@ -35,9 +35,20 @@ struct AppleAlignedTabTitle: ViewModifier {
 
     func body(content: Content) -> some View {
         #if os(iOS)
-        legacyNavigationBackground(content)
-            .navigationTitle(phoneHero && !usesPadLandingChrome ? "" : title)
-            .toolbarTitleDisplayMode(isLive || (phoneHero && !usesPadLandingChrome) ? .inline : .inlineLarge)
+        if phoneHero && !usesPadLandingChrome {
+            content.navigationTitle("").navigationBarTitleDisplayMode(.inline)
+        } else if isLive {
+            legacyNavigationBackground(content)
+                .navigationTitle(title)
+                .navigationBarTitleDisplayMode(.inline)
+        } else {
+            // `.inlineLarge` puts the large title in the toolbar row instead of a
+            // second row beneath it, so "Discover" and "Live" sit right under the
+            // status bar (owner, 2026-09-18: "Live is too low… Discover is too low").
+            legacyNavigationBackground(content)
+                .navigationTitle(title)
+                .toolbarTitleDisplayMode(.inlineLarge)
+        }
         #elseif os(tvOS)
         content
         #else

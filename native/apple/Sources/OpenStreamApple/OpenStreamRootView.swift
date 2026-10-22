@@ -349,18 +349,20 @@ public struct OpenStreamRootView: View {
     }
 
     private var isLargeLayout: Bool {
-        AppleLayoutClass.isLarge(size: rootViewportSize, isRegularWidth: horizontalSizeClass == .regular)
+        AppleLayoutClass.usesLargeLayout(isPad: UIDevice.current.userInterfaceIdiom == .pad,
+            size: rootViewportSize, isRegularWidth: horizontalSizeClass == .regular)
     }
 
     private var expandsPhoneLayout: Bool {
         isLargeLayout && UIDevice.current.userInterfaceIdiom == .phone
     }
 
-    /// Preserve today's iPad portrait presentation while an expanded phone uses both panes.
+    /// Settings as a sidebar and a pane on a regular-width iPad in landscape
+    /// and on a large phone window; a single pushed stack everywhere else.
     private var settingsUsesSplitView: Bool {
         AppleLayoutClass.settingsUseSplitView(size: rootViewportSize,
             isRegularWidth: horizontalSizeClass == .regular,
-            preservesPortraitStack: UIDevice.current.userInterfaceIdiom == .pad)
+            isPad: UIDevice.current.userInterfaceIdiom == .pad)
     }
     #elseif os(visionOS)
     /// The iPad's rule: a sidebar and a pane in a regular, landscape window.

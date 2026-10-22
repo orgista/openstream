@@ -63,8 +63,7 @@ struct AppleLayoutClassTests {
     @Test(arguments: [CGSize(width: 744, height: 1133), CGSize(width: 900, height: 740),
                       CGSize(width: 740, height: 900), CGSize(width: 600, height: 600)])
     func expandedPhonesSplitSettings(_ size: CGSize) {
-        #expect(AppleLayoutClass.settingsUseSplitView(size: size, isRegularWidth: true,
-                                                      preservesPortraitStack: false))
+        #expect(AppleLayoutClass.settingsUseSplitView(size: size, isRegularWidth: true, isPad: false))
     }
 
     /// Upright, the stage spans the width and the list fills the height under
@@ -101,16 +100,52 @@ struct AppleLayoutClassTests {
     @Test func currentIPadAndSmallPhonePaneChoicesStayTheSame() {
         let portrait = CGSize(width: 1032, height: 1376)
         let landscape = CGSize(width: 1376, height: 1032)
-        #expect(AppleLayoutClass.settingsUseSplitView(size: portrait, isRegularWidth: true,
-                                                      preservesPortraitStack: true) == false)
-        #expect(AppleLayoutClass.settingsUseSplitView(size: landscape, isRegularWidth: true,
-                                                      preservesPortraitStack: true))
+        #expect(AppleLayoutClass.settingsUseSplitView(size: portrait, isRegularWidth: true, isPad: true) == false)
+        #expect(AppleLayoutClass.settingsUseSplitView(size: landscape, isRegularWidth: true, isPad: true))
         #expect(AppleLiveStagePolicy.sideBySide(isRegularWidth: true, size: portrait) == false)
         #expect(AppleLiveStagePolicy.sideBySide(isRegularWidth: true, size: landscape))
         #expect(AppleLayoutClass.settingsUseSplitView(size: CGSize(width: 430, height: 932),
-            isRegularWidth: false, preservesPortraitStack: false) == false)
+            isRegularWidth: false, isPad: false) == false)
         #expect(AppleLiveStagePolicy.sideBySide(isRegularWidth: true, size: CGSize(width: 430, height: 932),
                                                 expandsPhoneLayout: true) == false)
+    }
+
+    /// Every iPad window keeps the iPad's paths: Slide Over, 1/3 and 1/2 split
+    /// on an 11-inch iPad, and a short Stage Manager window are compact or
+    /// under 600 pt, yet still get the pad hero, bar, title page and Live.
+    @Test(arguments: [
+        ("Slide Over", 320.0, 1180.0, false),
+        ("11-inch 1/3 split", 320.0, 834.0, false),
+        ("11-inch 1/2 split", 590.0, 834.0, false),
+        ("13-inch 1/3 split", 375.0, 1032.0, false),
+        ("Short Stage Manager window", 900.0, 500.0, true),
+    ])
+    func everyIPadWindowKeepsTheIPadLayout(_ sample: (String, Double, Double, Bool)) {
+        let (name, width, height, regular) = sample
+        let size = CGSize(width: width, height: height)
+        #expect(AppleLayoutClass.isLarge(size: size, isRegularWidth: regular) == false, "\(name)")
+        let large = AppleLayoutClass.usesLargeLayout(isPad: true, size: size, isRegularWidth: regular)
+        #expect(large, "\(name)")
+        #expect(AppleHomePresentationPolicy.hero(platform: .iOS, compact: !regular,
+            landscape: width > height, isLargeLayout: large) == .pad, "\(name)")
+        #expect(AppleLayoutClass.usesPadLandingChrome(isLarge: large, isPhone: false), "\(name)")
+        #expect(AppleTrailerStartPolicy.iOSPlatform(isPhone: false, isLargeLayout: large) == .padOrMac, "\(name)")
+        #expect(AppleLiveChannelPickerPresentation.choose(isLargeLayout: large) == .bottomStrip, "\(name)")
+        #expect(AppleLayoutClass.settingsUseSplitView(size: size, isRegularWidth: regular, isPad: true)
+            == (regular && width > height), "\(name)")
+    }
+
+    /// A title page under a landscape player lays out at 932 x 430 and must
+    /// keep the phone's chrome (`usesPhoneTitleChrome` is `!isLargeLayout`).
+    @Test func phonesAreLargeOnlyWhileTheirWindowIs() {
+        #expect(AppleLayoutClass.usesLargeLayout(isPad: false, size: CGSize(width: 932, height: 430),
+                                                 isRegularWidth: true) == false)
+        #expect(AppleLayoutClass.usesLargeLayout(isPad: false, size: CGSize(width: 669, height: 951),
+                                                 isRegularWidth: true))
+        #expect(AppleLayoutClass.usesLargeLayout(isPad: false, size: CGSize(width: 466, height: 678),
+                                                 isRegularWidth: false) == false)
+        #expect(AppleLayoutClass.usesLargeLayout(isPad: false, size: CGSize(width: 956, height: 440),
+                                                 isRegularWidth: true) == false)
     }
 
     @Test func resizingWithZeroTopInsetBypassesBarSettling() {

@@ -97,23 +97,13 @@ final class AppleiOSStubSmokeUITests: OpenStreamUITestCase {
             add(hierarchy)
             captureIndex += 1
         }
-        func tab(_ title: String) {
-            let tabBarButton = app.tabBars.buttons[title].firstMatch
-            let railButton = app.toolbars.buttons[title].firstMatch
-            let available = expectation(for: NSPredicate { _, _ in
-                (tabBarButton.exists && tabBarButton.isHittable) || (railButton.exists && railButton.isHittable)
-            }, evaluatedWith: nil)
-            XCTAssertEqual(XCTWaiter.wait(for: [available], timeout: 15), .completed)
-            let button = tabBarButton.exists && tabBarButton.isHittable ? tabBarButton : railButton
-            button.tap()
-        }
         for shape in ["wide", "portrait"] {
             if shape == "portrait" {
                 app.buttons["debug.layout.rotate"].firstMatch.tap()
             }
             let size = shape == "wide" ? "951x669" : "669x951"
             XCTAssertTrue((captureButton.value as? String ?? "").contains(size + " phone regular"))
-            tab("Discover")
+            tapTab("Discover")
             let details = app.buttons["home.featured.details"].firstMatch
             XCTAssertTrue(details.waitForExistence(timeout: 60))
             // A phone keeps its landing chrome at any size (owner 2026-10-20): no bar, round Search over the art.
@@ -134,13 +124,13 @@ final class AppleiOSStubSmokeUITests: OpenStreamUITestCase {
             app.buttons["detail.back"].firstMatch.tap()
             XCTAssertTrue(details.waitForExistence(timeout: 10), "Back must return to Discover")
 
-            tab("Library")
+            tapTab("Library")
             XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "library.title."))
                 .firstMatch.waitForExistence(timeout: 60))
             XCTAssertFalse(app.navigationBars["Library"].exists)
             XCTAssertTrue(app.buttons["library.compact-title.search"].firstMatch.isHittable)
             capture("duo-large-\(shape)-library")
-            tab("Live")
+            tapTab("Live")
             let stage = app.descendants(matching: .any)["live.stage.player"].firstMatch
             XCTAssertTrue(stage.waitForExistence(timeout: 60))
             let guide = app.buttons["live.guide"].firstMatch
@@ -158,7 +148,7 @@ final class AppleiOSStubSmokeUITests: OpenStreamUITestCase {
             let playing = expectation(for: NSPredicate(format: "value == %@", "Playing"), evaluatedWith: stage)
             XCTAssertEqual(XCTWaiter.wait(for: [playing], timeout: 30), .completed)
             capture("duo-large-\(shape)-live")
-            tab("Settings")
+            tapTab("Settings")
             let sources = app.buttons["Sources"].firstMatch
             XCTAssertTrue(sources.waitForExistence(timeout: 30))
             XCTAssertTrue(sources.isHittable)
@@ -172,7 +162,7 @@ final class AppleiOSStubSmokeUITests: OpenStreamUITestCase {
             XCTAssertEqual(splitResult, .completed, "Settings must keep both panes beside each other")
             XCTAssertGreaterThanOrEqual(app.navigationBars.count, 2)
         }
-        tab("Discover")
+        tapTab("Discover")
         app.buttons["home.featured.details"].firstMatch.tap()
         XCTAssertTrue(app.buttons["detail.play"].firstMatch.waitForExistence(timeout: 30))
         app.buttons["debug.layout.fold"].firstMatch.tap()
@@ -183,6 +173,70 @@ final class AppleiOSStubSmokeUITests: OpenStreamUITestCase {
         XCTAssertTrue((captureButton.value as? String ?? "").contains("669x951 phone regular"))
         XCTAssertTrue(app.buttons["detail.play"].firstMatch.waitForExistence(timeout: 15))
         capture("duo-unfolded-title")
+    }
+
+    /// Every iPad window keeps the iPad's layout: a 1/3 split (compact width,
+    /// under 600 pt) gets the bar over the landing hero, the title page's
+    /// toolbar Back, the iPad's Live page and a pushed Settings stack.
+    func testCompactIPadWindowKeepsThePadLayout() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            throw XCTSkip("iPad split-window proof")
+        }
+        app.launchArguments = Self.stubbedLaunchArguments + ["-OpenStreamDebugLayoutSize", "375,1032,compact",
+                                                            "-OpenStreamVisionScreen", "discover"]
+        configureFixtureLaunch(app)
+        app.launch()
+        let captureButton = app.buttons["debug.layout.capture"].firstMatch
+        XCTAssertTrue(captureButton.waitForExistence(timeout: 30))
+        XCTAssertTrue((captureButton.value as? String ?? "").contains("375x1032 pad compact"))
+        func capture(_ name: String) {
+            captureButton.tap()
+            let record = XCTAttachment(string: captureButton.value as? String ?? "")
+            record.name = name + "-canvas"
+            record.lifetime = .keepAlways
+            add(record)
+            let hierarchy = XCTAttachment(string: app.debugDescription)
+            hierarchy.name = name + "-elements"
+            hierarchy.lifetime = .keepAlways
+            add(hierarchy)
+        }
+        let details = app.buttons["home.featured.details"].firstMatch
+        XCTAssertTrue(details.waitForExistence(timeout: 60))
+        XCTAssertTrue(app.navigationBars["Discover"].exists, "An iPad split keeps the bar over the hero")
+        XCTAssertFalse(app.buttons["discover.compact-title.search"].exists)
+        capture("ipad-split-discover")
+        details.tap()
+        XCTAssertTrue(app.buttons["detail.play"].firstMatch.waitForExistence(timeout: 30))
+        let back = app.navigationBars.buttons["detail.back"].firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 10), "The iPad title page keeps Back in its toolbar")
+        capture("ipad-split-title")
+        back.tap()
+        XCTAssertTrue(details.waitForExistence(timeout: 10))
+
+        tapTab("Library")
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "library.title."))
+            .firstMatch.waitForExistence(timeout: 60))
+        XCTAssertTrue(app.navigationBars["Library"].exists)
+        capture("ipad-split-library")
+        tapTab("Live")
+        XCTAssertTrue(app.descendants(matching: .any)["live.stage.player"].firstMatch.waitForExistence(timeout: 60))
+        XCTAssertTrue(app.buttons["live.guide"].firstMatch.exists)
+        capture("ipad-split-live")
+        tapTab("Settings")
+        XCTAssertTrue(app.buttons["Sources"].firstMatch.waitForExistence(timeout: 30))
+        XCTAssertFalse(app.buttons["Media Server"].exists, "A compact iPad window pushes Settings pages")
+        capture("ipad-split-settings")
+    }
+
+    private func tapTab(_ title: String) {
+        let tabBarButton = app.tabBars.buttons[title].firstMatch
+        let railButton = app.toolbars.buttons[title].firstMatch
+        let available = expectation(for: NSPredicate { _, _ in
+            (tabBarButton.exists && tabBarButton.isHittable) || (railButton.exists && railButton.isHittable)
+        }, evaluatedWith: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [available], timeout: 15), .completed)
+        let button = tabBarButton.exists && tabBarButton.isHittable ? tabBarButton : railButton
+        button.tap()
     }
 
     func testDuoNativeScreensAndTransitions() async throws {
