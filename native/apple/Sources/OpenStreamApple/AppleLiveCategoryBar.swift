@@ -53,7 +53,7 @@ struct AppleLiveCategoryBar: View {
             if let onGuide {
                 Button(action: onGuide) {
                     Image(systemName: "tablecells")
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(.body)
                         .foregroundStyle(.secondary)
                         .frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
                         .contentShape(.rect)
@@ -65,7 +65,7 @@ struct AppleLiveCategoryBar: View {
             }
             Button(action: onSearch) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.body)
                     .foregroundStyle(.secondary)
                     .frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
                     .contentShape(.rect)
@@ -76,7 +76,10 @@ struct AppleLiveCategoryBar: View {
             .accessibilityLabel("Search Channels")
             .accessibilityIdentifier("live.search")
         }
-        .frame(height: categoryHeight)
+        // Chips and glyphs share one 44 pt row, so the glyphs sit on the labels' line.
+        .frame(height: AppleDesignTokens.minimumActionSize)
+        .padding(.top, usesParamountStyle ? AppleLiveStagePolicy.phoneCategoryRowTop : 0)
+        .frame(height: categoryHeight, alignment: usesParamountStyle ? .top : .center)
         .background(usesParamountStyle ? AppleLiveStagePolicy.phonePanel : .black)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("live.categories")
@@ -97,14 +100,14 @@ struct AppleLiveCategoryBar: View {
         } label: {
             Group {
                 if usesParamountStyle {
-                    // The underline is as wide as the label, not the 44 pt tap frame.
-                    tabLabel(tab, isSelected: isSelected)
-                        .padding(.bottom, AppleLiveStagePolicy.phoneCategoryUnderlineGap
-                            + AppleLiveStagePolicy.phoneCategoryUnderlineHeight)
+                    // The underline is as wide as the label, not the 44 pt tap frame, and hangs
+                    // under it without moving the label off the row's centre line.
+                    paramountLabel(tab, isSelected: isSelected)
                         .overlay(alignment: .bottom) {
                             underline(height: AppleLiveStagePolicy.phoneCategoryUnderlineHeight, isSelected: isSelected)
+                                .offset(y: AppleLiveStagePolicy.phoneCategoryUnderlineGap
+                                    + AppleLiveStagePolicy.phoneCategoryUnderlineHeight)
                         }
-                        // Centred in the strip, the label sits where Paramount+ puts it.
                         .frame(minHeight: AppleDesignTokens.minimumActionSize)
                 } else {
                     tabLabel(tab, isSelected: isSelected)
@@ -127,6 +130,23 @@ struct AppleLiveCategoryBar: View {
             .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
             .lineLimit(1)
             .fixedSize()
+    }
+
+    /// Paramount+'s label: callout size, semibold only when selected. The width is the semibold
+    /// one either way, so choosing a category never nudges the labels after it.
+    private func paramountLabel(_ tab: String, isSelected: Bool) -> some View {
+        Text(tab)
+            .font(.callout.weight(.semibold))
+            .lineLimit(1)
+            .fixedSize()
+            .hidden()
+            .overlay(alignment: .leading) {
+                Text(tab)
+                    .font(isSelected ? .callout.weight(.semibold) : .callout)
+                    .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+                    .lineLimit(1)
+                    .fixedSize()
+            }
     }
 
     private func underline(height: CGFloat, isSelected: Bool) -> some View {

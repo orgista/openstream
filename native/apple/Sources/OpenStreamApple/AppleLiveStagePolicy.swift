@@ -12,6 +12,10 @@ enum AppleLiveStagePolicy {
     /// carries the category strip and the rows; the strip is 81 pt from the stage to the first row,
     /// its underline 1 pt, as wide as the label, 6 pt under it; labels about 40 pt apart.
     static let phoneCategoryHeight: CGFloat = 81
+    /// The strip's 44 pt row of chips and glyphs starts here, putting the labels' centre 38 pt
+    /// below the stage: Paramount+ sets its labels' cap middle at 37.5 pt, baseline 43 pt, the
+    /// underline at 55 pt (DevPlus capture, 2026-10-20, measured 2026-10-22).
+    static let phoneCategoryRowTop: CGFloat = 16
     static let phoneCategorySpacing: CGFloat = 40
     static let phoneCategoryUnderlineHeight: CGFloat = 1
     static let phoneCategoryUnderlineGap: CGFloat = 6

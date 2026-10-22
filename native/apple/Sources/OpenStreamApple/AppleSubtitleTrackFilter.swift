@@ -3,7 +3,8 @@ import Foundation
 /// Subtitle auto-selection and the captions menu, under one language policy.
 ///
 /// Tagged tracks match the viewer's preferred languages. Untagged tracks are
-/// separate manual choices named "Unknown" and never qualify for auto-selection.
+/// separate manual choices ("CC1", "Subtitles 2") and never qualify for
+/// auto-selection.
 public enum AppleSubtitleTrackFilter: Sendable {
     /// The languages every captions menu works in, as two-letter codes in
     /// preference order: the given list, or the device's primary language
@@ -22,9 +23,11 @@ public enum AppleSubtitleTrackFilter: Sendable {
     }
 
     /// `und`, `zxx`, `mul`, `mis` and an empty tag say nothing about the
-    /// language, so they never match a preference.
+    /// language, so they never match a preference. Neither does a word no
+    /// language code reduces to: a live playlist's "unknown" or "undefined"
+    /// was a language row named after itself (owner 2026-10-22, "(unknown)").
     static func isLanguage(_ code: String) -> Bool {
-        !code.isEmpty && !["und", "zxx", "mul", "mis"].contains(code)
+        !code.isEmpty && code.count <= 3 && !["und", "zxx", "mul", "mis"].contains(code)
     }
 
     /// The single auto-select candidate: the best track of the first
@@ -65,7 +68,7 @@ public enum AppleSubtitleTrackFilter: Sendable {
         /// The track this row selects: the active one when it belongs to the
         /// row, so the check mark stays on what is drawn; otherwise the best.
         public let track: ApplePlaybackTrack
-        /// "English", "English (SDH)", or numbered "Unknown" manual choices.
+        /// "English", "English (SDH)", "English (CC)", or an untagged "CC1" / "Subtitles 2".
         public let title: String
         /// Every track the row stands for, the chosen one included.
         public let memberIDs: [Int]
@@ -98,8 +101,9 @@ public enum AppleSubtitleTrackFilter: Sendable {
     /// track over a sidecar file, the container default, then the lower id.
     /// A variant gets its own row, named with its kind — "English (SDH)",
     /// "English (Forced)" — only when a plain track of that language exists
-    /// too; alone, it simply is "English". Effective languages appear first,
-    /// followed by one separate Unknown choice per untagged track.
+    /// too; alone, it simply is "English". Closed captions always say so:
+    /// "English (CC)". Effective languages appear first, followed by one
+    /// separate choice per untagged track (`untaggedTitles`).
     public static func menuChoices(
         _ tracks: [ApplePlaybackTrack],
         preferredLanguages: [String],
@@ -107,11 +111,47 @@ public enum AppleSubtitleTrackFilter: Sendable {
     ) -> [MenuChoice] {
         let wanted = effectiveLanguages(preferredLanguages)
         let tagged = tracks.filter { wanted.contains(languageKey(of: $0)) }
-        let unknown = tracks.filter { languageKey(of: $0).isEmpty }.sorted { $0.id < $1.id }
-        let manual = unknown.enumerated().map { index, track in
-            MenuChoice(track: track, title: unknown.count == 1 ? "Unknown" : "Unknown \(index + 1)", memberIDs: [track.id])
+        let untagged = tracks.filter { languageKey(of: $0).isEmpty }.sorted { $0.id < $1.id }
+        let manual = zip(untagged, untaggedTitles(untagged)).map { track, title in
+            MenuChoice(track: track, title: title, memberIDs: [track.id])
         }
         return grouped(tagged, wanted: wanted, activeTrackID: activeTrackID) + manual
+    }
+
+    /// Names for tracks with no language tag (owner 2026-10-22: Live read
+    /// "(unknown)"). A broadcast caption is its service, "CC1"–"CC4", from
+    /// the track's own name when it carries one, else the next free number;
+    /// anything else is "Subtitles", numbered when there are several. A
+    /// muxer's title never names the language (owner 2026-10-14). Two tracks
+    /// naming the same service read "CC1" and "CC1 (2)".
+    static func untaggedTitles(_ tracks: [ApplePlaybackTrack]) -> [String] {
+        var usedServices = Set(tracks.compactMap(captionService))
+        let subtitleCount = tracks.filter { kind(of: $0) != .closedCaptions }.count
+        var subtitleNumber = 0
+        var seen: [String: Int] = [:]
+        return tracks.map { track -> String in
+            if kind(of: track) == .closedCaptions {
+                if let service = captionService(track) { return "CC\(service)" }
+                var service = 1
+                while usedServices.contains(service) { service += 1 }
+                usedServices.insert(service)
+                return "CC\(service)"
+            }
+            subtitleNumber += 1
+            return subtitleCount == 1 ? "Subtitles" : "Subtitles \(subtitleNumber)"
+        }.map { title in
+            let count = (seen[title] ?? 0) + 1
+            seen[title] = count
+            return count == 1 ? title : "\(title) (\(count))"
+        }
+    }
+
+    /// The CEA-608 service a caption track names itself after ("CC1", "cc3").
+    private static func captionService(_ track: ApplePlaybackTrack) -> Int? {
+        guard kind(of: track) == .closedCaptions,
+              let match = track.title.range(of: #"\bCC[1-4]\b"#, options: [.regularExpression, .caseInsensitive])
+        else { return nil }
+        return track.title[match].last?.wholeNumberValue
     }
 
     /// The captions menu's "More…": every tagged language the stream has
@@ -151,10 +191,12 @@ public enum AppleSubtitleTrackFilter: Sendable {
             members[key, default: []].append(track)
         }
         // A language with no plain row promotes its best variant to it.
+        // Closed captions keep their "(CC)": a broadcast's only English track
+        // is still captions, not subtitles.
         let languages = Set(order.map(\.language))
         var promoted: [String: MenuKind] = [:]
         for language in languages where !order.contains(Key(language: language, kind: .full)) {
-            promoted[language] = order.filter { $0.language == language }.map(\.kind).min()
+            promoted[language] = order.filter { $0.language == language && $0.kind != .closedCaptions }.map(\.kind).min()
         }
         // Languages: preferred first, then one holding a default track, then
         // by lowest id — the order the stream lists them in.
@@ -306,7 +348,7 @@ public enum AppleSubtitleTrackFilter: Sendable {
     }
 
     public static func menuLabel(for track: ApplePlaybackTrack) -> String {
-        guard !languageKey(of: track).isEmpty else { return "Unknown" }
+        guard !languageKey(of: track).isEmpty else { return "Subtitles" }
         let code = normalized(track.language ?? "")
         if !code.isEmpty, let loc = Locale.current.localizedString(forLanguageCode: code), !loc.isEmpty {
             return loc.capitalized

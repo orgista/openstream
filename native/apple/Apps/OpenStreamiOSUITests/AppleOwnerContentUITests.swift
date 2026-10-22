@@ -138,6 +138,22 @@ final class AppleOwnerContentUITests: OpenStreamUITestCase {
         closePlayer()
     }
 
+    /// Owner 2026-10-22: opening Live the first time waited on the channels.
+    /// Discover first, for the launch prefetch's time, then Live. A timing log,
+    /// not a gate: it passes at any speed, and the measurement is the app's
+    /// trace line "live rows N shown Xms after opening".
+    func testDLiveFirstOpenTimeToRows() {
+        launch([])
+        Thread.sleep(forTimeInterval: 12)
+        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "guide.play."))
+        let started = Date()
+        tab("Live")
+        let shown = rows.firstMatch.waitForExistence(timeout: 120)
+        print("OWNER-CONTENT live first rows ms=\(Int(Date().timeIntervalSince(started) * 1000)) shown=\(shown)")
+        attach("d-live-first-rows")
+        check(shown, "d-no-rows", "Live showed no channel rows")
+    }
+
     /// Discover's rows load from the media servers; a title page shows its trailer.
     func testDDiscoverRowsAndTrailer() {
         launch([])

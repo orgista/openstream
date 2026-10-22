@@ -1171,13 +1171,17 @@ struct AppleTransportTrackMenu: View {
     /// Each row reports itself so the chrome stays up while the menu is open.
     var onMenuItemAppeared: () -> Void = {}
     var onMenuItemDisappeared: () -> Void = {}
+    #if os(iOS)
+    var symbolConfiguration = AppleTransportMenuButton.defaultSymbolConfiguration
+    #endif
 
     var body: some View {
         #if os(iOS)
         AppleTransportMenuButton(title: "Audio & Subtitles",
             systemImage: selectedSubtitleID == nil ? "captions.bubble" : "captions.bubble.fill",
             identifier: "player.captions", value: selectedSubtitleID == nil ? "Subtitles off" : "Subtitles on",
-            menu: uiMenu, onOpen: onMenuItemAppeared, onClose: onMenuItemDisappeared)
+            menu: uiMenu, onOpen: onMenuItemAppeared, onClose: onMenuItemDisappeared,
+            symbolConfiguration: symbolConfiguration)
             .frame(width: AppleDesignTokens.minimumActionSize, height: AppleDesignTokens.minimumActionSize)
         #else
         Menu {
@@ -1300,6 +1304,8 @@ struct AppleTransportTrackMenu: View {
 
 #if os(iOS)
 struct AppleTransportMenuButton: UIViewRepresentable {
+    static let defaultSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 22)
+
     let title: String
     let systemImage: String
     let identifier: String
@@ -1307,6 +1313,7 @@ struct AppleTransportMenuButton: UIViewRepresentable {
     let menu: UIMenu
     let onOpen: () -> Void
     let onClose: () -> Void
+    var symbolConfiguration = defaultSymbolConfiguration
 
     func makeUIView(context: Context) -> AppleTransportUIButton {
         let button = AppleTransportUIButton(type: .system)
@@ -1316,8 +1323,7 @@ struct AppleTransportMenuButton: UIViewRepresentable {
     }
 
     func updateUIView(_ button: AppleTransportUIButton, context: Context) {
-        button.setImage(UIImage(systemName: systemImage,
-                                withConfiguration: UIImage.SymbolConfiguration(pointSize: 22)), for: .normal)
+        button.setImage(UIImage(systemName: systemImage, withConfiguration: symbolConfiguration), for: .normal)
         button.accessibilityLabel = title
         button.accessibilityIdentifier = identifier
         button.accessibilityValue = value

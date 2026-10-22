@@ -116,7 +116,7 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         menuShot.name = "caption-\(name)-selection"; menuShot.lifetime = .keepAlways; add(menuShot)
         XCTAssertTrue(choice.waitForExistence(timeout: 5), "Requested embedded subtitle track is missing")
         if name == "ff-pgs-dts.m2ts" {
-            XCTAssertTrue(choice.label.contains("Unknown"), "Untagged PGS must be listed as Unknown")
+            XCTAssertTrue(choice.label.hasPrefix("Subtitles"), "Untagged PGS must be listed as Subtitles")
         }
         choice.tap()
         func seekTextCue() {
@@ -774,8 +774,20 @@ final class AppleiOSUITests: OpenStreamUITestCase {
         XCTAssertTrue(all.waitForExistence(timeout: 30))
         let barFrame = bar.frame
         let allFrame = all.frame
-        // Paramount+ on DevPlus: the labels sit in the middle of the strip, not at its top.
-        XCTAssertEqual(allFrame.midY, barFrame.midY, accuracy: 1, "chip \(allFrame) in strip \(barFrame)")
+        // Paramount+ on DevPlus: the labels' centre 37.5 pt below the stage, at the rows' 16 pt inset.
+        XCTAssertEqual(allFrame.midY - barFrame.minY, 38, accuracy: 1, "chip \(allFrame) in strip \(barFrame)")
+        XCTAssertEqual(allFrame.minX, barFrame.minX + 16, accuracy: 1, "chip \(allFrame) in strip \(barFrame)")
+        // Owner 2026-10-22: the strip "looks too big and not aligned". Its glyphs share the labels' line.
+        for id in ["live.guide", "live.search"] {
+            let glyph = app.buttons[id].firstMatch
+            XCTAssertEqual(glyph.frame.midY, allFrame.midY, accuracy: 0.5, "\(id) \(glyph.frame) vs \(allFrame)")
+            XCTAssertEqual(glyph.frame.height, allFrame.height, accuracy: 0.5, "\(id) \(glyph.frame)")
+        }
+        let stripFrames = XCTAttachment(string: "strip: \(barFrame)\nAll: \(allFrame)\nguide: "
+            + "\(app.buttons["live.guide"].firstMatch.frame)\nsearch: \(app.buttons["live.search"].firstMatch.frame)")
+        stripFrames.name = "live-strip-frames"
+        stripFrames.lifetime = .keepAlways
+        add(stripFrames)
         attach("live-categories-before-scroll")
         for _ in 0..<3 {
             list.swipeUp()
@@ -812,6 +824,91 @@ final class AppleiOSUITests: OpenStreamUITestCase {
             XCTAssertEqual(favorites.frame.minY, before.minY, accuracy: 1)
             attach("live-categories-favorites-selected")
         }
+    }
+
+    /// Owner 2026-10-22: "live video player icons are not the same size … a bit jank". Every glyph
+    /// on the inline stage and in the full-screen player has the same 44 pt target; a row shares one
+    /// centre line, with even gaps where the glyphs sit together.
+    func testLivePlayerGlyphsShareOneSizeAndLine() throws {
+        guard UIDevice.current.userInterfaceIdiom == .phone else {
+            throw XCTSkip("Phone Live layout")
+        }
+        continueAfterFailure = true
+        app.launchArguments = ["-OpenStreamMuteAudio", "YES", "-OpenStreamHoldPlayerChrome", "YES"]
+        launch(screen: "live")
+        let player = app.descendants(matching: .any).matching(identifier: "live.stage.player").firstMatch
+        XCTAssertTrue(player.waitForExistence(timeout: 60))
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "Playing"), object: player)], timeout: 60), .completed)
+        XCTAssertTrue(revealInlineLiveControls(timeout: 60))
+        let inline = glyphFrames(["player.mute", "player.airplay", "player.fullscreen"], within: player.frame)
+        attach("live-glyphs-inline")
+        assertGlyphRow(inline, name: "inline", evenGaps: true)
+
+        app.buttons["player.fullscreen"].firstMatch.tap()
+        let close = app.buttons["player.close"].firstMatch
+        XCTAssertTrue(close.waitForExistence(timeout: 10))
+        XCTAssertTrue(revealPlayerControls())
+        attach("live-glyphs-full-screen")
+        // Picture in Picture and Unmute are offered only on a PiP-capable route and while muted by the viewer.
+        let top = glyphFrames(["player.close", "player.options"], within: app.frame)
+        let bottom = glyphFrames(["player.airplay", "player.captions", "player.channels"], within: app.frame)
+        let side = glyphFrames(["live.player.next", "live.player.previous"], within: app.frame)
+        assertGlyphRow(top, name: "full-screen top", evenGaps: false)
+        assertGlyphRow(bottom, name: "full-screen bottom", evenGaps: true)
+        assertGlyphRow(side, name: "full-screen channel step", evenGaps: false, sameLine: false)
+        let frames = XCTAttachment(string: (inline + top + bottom + side).map { "\($0.id): \($0.frame)" }
+            .joined(separator: "\n"))
+        frames.name = "live-glyph-frames"
+        frames.lifetime = .keepAlways
+        add(frames)
+        close.tap()
+    }
+
+    private func glyphFrames(_ ids: [String], within bounds: CGRect) -> [(id: String, frame: CGRect)] {
+        ids.compactMap { id in
+            let found = app.descendants(matching: .any).matching(identifier: id).allElementsBoundByIndex
+                .first { !$0.frame.isEmpty && bounds.contains(CGPoint(x: $0.frame.midX, y: $0.frame.midY)) }
+            XCTAssertNotNil(found, "\(id) is not on screen within \(bounds)")
+            return found.map { (id, $0.frame) }
+        }
+    }
+
+    private func assertGlyphRow(_ row: [(id: String, frame: CGRect)], name: String, evenGaps: Bool,
+                                sameLine: Bool = true) {
+        XCTAssertGreaterThanOrEqual(row.count, 2, "\(name): \(row)")
+        guard let first = row.first else { return }
+        for glyph in row {
+            XCTAssertEqual(glyph.frame.width, 44, accuracy: 0.5, "\(name) \(glyph.id) \(glyph.frame)")
+            XCTAssertEqual(glyph.frame.height, 44, accuracy: 0.5, "\(name) \(glyph.id) \(glyph.frame)")
+            if sameLine {
+                XCTAssertEqual(glyph.frame.midY, first.frame.midY, accuracy: 0.5, "\(name) \(glyph.id) \(glyph.frame)")
+            }
+        }
+        guard evenGaps else { return }
+        let sorted = row.map(\.frame).sorted { $0.minX < $1.minX }
+        let gaps = zip(sorted, sorted.dropFirst()).map { $1.minX - $0.maxX }
+        for gap in gaps { XCTAssertEqual(gap, gaps[0], accuracy: 0.5, "\(name) gaps \(gaps)") }
+    }
+
+    /// Owner 2026-10-22: rows "loading like that". A fresh container and a
+    /// playlist that answers 6 s late: the list area shows one "Loading
+    /// Channels" spinner, nothing else spins, then the strip and rows replace it.
+    func testLiveShowsOneLoadingStateWhileThePlaylistLoads() {
+        app.launchArguments = ["-OpenStreamMuteAudio", "YES", "-OpenStreamResetOnLaunch", "YES",
+                               "-OpenStreamStubPlaylistStall", "6"]
+        launch(screen: "live")
+        let loading = app.descendants(matching: .any).matching(identifier: "live.channels.loading").firstMatch
+        XCTAssertTrue(loading.waitForExistence(timeout: 15), "No loading state while the playlist stalls")
+        attach("live-loading-state")
+        XCTAssertTrue(app.staticTexts["Loading Channels"].exists || loading.label == "Loading Channels")
+        let others = app.progressIndicators.matching(NSPredicate(format: "identifier != %@", "live.channels.loading"))
+        XCTAssertEqual(others.count, 0, "Only the list's spinner while loading")
+        XCTAssertFalse(app.descendants(matching: .any)["live.categories"].exists, "No strip before there are channels")
+        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "guide.play."))
+        XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 30))
+        XCTAssertFalse(loading.exists)
+        XCTAssertTrue(app.descendants(matching: .any)["live.categories"].exists)
     }
 
     func testLiveGuideSheetOpensAndDismisses() {
@@ -3797,8 +3894,9 @@ final class AppleiOSUITests: OpenStreamUITestCase {
     #if targetEnvironment(simulator)
     // AVRoutePickerView exposes its system button on the simulator without
     // presenting receivers. Discovery and routing need a physical device.
+    // Live's AirPlay is itself the `player.airplay` button (`AppleLiveRouteButton`).
     private func crawlSimulatorAirPlayIsAvailable(_ button: XCUIElement) -> Bool {
-        let picker = app.otherElements["player.airplay"].firstMatch
+        let picker = app.descendants(matching: .any).matching(identifier: "player.airplay").firstMatch
         let available = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             self.app.state == .runningForeground && picker.exists && button.exists
                 && button.label == "AirPlay" && button.isEnabled
