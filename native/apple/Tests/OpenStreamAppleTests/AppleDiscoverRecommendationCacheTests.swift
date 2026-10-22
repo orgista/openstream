@@ -71,15 +71,14 @@ struct AppleDiscoverRecommendationCacheTests {
         #expect(await AppleDiscoverRecommendationCache.restore(key, sources: [source()], cache: cache) == nil)
     }
 
-    @Test func settledCatalogDoesNotKeepARecommendationSkeleton() {
-        #expect(!AppleDiscoverView.showsLoadingContent(hasContent: true, hasRecommendations: false, isLoading: false))
-        #expect(!AppleDiscoverView.showsLoadingContent(hasContent: true, hasRecommendations: true, isLoading: false))
+    @Test(arguments: [false, true])
+    func cachedCatalogRemainsVisibleWhileRecommendationsPrepare(isLoading: Bool) {
+        #expect(!AppleDiscoverView.showsLoadingContent(hasContent: true, isLoading: isLoading))
     }
 
-    @Test func initialPreparationKeepsTheSkeletonUntilAnAnswerArrives() {
-        #expect(AppleDiscoverView.showsLoadingContent(hasContent: true, hasRecommendations: false, isLoading: true))
-        #expect(AppleDiscoverView.showsLoadingContent(hasContent: false, hasRecommendations: false, isLoading: true))
-        #expect(!AppleDiscoverView.showsLoadingContent(hasContent: true, hasRecommendations: true, isLoading: true))
+    @Test(arguments: [false, true])
+    func onlyAnEmptyLoadingPageShowsTheSkeleton(isLoading: Bool) {
+        #expect(AppleDiscoverView.showsLoadingContent(hasContent: false, isLoading: isLoading) == isLoading)
     }
 
     private func source() -> AppleSource {

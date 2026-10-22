@@ -268,21 +268,20 @@ import Testing
 
     // MARK: Geometry
 
-    /// Owner 2026-10-14: full-bleed again, as 0d100ce had it: from the top
-    /// edge to 70 % of the screen, held so ≥ 90 pt of the first row peeks
-    /// above the tab bar. The width no longer sets the height.
+    /// Short phones share the title-page crop; taller phones preserve the
+    /// first-row peek, without letting width set the height.
     @Test(arguments: [
-        // iPhone SE (3rd gen): 667 pt, 49 pt tab bar: the peek clamp wins.
-        (AppleHomePhoneHeroLayout(containerHeight: 667, topInset: 116, bottomInset: 49), CGFloat(426)),
+        // iPhone SE (3rd gen): retain the title-page height and a smaller peek.
+        (AppleHomePhoneHeroLayout(containerHeight: 667, topInset: 116, bottomInset: 49), CGFloat(667 * 0.70), CGFloat(49.1)),
         // iPhone 16e: reserve the footer as well as the first-row peek.
-        (AppleHomePhoneHeroLayout(containerHeight: 844, topInset: 143, bottomInset: 83), CGFloat(569)),
+        (AppleHomePhoneHeroLayout(containerHeight: 844, topInset: 143, bottomInset: 83), CGFloat(569), CGFloat(90)),
         // iPhone 15 Pro Max: 932 pt: 70 % of the screen.
-        (AppleHomePhoneHeroLayout(containerHeight: 932, topInset: 155, bottomInset: 83), CGFloat(932 * 0.70)),
+        (AppleHomePhoneHeroLayout(containerHeight: 932, topInset: 155, bottomInset: 83), CGFloat(932 * 0.70), CGFloat(94.6)),
     ])
-    func thePhoneArtIsFullBleed(_ layout: AppleHomePhoneHeroLayout, expected: CGFloat) {
+    func thePhoneArtIsFullBleed(_ layout: AppleHomePhoneHeroLayout, expected: CGFloat, expectedPeek: CGFloat) {
         #expect(abs(layout.artHeight - expected) < 0.5)
         let peek = layout.containerHeight - layout.bottomInset - layout.heroHeight - AppleHomePhoneHeroLayout.firstRowLead
-        #expect(peek >= AppleHomePhoneHeroLayout.minimumRowPeek - 0.001)
+        #expect(abs(peek - expectedPeek) < 0.5)
         #expect(layout.topOverlap == layout.topInset + AppleHomePhoneHeroLayout.stackTopPadding)
     }
 

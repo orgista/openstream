@@ -471,6 +471,7 @@ public actor AppleTopShelfSnapshotWriter {
     private let trailerFiles: AppleTopShelfTrailerFiles?
     private let trailerDownloads: AppleTopShelfTrailerDownloads
     private let widgetArtwork = AppleWidgetHeroArtworkStore()
+    private let didChange: @Sendable () -> Void
 
     public init(containerProvider: @escaping @Sendable () -> URL? = {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup)
@@ -482,12 +483,14 @@ public actor AppleTopShelfSnapshotWriter {
 
     init(containerProvider: @escaping @Sendable () -> URL?, snapshotLocation: @escaping @Sendable (URL) -> URL,
          artwork: AppleTopShelfArtworkStore?, trailerFiles: AppleTopShelfTrailerFiles?,
-         trailerDownloads: AppleTopShelfTrailerDownloads = .shared) {
+         trailerDownloads: AppleTopShelfTrailerDownloads = .shared,
+         didChange: @escaping @Sendable () -> Void = { AppleTopShelfSnapshotWriter.notify() }) {
         self.containerProvider = containerProvider
         self.snapshotLocation = snapshotLocation
         self.artwork = artwork
         self.trailerFiles = trailerFiles
         self.trailerDownloads = trailerDownloads
+        self.didChange = didChange
     }
 
     static var defaultTrailerFiles: AppleTopShelfTrailerFiles? {
@@ -554,7 +557,7 @@ public actor AppleTopShelfSnapshotWriter {
                     // An already absent snapshot is a completed opt-out.
                 }
             }
-            notify()
+            didChange()
             return
         }
 
@@ -596,7 +599,7 @@ public actor AppleTopShelfSnapshotWriter {
             snapshot.widgetHero = hero
         }
         try Task.checkCancellation()
-        try save(snapshot, to: url)
+        try save(snapshot, to: url, notify: false)
         if let first = snapshot.continueWatching.first,
            let continued = shownContinued.first {
             let item = listed[continued.record.id] ?? Self.matchedItem(for: continued)
@@ -667,7 +670,7 @@ public actor AppleTopShelfSnapshotWriter {
         try save(current.withShelfVideos(videos), to: url)
     }
 
-    private func save(_ snapshot: AppleTopShelfSnapshot, to url: URL) throws {
+    func save(_ snapshot: AppleTopShelfSnapshot, to url: URL, notify: Bool = true) throws {
         let data = try JSONEncoder().encode(snapshot)
         #if os(iOS) || os(visionOS)
         try data.write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
@@ -675,7 +678,7 @@ public actor AppleTopShelfSnapshotWriter {
         // The tvOS extension opens the file separately, including while the app is inactive.
         try data.write(to: url, options: .atomic)
         #endif
-        notify()
+        if notify { didChange() }
     }
 
     /// The in-progress records Continue Watching can open, resolved as on
@@ -810,7 +813,7 @@ public actor AppleTopShelfSnapshotWriter {
         )
     }
 
-    private func notify() {
+    static func notify() {
         #if os(tvOS)
         TVTopShelfContentProvider.topShelfContentDidChange()
         #endif

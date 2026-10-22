@@ -203,7 +203,7 @@ func channelHealthLoadsMissingLineupBeforeLiveAndReusesItsCache() async throws {
     let store = AppleChannelHealthStore(history: AppleChannelHealthHistory(directory: root.appendingPathComponent("history")))
     #expect(store.lineup.isEmpty)
     #expect(await cache.snapshot(for: source.id) == nil)
-    await store.prepareLineupIfNeeded(settings: settings, sourceStore: sources, cache: cache, client: client)
+    await store.prepareLineupIfNeeded(settings: settings, sourceStore: sources, allowsNetwork: true, cache: cache, client: client)
     #expect(store.lineup.map(\.name) == ["Fixture News"])
     #expect(!store.isPreparingLineup)
     #expect(!store.isSweeping)
@@ -215,6 +215,44 @@ func channelHealthLoadsMissingLineupBeforeLiveAndReusesItsCache() async throws {
     }
     await cachedStore.prepareLineupIfNeeded(settings: settings, sourceStore: sources, cache: cache, client: noNetwork)
     #expect(cachedStore.lineup == store.lineup)
+}
+
+@MainActor @Test
+func channelHealthSettingsUsesOnlyCachedChannelsAndPreservesValidation() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let suite = "health-cache-only-\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let sources = AppleSourceStore(defaults: defaults, keychain: HealthLineupCredentials(),
+        documentsDirectory: root.appendingPathComponent("documents"))
+    let source = try sources.addIPTV(name: "Fixture TV", type: .m3u,
+        endpoint: "https://fixture.example/channels.m3u", username: "", password: "")
+    sources.recordValidationFailure(id: source.id, summary: "Can’t reach Fixture TV.")
+    let savedSources = sources.sources
+    let settings = AppleSettingsStore(defaults: defaults, keychain: HealthLineupCredentials())
+    settings.liveChannelScope = .providerLineup
+    settings.liveChannelPackage = .everything
+    let cache = AppleIPTVChannelCache(directory: root.appendingPathComponent("channels"))
+    let store = AppleChannelHealthStore(history: AppleChannelHealthHistory(directory: root.appendingPathComponent("history")))
+    let noNetwork = AppleIPTVClient { _ in
+        Issue.record("Opening Settings must not fetch a Live playlist")
+        throw URLError(.badServerResponse)
+    }
+
+    await store.prepareLineupIfNeeded(settings: settings, sourceStore: sources, cache: cache, client: noNetwork)
+    #expect(store.lineup.isEmpty)
+    #expect(await cache.snapshot(for: source.id) == nil)
+    #expect(sources.sources == savedSources)
+    #expect(!store.isPreparingLineup)
+
+    let channels = await cache.reconcileAndStore([
+        AppleIPTVChannel(id: "fixture-news", sourceID: source.id, name: "Fixture News",
+            streamURL: try #require(URL(string: "https://fixture.example/live/news.m3u8")))
+    ], for: source.id)
+    await store.prepareLineupIfNeeded(settings: settings, sourceStore: sources, cache: cache, client: noNetwork)
+    #expect(store.lineup == channels)
+    #expect(sources.sources == savedSources)
 }
 
 private struct HealthLineupCredentials: AppleCredentialStoring {
