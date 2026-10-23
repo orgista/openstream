@@ -200,6 +200,49 @@ final class AppleTVStubSmokeUITests: OpenStreamUITestCase {
         XCTAssertTrue(poster.waitForExistence(timeout: 30), "Discover did not come back")
     }
 
+    /// Build 20 B4: nothing under the title row took focus, so Down from Play
+    /// stayed on Play and the synopsis sat below the screen. Down now lands on
+    /// the synopsis and the page scrolls it into view.
+    func testDownFromPlayScrollsTheSynopsisIntoView() {
+        configureFixtureLaunch(app)
+        app.launch()
+        XCTAssertTrue(focusedElement.waitForExistence(timeout: 60), "Discover never took focus")
+        XCTAssertTrue(focus(Self.serverShelfItem("jf-movie-5"), pressing: .down), "The fixture poster never took focus")
+        remote.press(.select)
+        XCTAssertTrue(element("detail.play").waitForExistence(timeout: 30), "the title page never opened")
+        XCTAssertTrue(focus("detail.play", pressing: .right))
+
+        XCTAssertTrue(focus("detail.synopsis", pressing: .down, limit: 3),
+                      "Down from Play never reached the synopsis; focus sits on '\(focusedElement.identifier)'")
+        let synopsis = element("detail.synopsis")
+        let screen = app.windows.firstMatch.frame
+        let settled = NSPredicate { _, _ in screen.contains(synopsis.frame) }
+        let onScreen = XCTNSPredicateExpectation(predicate: settled, object: nil)
+        XCTAssertEqual(XCTWaiter().wait(for: [onScreen], timeout: 5), .completed,
+                       "the synopsis took focus but stayed off screen at \(synopsis.frame)")
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "title-page-synopsis-focused"
+        shot.lifetime = .keepAlways
+        add(shot)
+
+        XCTAssertTrue(focus("detail.play", pressing: .up, limit: 3), "Up from the synopsis did not return to Play")
+    }
+
+    /// A series page keeps the owner's 2026-09-14 order: Down from Play goes
+    /// to Episodes, with no stop on the synopsis.
+    func testDownFromPlayOnASeriesGoesStraightToEpisodes() {
+        app.launchArguments += ["-OpenStreamVisionScreen", "detail"]
+        configureFixtureLaunch(app)
+        app.launch()
+        XCTAssertTrue(element("detail.episodes").waitForExistence(timeout: 30), "the series page never showed Episodes")
+        XCTAssertTrue(focus("detail.play", pressing: .right))
+        remote.press(.down)
+        let inEpisodes = element("detail.episodes").descendants(matching: .any)
+            .matching(NSPredicate(format: "hasFocus == true")).firstMatch
+        XCTAssertTrue(inEpisodes.waitForExistence(timeout: 3),
+                      "Down from Play did not reach Episodes; focus sits on '\(focusedElement.identifier)'")
+    }
+
     /// Moves focus one way until `identifier` holds it.
     @discardableResult
     private func focus(_ identifier: String, pressing direction: XCUIRemote.Button, limit: Int = 12) -> Bool {

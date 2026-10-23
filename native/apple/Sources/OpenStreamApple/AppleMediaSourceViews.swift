@@ -1269,7 +1269,6 @@ struct AppleLiveTVView: View {
             channels: channelSnapshot.channels,
             channelIndex: channelIndex,
             categories: channelSnapshot.categories,
-            hiddenCount: channelSnapshot.hiddenCount,
             selectedCategory: $selectedCategory,
             guide: guideStore.guide(for: playbackGuideChannelIDs),
             guideRevision: guideStore.revision,

@@ -201,20 +201,51 @@ struct AppleTVPosterCard: View {
     }
 }
 
-/// The synopsis, as plain text. It used to be a focus stop that drew a grey
-/// tile behind itself when focused — the box in the owner's capture
-/// (2026-09-14, "clean up the description a bit"). A paragraph is not a
-/// control: there is nothing to do with it, so it takes no focus and draws no
-/// container, and Down from Play goes to the episodes like the reference apps.
+/// The synopsis, as plain text with no tile behind it: a grey box when
+/// focused was the owner's "clean up the description a bit" (2026-09-14).
+/// On a movie page it is a focus stop, dimmed at rest and full white when
+/// focused: focus moves geometrically, so a page with nothing focusable
+/// under the title row could never scroll and the synopsis sat below the
+/// screen (build 20 B4: Rampage, y = 1062 of 1080). A series page has
+/// Episodes there, and Down from Play goes straight to them (owner
+/// 2026-09-14), so `isFocusable` is false.
 struct AppleTVFocusableParagraph: View {
     let text: String
+    var isFocusable = true
+    @FocusState private var isFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Text(text)
             .font(.system(size: AppleTVDetailMetrics.synopsisFontSize))
-            .foregroundStyle(.white)
+            .foregroundStyle(.white.opacity(isFocused || !isFocusable ? 1 : AppleTVDetailMetrics.synopsisRestingOpacity))
             .fixedSize(horizontal: false, vertical: true)
             .frame(width: AppleTVDetailMetrics.synopsisColumnWidth, alignment: .leading)
+            .focusable(isFocusable)
+            .focusEffectDisabled()
+            .focused($isFocused)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: isFocused)
+            .accessibilityIdentifier("detail.synopsis")
+    }
+}
+
+/// One person on the Cast & Crew row: the shared portrait, lifted while
+/// focused. Nothing opens from it; it is a focus stop so the remote can walk
+/// the row and the page scrolls to it.
+struct AppleTVCreditCard: View {
+    let person: AppleCreditPerson
+    @FocusState private var isFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        AppleTitlePageCreditPortrait(person: person, side: AppleTVDetailMetrics.creditPortraitSide)
+            .scaleEffect(isFocused ? AppleTVDetailMetrics.creditFocusScale : 1)
+            .focusable()
+            .focusEffectDisabled()
+            .focused($isFocused)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: isFocused)
+            .accessibilityLabel([person.name, person.role].compactMap(\.self).joined(separator: ", "))
+            .accessibilityIdentifier("detail.cast.person")
     }
 }
 

@@ -9,7 +9,6 @@ public extension UTType {
 public final class AppleChannelLineupStore: Sendable {
     public static let shared = AppleChannelLineupStore()
     public static let didChange = Notification.Name("openstream.lineup.changed")
-    public static let emptyMessage = "Import a lineup file to organise channels by number and category."
 
     private struct State {
         var file: AppleChannelLineupFile?

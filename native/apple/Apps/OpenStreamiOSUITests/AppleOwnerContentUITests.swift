@@ -598,9 +598,9 @@ final class AppleLineupImportUITests: OpenStreamUITestCase {
 
     func testAImportFromFilesAndKeepAfterRelaunch() throws {
         launch("channels")
-        XCTAssertTrue(app.staticTexts["lineup.empty"].waitForExistence(timeout: 30))
         let package = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Package' OR label == 'Everything'")).firstMatch
-        XCTAssertTrue(package.waitForExistence(timeout: 10))
+        XCTAssertTrue(package.waitForExistence(timeout: 30))
+        XCTAssertFalse(app.staticTexts["lineup.name"].exists)
         package.tap()
         XCTAssertFalse(app.buttons["Complete Guide"].exists)
         app.buttons["Everything"].firstMatch.tap()

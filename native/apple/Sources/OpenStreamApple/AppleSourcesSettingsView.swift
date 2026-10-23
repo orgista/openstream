@@ -1007,7 +1007,7 @@ private struct AppleAddLiveTVSourceView: View {
 
     #if os(tvOS)
 
-    /// Apple TV: labels above stock fields, Save and Test Connection as pills
+    /// Apple TV: labels above stock fields, Save and Test as pills
     /// in their own focus section below, the result line under them. The
     /// pills stay focusable while the form is incomplete; pressing one names
     /// what is missing instead of going inert (owner items S9, S10, S11).
@@ -1229,7 +1229,7 @@ private struct AppleAddLiveTVSourceView: View {
     private func connectionLabel(saving: Bool) -> some View {
         let active = isWorking && (connectionAction?.shouldSave == saving)
         return AppleWorkingButtonLabel(
-            title: saving ? "Save" : "Test Connection",
+            title: saving ? "Save" : "Test",
             workingTitle: saving ? "Saving…" : "Testing…",
             isWorking: active
         )
@@ -1902,15 +1902,18 @@ struct AppleLineupImportSection: View {
     #endif
 
     var body: some View {
+        #if os(tvOS)
+        // Nothing to import with here, so no section until a lineup arrives.
+        if let lineup {
+            Section("Channel Lineup") {
+                Text(lineup.name).accessibilityIdentifier("lineup.name")
+            }
+        }
+        #else
         Section("Channel Lineup") {
             if let lineup {
                 Text(lineup.name).accessibilityIdentifier("lineup.name")
-            } else {
-                Text(AppleChannelLineupStore.emptyMessage)
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("lineup.empty")
             }
-            #if !os(tvOS)
             Button("Import Lineup…", systemImage: "square.and.arrow.down") { choosingFile = true }
                 .accessibilityIdentifier("lineup.import.file")
             TextField("Lineup URL", text: $lineupURL)
@@ -1924,7 +1927,7 @@ struct AppleLineupImportSection: View {
                 .disabled(isFetching || lineupURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .accessibilityIdentifier("lineup.import.url")
             if isFetching { ProgressView().accessibilityLabel("Importing lineup") }
-            #endif
         }
+        #endif
     }
 }

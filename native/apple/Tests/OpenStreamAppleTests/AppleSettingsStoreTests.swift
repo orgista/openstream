@@ -472,8 +472,7 @@ func topTenListsRequireAnOptInAndRememberIt() {
 }
 
 /// Top 10 rows are TMDB's charts: with no key, or with metadata off, the
-/// toggle is unavailable and says in one line what is missing; with both it
-/// works and says nothing.
+/// toggle is unavailable; with both it works.
 @MainActor
 @Test
 func topTenListsNeedATMDBKeyAndMetadata() {
@@ -481,13 +480,10 @@ func topTenListsNeedATMDBKeyAndMetadata() {
     store.metadataEnabled = true
     store.tmdbAPIKey = ""
     #expect(!store.top10ListsAvailable)
-    #expect(store.top10ListsFooter == "Needs a TMDB API key")
     store.tmdbAPIKey = "fixture-tmdb"
     #expect(store.top10ListsAvailable)
-    #expect(store.top10ListsFooter == nil)
     store.metadataEnabled = false
     #expect(!store.top10ListsAvailable)
-    #expect(store.top10ListsFooter == "Needs Use Metadata APIs")
 }
 
 /// A link shared before the Keychain gives the TMDB key (a launch before

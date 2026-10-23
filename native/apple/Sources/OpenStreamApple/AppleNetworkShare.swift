@@ -233,6 +233,10 @@ public enum AppleSMBError: Error, Equatable, LocalizedError, Sendable {
         if nsError.domain == NSPOSIXErrorDomain, [EPERM, EACCES].contains(Int32(nsError.code)) {
             return .accessDenied
         }
+        if nsError.domain == NSPOSIXErrorDomain,
+           [EHOSTUNREACH, ENETUNREACH, EHOSTDOWN, ENETDOWN, ETIMEDOUT].contains(Int32(nsError.code)) {
+            return .serverUnreachable
+        }
         if [
             "timed out", "timedout", "host is down", "network is down", "network is unreachable",
             "connection refused", "no route to host", "not connected", "could not connect"
@@ -900,7 +904,7 @@ struct AppleSMBNetworkLibraryScanner: Sendable {
         } catch {
             try Task.checkCancellation()
             if error is CancellationError { throw error }
-            return AppleLibraryScanResult(items: [], status: .failed)
+            return AppleLibraryScanResult(items: [], status: .failed, shareFailure: .mapped(from: error))
         }
         try Task.checkCancellation()
         let snapshot = try await AppleSMBDirectoryWalker.scan(root: root,

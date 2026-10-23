@@ -3,6 +3,9 @@ import Foundation
 public enum AppleLibrarySourceError: Error, Equatable, LocalizedError, Sendable {
     case invalidFolder
     case unavailable
+    /// A network share that did not answer: it may be off, asleep or not
+    /// allowed yet (the Local Network prompt), not gone.
+    case unreachable
     case permissionDenied
     case noMedia
 
@@ -10,9 +13,28 @@ public enum AppleLibrarySourceError: Error, Equatable, LocalizedError, Sendable 
         switch self {
         case .invalidFolder: "Choose a folder from Files."
         case .unavailable: "This folder is no longer available."
+        case .unreachable: "Can't reach this share."
         case .permissionDenied: "oStream no longer has permission to read this folder."
         case .noMedia: "No video files were found."
         }
+    }
+}
+
+/// When Library scans again by itself after a network share did not answer.
+///
+/// On a fresh install the first scan runs while the Local Network prompt is
+/// still up, so every share fails, and Library kept the failure until the
+/// viewer tapped Refresh (build 20 B5). Nothing tells the app when the prompt
+/// is answered beyond the app becoming active again, so it also scans again on
+/// a widening schedule; a scan that reaches every share starts the count over.
+enum AppleLibraryShareRetryPolicy {
+    static let delays: [Duration] = [.seconds(3), .seconds(10), .seconds(30), .seconds(60), .seconds(120)]
+
+    /// The wait before the next scan, or nil for none. `attempt` counts the
+    /// retries since the last scan that reached every share.
+    static func delay(unreachableShares: Int, attempt: Int, delays: [Duration] = delays) -> Duration? {
+        guard unreachableShares > 0, delays.indices.contains(attempt) else { return nil }
+        return delays[attempt]
     }
 }
 
