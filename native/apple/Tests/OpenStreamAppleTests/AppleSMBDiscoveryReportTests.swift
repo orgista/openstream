@@ -229,6 +229,10 @@ private struct NestedSMBClient: AppleNetworkShareClient {
     #expect(AppleSMBError.mapped(from: NSError(
         domain: NSPOSIXErrorDomain, code: Int(EPERM)
     )) == .accessDenied)
+    // A blocked or pending Local Network permission fails the connect with no route.
+    #expect(AppleSMBError.mapped(from: NSError(
+        domain: NSPOSIXErrorDomain, code: Int(EHOSTUNREACH)
+    )) == .serverUnreachable)
     // libsmb2 reports a wrong password as ECONNREFUSED with the NT status in the text.
     #expect(AppleSMBError.mapped(from: NSError(
         domain: NSPOSIXErrorDomain, code: Int(ECONNREFUSED),

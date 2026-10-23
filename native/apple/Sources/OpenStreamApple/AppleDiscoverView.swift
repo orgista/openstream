@@ -3726,10 +3726,11 @@ struct AppleCatalogItemDetailView: View {
     // MARK: - Apple TV title page (FEEDBACK rework plan, task 5)
 
     /// Full-screen backdrop with the title block anchored bottom-leading at
-    /// (80, bottom 60); scrolling down reveals the synopsis, Episodes and
-    /// More Like This. There is no back control (Menu pops the page) and no
-    /// Download action. The backdrop stays a still: the Apple TV plays no
-    /// trailer (`AppleTitlePagePolicy.offersTrailers`), so there is no trailer
+    /// (80, bottom 60); focus walks down to the synopsis, Episodes, More
+    /// Like This and Cast & Crew, scrolling the page. There is no back
+    /// control (Menu pops the page) and no Download action. The backdrop
+    /// stays a still: the Apple TV plays no trailer
+    /// (`AppleTitlePagePolicy.offersTrailers`), so there is no trailer
     /// button, rail or preview. Every number comes from `AppleTVDetailMetrics`.
     private var tvOSDetailLayout: some View {
         ScrollView(.vertical) {
@@ -4078,7 +4079,7 @@ struct AppleCatalogItemDetailView: View {
                 catalog: item.summary,
                 enriched: pageMetadata.details?.overview
             ) {
-                AppleTVFocusableParagraph(text: summary)
+                AppleTVFocusableParagraph(text: summary, isFocusable: !showsEpisodeSection)
                     .padding(.horizontal, AppleTVDetailMetrics.overlayLeadingInset)
             }
             if showsEpisodeSection {
@@ -4093,6 +4094,10 @@ struct AppleCatalogItemDetailView: View {
             }
             if !suggestedItems.isEmpty {
                 tvOSMoreLikeThisShelf
+            }
+            let credits = titlePageCredits
+            if !credits.isEmpty {
+                tvOSCastShelf(credits)
             }
         }
         .padding(.top, AppleTVDetailMetrics.sectionSpacing)
@@ -4238,6 +4243,26 @@ struct AppleCatalogItemDetailView: View {
             .focusSection()
         }
         .accessibilityIdentifier("detail.more-like-this")
+    }
+
+    private func tvOSCastShelf(_ people: [AppleCreditPerson]) -> some View {
+        VStack(alignment: .leading, spacing: AppleTVDetailMetrics.shelfTitleSpacing) {
+            AppleTVShelfTitle(title: "Cast & Crew")
+            ScrollView(.horizontal) {
+                LazyHStack(alignment: .top, spacing: AppleTVDetailMetrics.posterGap) {
+                    ForEach(people) { person in
+                        AppleTVCreditCard(person: person)
+                    }
+                }
+                .padding(.vertical, AppleTVDetailMetrics.shelfVerticalBleed)
+            }
+            .contentMargins(.horizontal, AppleTVDetailMetrics.overlayLeadingInset, for: .scrollContent)
+            .scrollIndicators(.hidden)
+            .scrollClipDisabled()
+            .focusSection()
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("detail.cast")
     }
     #endif
 

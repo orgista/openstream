@@ -22,6 +22,10 @@ final class AppleLocalLibraryStore {
     private(set) var noMatchIDs: Set<String> = []
     private(set) var isLoading = false
     @ObservationIgnored private let reloadGate = AppleReloadGate()
+    @ObservationIgnored private(set) var shareRetryAttempt = 0
+    @ObservationIgnored private var shareRetryTask: Task<Void, Never>?
+    @ObservationIgnored private var unreachableShareCount = 0
+    var hasPendingShareRetry: Bool { shareRetryTask != nil }
     private(set) var errorMessage: String?
     private(set) var progress: [String: ApplePlaybackProgress] = [:]
     private var offlineIDs: [String: String] = [:]
@@ -31,11 +35,17 @@ final class AppleLocalLibraryStore {
     private let injectedPlaybackStore: ApplePlaybackStore?
     private var playbackStore: ApplePlaybackStore { injectedPlaybackStore ?? ApplePlaybackStore() }
     @ObservationIgnored private var recordedIdentityFileIDs: Set<String> = []
+    private let makeShareClient: @Sendable () -> any AppleNetworkShareClient
+    private let shareRetryDelays: [Duration]
 
     init(resolver: AppleLibraryMetadataResolver = .shared, playbackStore: ApplePlaybackStore? = nil,
-         groups: [AppleLibrarySeries] = [], sources: [AppleSource] = [], offlineIDs: [String: String] = [:], versionCacheURL: URL? = nil) {
+         groups: [AppleLibrarySeries] = [], sources: [AppleSource] = [], offlineIDs: [String: String] = [:], versionCacheURL: URL? = nil,
+         makeShareClient: @escaping @Sendable () -> any AppleNetworkShareClient = { AppleSMBClient() },
+         shareRetryDelays: [Duration] = AppleLibraryShareRetryPolicy.delays) {
         metadataResolver = resolver
         injectedPlaybackStore = playbackStore
+        self.makeShareClient = makeShareClient
+        self.shareRetryDelays = shareRetryDelays
         self.groups = groups
         self.sources = sources
         self.offlineIDs = offlineIDs
@@ -103,6 +113,10 @@ final class AppleLocalLibraryStore {
         noMatchIDs = []
         isLoading = false
         errorMessage = nil
+        shareRetryTask?.cancel()
+        shareRetryTask = nil
+        shareRetryAttempt = 0
+        unreachableShareCount = 0
         progress = [:]
         offlineIDs = [:]
         recordedIdentityFileIDs = []
@@ -494,30 +508,36 @@ final class AppleLocalLibraryStore {
         return entries
     }
 
-    func reload(sourceStore: AppleSourceStore, mediaIndex: AppleMediaIndexStore, settings: AppleSettingsStore) async {
+    /// `showsProgress: false` is for the share retries: they keep the grid
+    /// and empty state as they are rather than flash the loading spinner.
+    func reload(sourceStore: AppleSourceStore, mediaIndex: AppleMediaIndexStore, settings: AppleSettingsStore,
+                showsProgress: Bool = true) async {
         guard !Task.isCancelled, await reloadGate.waitUntilIdle(), reloadGate.begin() else { return }
-        isLoading = true
+        if showsProgress { isLoading = true }
         defer {
-            isLoading = false
+            if showsProgress { isLoading = false }
             reloadGate.end()
         }
+        shareRetryTask?.cancel()
+        shareRetryTask = nil
         sources = sourceStore.sources.filter { $0.isEnabled && ($0.kind == .library || $0.kind == .nas) }
         var files: [AppleLibraryItem] = []
         var errors: [String] = []
+        var unreachableShares = 0
         var pendingIndexWrites: [(source: AppleSource, items: [AppleLibraryItem], status: AppleLibraryScanStatus)] = []
         for source in sources {
             do {
                 let result: AppleLibraryScanResult
                 if source.kind == .nas {
                     let credentials = try sourceStore.networkCredentials(for: source) ?? AppleSMBCredentials(username: "", password: "")
-                    result = try await AppleSMBNetworkLibraryScanner(client: AppleSMBClient()).scan(source: source, credentials: credentials)
+                    result = try await AppleSMBNetworkLibraryScanner(client: makeShareClient()).scan(source: source, credentials: credentials)
                 } else { result = await AppleLibraryScanner().scanResult(source: source) }
                 guard !Task.isCancelled else {
                     staleSourceIDs.insert(source.id)
                     try? await mediaIndex.replace(instanceID: source.id, with: [], scanStatus: .failed)
                     return
                 }
-                guard result.status != .failed else { throw AppleLibrarySourceError.unavailable }
+                guard result.status != .failed else { throw Self.scanError(kind: source.kind, shareFailure: result.shareFailure) }
                 let previous = groups.flatMap(\.items).filter { $0.sourceID == source.id }
                 let scanned = result.retaining(previous)
                 if result.status == .complete { staleSourceIDs.remove(source.id) }
@@ -539,6 +559,7 @@ final class AppleLocalLibraryStore {
                 staleSourceIDs.insert(source.id)
                 pendingIndexWrites.append((source, [], .failed))
                 errors.append("\(source.name): \(error.localizedDescription)")
+                if error as? AppleLibrarySourceError == .unreachable { unreachableShares += 1 }
                 sourceStore.recordValidationFailure(id: source.id, summary: error.localizedDescription)
             }
         }
@@ -633,6 +654,8 @@ final class AppleLocalLibraryStore {
         }
         #endif
         errorMessage = errors.isEmpty ? nil : errors.joined(separator: "\n")
+        unreachableShareCount = unreachableShares
+        scheduleShareRetry(unreachableShares: unreachableShares, sourceStore: sourceStore, mediaIndex: mediaIndex, settings: settings)
         let (cached, missed) = await metadataResolver.cachedLookups(for: groups)
         let merged = metadata.merging(cached) { _, persisted in persisted }
         if merged != metadata {
@@ -680,6 +703,41 @@ final class AppleLocalLibraryStore {
             AppleLaunchWorkPolicy.recordScan(sourceDigest: sourceDigest, date: lastScan ?? Date())
         }
     }
+
+    /// A share that did not answer is unreachable and worth another try; a
+    /// share that answered with an error (sign-in, share name, permissions)
+    /// keeps that error's own wording and is not retried.
+    nonisolated static func scanError(kind: AppleSourceKind, shareFailure: AppleSMBError?) -> any Error {
+        guard kind == .nas, let shareFailure else { return AppleLibrarySourceError.unavailable }
+        return shareFailure == .serverUnreachable ? AppleLibrarySourceError.unreachable : shareFailure
+    }
+
+    /// The app came back to the front, which is also when the Local Network
+    /// prompt closes: scan again at once if the last scan could not reach a
+    /// share, and start the retry schedule over.
+    func retryUnreachableShares(sourceStore: AppleSourceStore, mediaIndex: AppleMediaIndexStore,
+                                settings: AppleSettingsStore) async {
+        guard unreachableShareCount > 0, !isLoading else { return }
+        shareRetryAttempt = 0
+        await reload(sourceStore: sourceStore, mediaIndex: mediaIndex, settings: settings, showsProgress: false)
+    }
+
+    private func scheduleShareRetry(unreachableShares: Int, sourceStore: AppleSourceStore,
+                                    mediaIndex: AppleMediaIndexStore, settings: AppleSettingsStore) {
+        if unreachableShares == 0 { shareRetryAttempt = 0 }
+        guard let delay = AppleLibraryShareRetryPolicy.delay(unreachableShares: unreachableShares,
+                                                             attempt: shareRetryAttempt, delays: shareRetryDelays) else { return }
+        shareRetryAttempt += 1
+        appleTrace("library share unreachable, scanning again in \(delay)")
+        shareRetryTask = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled, let self else { return }
+            // `reload` cancels a pending retry, and this one has started.
+            shareRetryTask = nil
+            await reload(sourceStore: sourceStore, mediaIndex: mediaIndex, settings: settings, showsProgress: false)
+        }
+    }
+
     /// Persist before publishing; playback keys are untouched.
     func correctMatch(_ group: AppleLibrarySeries, candidate: AppleCatalogItem, provider: String,
                       explicitIDs: [String: String] = [:], resolver: AppleLibraryMetadataResolver = .shared) async throws {

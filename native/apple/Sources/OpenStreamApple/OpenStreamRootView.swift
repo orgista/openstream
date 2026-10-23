@@ -413,6 +413,12 @@ public struct OpenStreamRootView: View {
         .modifier(ApplePINPresenter())
         .onChange(of: restrictionScenePhase) { _, phase in
             if phase == .background { AppleRestrictionStore.shared.background() }
+            if phase == .active {
+                Task {
+                    await AppleLocalLibraryStore.shared.retryUnreachableShares(
+                        sourceStore: sourceStore, mediaIndex: mediaIndex, settings: settingsStore)
+                }
+            }
         }
         .safeAreaInset(edge: .bottom) { AppleImportProgressView() }
         .modifier(AppleProgrammeReminderBanner())

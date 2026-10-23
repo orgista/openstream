@@ -202,6 +202,7 @@ enum AppleTVDetailMetrics {
     // Below the fold
     static let synopsisFontSize: CGFloat = 29
     static let synopsisColumnWidth: CGFloat = 900
+    static let synopsisRestingOpacity: CGFloat = 0.75
     static let sectionSpacing: CGFloat = 60
     static let shelfTitleFontSize: CGFloat = 38
     static let shelfTitleSpacing: CGFloat = 24
@@ -220,6 +221,10 @@ enum AppleTVDetailMetrics {
     static let posterSize = CGSize(width: 260, height: 390)
     static let posterGap: CGFloat = 40
     static let posterNameFontSize: CGFloat = 25
+
+    // Cast & Crew: round portraits, lifted like a poster while focused.
+    static let creditPortraitSide: CGFloat = 150
+    static let creditFocusScale: CGFloat = 1.1
 
     // Cards lift with the system highlight (`appleTVCardArtworkFocus`); the
     // glyph discs scale by `focusScale`.

@@ -3,6 +3,107 @@ import Observation
 import Testing
 @testable import OpenStreamApple
 
+/// Build 20 B5: a share the first scan could not reach (the Local Network
+/// prompt was still up) is scanned again on a widening schedule that ends;
+/// a scan that reached every share schedules nothing.
+@Test func unreachableShareIsScannedAgainOnAWideningScheduleThatEnds() {
+    let delays = (0 ..< 8).compactMap { AppleLibraryShareRetryPolicy.delay(unreachableShares: 1, attempt: $0) }
+    #expect(delays == [.seconds(3), .seconds(10), .seconds(30), .seconds(60), .seconds(120)])
+    #expect(AppleLibraryShareRetryPolicy.delay(unreachableShares: 2, attempt: 0) == .seconds(3))
+    #expect(AppleLibraryShareRetryPolicy.delay(unreachableShares: 0, attempt: 0) == nil)
+    #expect(AppleLibraryShareRetryPolicy.delay(unreachableShares: 1, attempt: -1) == nil)
+}
+
+/// Build 20 B5 at the store: a share that does not answer reads as
+/// unreachable and is scanned again without the loading spinner or a launch
+/// scan stamp; a clean scan starts the count over, Refresh and Reset drop a
+/// pending retry, and a share that answers with an error is not retried.
+@MainActor @Test(.timeLimit(.minutes(1)))
+func unreachableShareIsScannedAgainQuietlyUntilAScanReachesIt() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let suite = "library-share-retry-\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let sourceStore = AppleSourceStore(defaults: defaults, keychain: SortObservationCredentialStub(),
+        documentsDirectory: root.appendingPathComponent("documents"))
+    let settings = AppleSettingsStore(defaults: defaults, keychain: SortObservationCredentialStub())
+    _ = try sourceStore.addNetworkShare(name: "ServerPlus", host: "192.0.2.10", share: "Media")
+    let client = FlakyShareClient()
+    let library = AppleLocalLibraryStore(
+        resolver: AppleLibraryMetadataResolver(directory: root.appendingPathComponent("metadata")) { _, _, _ in nil },
+        playbackStore: ApplePlaybackStore(defaults: defaults), versionCacheURL: root.appendingPathComponent("versions.json"),
+        makeShareClient: { client }, shareRetryDelays: [.milliseconds(20), .milliseconds(20), .seconds(60)])
+    await client.observeLoading { library.isLoading }
+    let index = AppleMediaIndexStore(repository: AppleMediaIndexRepository(fileURL: root.appendingPathComponent("index.json")))
+    func reload() async { await library.reload(sourceStore: sourceStore, mediaIndex: index, settings: settings) }
+    let stampKey = "openstream.library.lastScan.v1"
+    func digest() -> String {
+        ApplePlaybackIdentity.digest(for: library.sources.map(\.id.uuidString).sorted().joined(separator: ","))
+    }
+    func stamp() -> TimeInterval? {
+        (UserDefaults.standard.dictionary(forKey: stampKey) as? [String: TimeInterval])?[digest()]
+    }
+
+    await client.fail(with: .serverUnreachable)
+    await reload()
+    #expect(library.errorMessage == "ServerPlus: Can't reach this share.")
+    while await client.loadingAtEachScan.count < 3 { try await Task.sleep(for: .milliseconds(10)) }
+    while library.shareRetryAttempt < 3 { try await Task.sleep(for: .milliseconds(10)) }
+    #expect(await client.loadingAtEachScan == [true, false, false])
+    #expect(library.hasPendingShareRetry)
+    #expect(stamp() == nil)
+
+    await client.fail(with: nil)
+    await reload()
+    #expect(library.errorMessage == nil)
+    #expect(!library.hasPendingShareRetry)
+    #expect(library.shareRetryAttempt == 0)
+    #expect(stamp() != nil)
+    let stampedDigest = digest()
+    defer {
+        var stamps = UserDefaults.standard.dictionary(forKey: stampKey) ?? [:]
+        stamps[stampedDigest] = nil
+        UserDefaults.standard.set(stamps, forKey: stampKey)
+    }
+
+    await client.fail(with: .authenticationFailed)
+    await reload()
+    #expect(library.errorMessage == "ServerPlus: \(AppleSMBError.authenticationFailed.localizedDescription)")
+    #expect(!library.hasPendingShareRetry)
+
+    await client.fail(with: .serverUnreachable)
+    await library.retryUnreachableShares(sourceStore: sourceStore, mediaIndex: index, settings: settings)
+    #expect(await client.loadingAtEachScan.count == 5, "becoming active rescans only after an unreachable share")
+    await reload()
+    await library.retryUnreachableShares(sourceStore: sourceStore, mediaIndex: index, settings: settings)
+    let afterRefresh = await client.loadingAtEachScan.dropFirst(5)
+    #expect(afterRefresh.first == true)
+    #expect(afterRefresh.count >= 2 && afterRefresh.dropFirst().allSatisfy { !$0 }, "becoming active rescans an unreachable share quietly")
+    while library.shareRetryAttempt < 3 { try await Task.sleep(for: .milliseconds(10)) }
+    #expect(library.hasPendingShareRetry)
+    library.discardAfterReset()
+    #expect(!library.hasPendingShareRetry)
+    #expect(library.shareRetryAttempt == 0)
+}
+
+private actor FlakyShareClient: AppleNetworkShareClient {
+    private var failure: AppleSMBError?
+    private var isLoading: (@MainActor @Sendable () -> Bool)?
+    private(set) var loadingAtEachScan: [Bool] = []
+
+    func fail(with failure: AppleSMBError?) { self.failure = failure }
+    func observeLoading(_ isLoading: @escaping @MainActor @Sendable () -> Bool) { self.isLoading = isLoading }
+
+    func listShares(host: String, port: Int, credentials: AppleSMBCredentials) async throws -> [AppleSMBShare] { [] }
+    func listDirectory(url: URL, credentials: AppleSMBCredentials, recursive: Bool) async throws -> [AppleSMBDirectoryEntry] {
+        if let isLoading { loadingAtEachScan.append(await isLoading()) }
+        if let failure { throw failure }
+        return []
+    }
+    func read(url: URL, credentials: AppleSMBCredentials, range: Range<UInt64>) async throws -> Data { Data() }
+}
+
 @MainActor @Test func localTitleMatchingPrefersIMDbAndDistinguishesRemakes() {
     let movie = AppleCatalogItem(mediaID: "tt1160419", type: "movie", name: "Dune", releaseInfo: "2021")
     #expect(AppleLocalLibraryStore.matches(movie, .init(mediaID: "tt1160419", type: "movie", name: "Dune: Part One", releaseInfo: "2021")))

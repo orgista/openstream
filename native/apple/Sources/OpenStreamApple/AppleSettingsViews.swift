@@ -220,8 +220,6 @@ struct AppleSettingsView: View {
                 .accessibilityIdentifier("settings.discover.rows")
             } header: {
                 Text("Discover")
-            } footer: {
-                if let footer = settings.top10ListsFooter { Text(footer) }
             }
 
             Section("Library") {
@@ -525,8 +523,6 @@ private struct AppleTVDiscoverPane: View {
                 .accessibilityIdentifier("settings.discover.rows")
             } header: {
                 Text("Discover")
-            } footer: {
-                if let footer = settings.top10ListsFooter { Text(footer) }
             }
 
             Section("Library") {
@@ -1184,23 +1180,6 @@ private struct AppleConnectionStatusView: View {
     }
 }
 
-private struct AppleConnectionTestLabel: View {
-    let isTesting: Bool
-
-    var body: some View {
-        if isTesting {
-            HStack {
-                ProgressView()
-                    .controlSize(.small)
-                    .accessibilityLabel("Testing connection")
-                Text("Testing")
-            }
-        } else {
-            Text("Test Connection")
-        }
-    }
-}
-
 @MainActor
 private struct AppleSettingsPersistenceError: View {
     let settings: AppleSettingsStore
@@ -1367,15 +1346,18 @@ enum AppleChannelManagerLoad {
     }
 }
 
-/// Off limits until TMDB is set up: the rows are TMDB's charts.
+/// Off limits until TMDB is set up: the rows are TMDB's charts. Off and
+/// dimmed then, rather than a line saying why (no explainer text).
 @MainActor
 private struct AppleTop10ListsToggle: View {
     let settings: AppleSettingsStore
 
     var body: some View {
-        @Bindable var settings = settings
-        Toggle("Top 10 lists", isOn: $settings.top10ListsEnabled)
-            .disabled(!settings.top10ListsAvailable)
-            .accessibilityIdentifier("settings.discover.top10")
+        Toggle("Top 10 lists", isOn: Binding(
+            get: { settings.top10ListsEnabled && settings.top10ListsAvailable },
+            set: { settings.top10ListsEnabled = $0 }
+        ))
+        .disabled(!settings.top10ListsAvailable)
+        .accessibilityIdentifier("settings.discover.top10")
     }
 }

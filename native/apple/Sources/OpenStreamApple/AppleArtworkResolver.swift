@@ -176,11 +176,4 @@ extension AppleSettingsStore {
         }
         return tmdbConfiguration
     }
-
-    /// The one line under the Top 10 toggle while it is off limits
-    /// (`top10ListsAvailable`): what is missing, the key first.
-    var top10ListsFooter: String? {
-        guard !top10ListsAvailable else { return nil }
-        return (try? AppleTMDBConfiguration(credential: tmdbAPIKey)) == nil ? "Needs a TMDB API key" : "Needs Use Metadata APIs"
-    }
 }
