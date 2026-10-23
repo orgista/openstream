@@ -34,6 +34,16 @@ struct AppleLivePrefetchTests {
         #expect(leading.map(\.id) == [Self.lineup[1].id, Self.lineup[2].id])
     }
 
+    /// With an imported lineup Live sorts by its numbers, so the warm set
+    /// follows them; channels the lineup does not know keep playlist order.
+    @Test func anImportedLineupOrdersTheLeadingChannels() {
+        let entries = [AppleChannelLineupEntry(number: 2, name: "Channel 200", aliases: [], category: "News"),
+                       AppleChannelLineupEntry(number: 5, name: "Channel 3", aliases: [], category: "Sports")]
+        let leading = AppleLivePrefetch.leadingChannels(Self.lineup, preferredIDs: [Self.lineup[9].id],
+                                                        hiddenIDs: [], entries: entries, limit: 5)
+        #expect(leading.map(\.id) == [9, 199, 2, 0, 1].map { Self.lineup[$0].id })
+    }
+
     @Test func logosAreRequestedAtTheRowsSize() {
         let requests = AppleLivePrefetch.logoRequests([Self.channel(1), Self.channel(2, logo: false)], displayScale: 3)
         #expect(requests.map(\.url) == [URL(string: "https://fixture.example/logo/1.png")!])

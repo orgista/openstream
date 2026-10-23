@@ -29,7 +29,7 @@ enum AppleLivePrefetch {
         let (fetched, leading) = await loadLeadingChannels(playlists,
             preferredIDs: AppleLiveWatchHistoryStore.shared.history.channelIDs + settings.favoriteLiveChannelOrder
                 + settings.favoriteChannelIDs.sorted(),
-            hiddenIDs: settings.hiddenLiveChannelIDs)
+            hiddenIDs: settings.hiddenLiveChannelIDs, entries: AppleChannelLineupPresets.current)
         guard !leading.isEmpty, !Task.isCancelled else { return }
         await AppleRemoteImageCache.shared.prefetch(logoRequests(leading, displayScale: displayScale))
         guard !Task.isCancelled else { return }
@@ -51,7 +51,8 @@ enum AppleLivePrefetch {
     /// channels to warm.
     @concurrent
     nonisolated static func loadLeadingChannels(_ playlists: [PlaylistRequest], preferredIDs: [String],
-                                                hiddenIDs: Set<String>) async -> (fetched: Int, leading: [AppleIPTVChannel]) {
+                                                hiddenIDs: Set<String>,
+                                                entries: [AppleChannelLineupEntry]) async -> (fetched: Int, leading: [AppleIPTVChannel]) {
         let client = AppleIPTVClient()
         var channels: [AppleIPTVChannel] = []
         var fetched = 0
@@ -72,14 +73,23 @@ enum AppleLivePrefetch {
                 appleTrace("live prefetch: \(source.name) did not load")
             }
         }
-        return (fetched, leadingChannels(channels, preferredIDs: preferredIDs, hiddenIDs: hiddenIDs))
+        return (fetched, leadingChannels(channels, preferredIDs: preferredIDs, hiddenIDs: hiddenIDs, entries: entries))
     }
 
     /// The channels Live is likely to draw first: the ones watched and
-    /// favourited, then the playlists' own order, skipping hidden ones.
+    /// favourited, then the imported lineup's numbers when there is one (the
+    /// order Live sorts by), then the playlists' own order, skipping hidden ones.
     nonisolated static func leadingChannels(_ channels: [AppleIPTVChannel], preferredIDs: [String],
-                                            hiddenIDs: Set<String>, limit: Int = leadingCount) -> [AppleIPTVChannel] {
-        let visible = channels.filter { !hiddenIDs.contains($0.id) }
+                                            hiddenIDs: Set<String>, entries: [AppleChannelLineupEntry] = [],
+                                            limit: Int = leadingCount) -> [AppleIPTVChannel] {
+        var visible = channels.filter { !hiddenIDs.contains($0.id) }
+        if !entries.isEmpty {
+            let index = AppleChannelLineupIndex(entries)
+            visible = visible.enumerated()
+                .map { (number: index.match($0.element.name)?.number ?? .max, offset: $0.offset, channel: $0.element) }
+                .sorted { ($0.number, $0.offset) < ($1.number, $1.offset) }
+                .map(\.channel)
+        }
         let byID = Dictionary(visible.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var seen = Set<String>()
         var result: [AppleIPTVChannel] = []

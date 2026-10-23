@@ -1150,7 +1150,8 @@ final class AppleTVFocusUITests: OpenStreamUITestCase {
         XCTAssertTrue(element("live.category.All").isSelected, "could not return to All")
 
         // (c) Right along the chip row to the search glyph, then open it.
-        for _ in 0 ..< 20 where focusedElement.identifier != "live.search" {
+        // The owner's lineup has 30+ category chips, so allow a long walk.
+        for _ in 0 ..< 80 where focusedElement.identifier != "live.search" {
             remote.press(.right)
             Thread.sleep(forTimeInterval: 0.8)
         }
