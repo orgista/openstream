@@ -17,9 +17,8 @@ final class AppleTVTopShelfUITests: OpenStreamUITestCase {
     private let pineBoard = XCUIApplication(bundleIdentifier: "com.apple.PineBoard")
     private let headBoard = XCUIApplication(bundleIdentifier: "com.apple.HeadBoard")
 
-    /// Discover → Stub Movie Five (first in the server's Latest row) → Play,
-    /// fifteen seconds of it, then back to Discover.
-    private func watchPartOfAFixtureTitle(in app: XCUIApplication) {
+    private func watchPartOfATitle(in app: XCUIApplication, matching title: NSPredicate,
+                                  inLibrary: Bool = false) -> Bool {
         func focus(_ predicate: NSPredicate, pressing direction: XCUIRemote.Button) -> Bool {
             let target = app.descendants(matching: .any).matching(NSCompoundPredicate(andPredicateWithSubpredicates: [
                 NSPredicate(format: "hasFocus == true"), predicate])).firstMatch
@@ -29,23 +28,97 @@ final class AppleTVTopShelfUITests: OpenStreamUITestCase {
             }
             return target.exists
         }
-        XCTAssertTrue(focus(Self.serverShelfItem("jf-movie-5"), pressing: .down), "the fixture title never took focus")
+        if inLibrary {
+            for _ in 0..<8 { remote.press(.up) }
+            guard focus(NSPredicate(format: "label == 'Library' AND elementType == %d",
+                Int(XCUIElement.ElementType.button.rawValue)), pressing: .right) else {
+                XCTFail("Library never took focus")
+                return false
+            }
+            remote.press(.select)
+        }
+        guard app.descendants(matching: .any).matching(title).firstMatch.waitForExistence(timeout: 120) else {
+            XCTFail("No playable title appeared")
+            return false
+        }
+        guard focus(title, pressing: .down) else {
+            XCTFail("The title never took focus")
+            return false
+        }
         remote.press(.select)
-        XCTAssertTrue(focus(NSPredicate(format: "identifier == 'detail.play'"), pressing: .right), "Play never took focus")
+        guard focus(NSPredicate(format: "identifier == 'detail.play'"), pressing: .right) else {
+            XCTFail("Play never took focus")
+            return false
+        }
         remote.press(.select)
-        let ready = app.descendants(matching: .any)["player.playback.ready"].firstMatch
-        XCTAssertTrue(ready.waitForExistence(timeout: 60), "the fixture title never played")
-        Thread.sleep(forTimeInterval: 15)
+        if inLibrary {
+            let elapsed = app.staticTexts.matching(NSPredicate(
+                format: "identifier BEGINSWITH 'Elapsed Time' AND label MATCHES %@", #"\d+:\d{2}(:\d{2})?"#)).firstMatch
+            for _ in 0..<3 where !elapsed.exists {
+                remote.press(.down)
+                _ = elapsed.waitForExistence(timeout: 2)
+            }
+            var initial: Double?
+            let advancing = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                guard elapsed.exists else { return false }
+                let seconds = elapsed.label.split(separator: ":").reduce(0) { $0 * 60 + (Double($1) ?? 0) }
+                guard let start = initial else { initial = seconds; return false }
+                return seconds > start
+            }, object: nil)
+            guard XCTWaiter.wait(for: [advancing], timeout: 60) == .completed else {
+                XCTFail("Playback time never advanced")
+                return false
+            }
+            attach("owner-playing")
+        } else {
+            let ready = app.descendants(matching: .any)["player.playback.ready"].firstMatch
+            guard ready.waitForExistence(timeout: 60) else {
+                XCTFail("The fixture title never played")
+                return false
+            }
+        }
+        Thread.sleep(forTimeInterval: 30)
         remote.press(.menu)
         Thread.sleep(forTimeInterval: 2)
         remote.press(.menu)
+        if inLibrary {
+            for _ in 0..<8 { remote.press(.up) }
+            guard focus(NSPredicate(format: "label == 'Discover' AND elementType == %d",
+                Int(XCUIElement.ElementType.button.rawValue)), pressing: .left) else {
+                XCTFail("Discover never took focus")
+                return false
+            }
+            remote.press(.select)
+        }
+        return true
     }
 
     private func attach(_ name: String) {
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        shot.name = name
+        shot.name = "diagnostic-topshelf-\(name)"
         shot.lifetime = .keepAlways
         add(shot)
+    }
+
+    func testCleanInstallHasNoTopShelfContent() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["OPENSTREAM_TOPSHELF_CLEAN_INSTALL"] == "YES",
+                          "Requires the isolated clean-install run")
+        let app = XCUIApplication(bundleIdentifier: "com.orgista.openstream")
+        app.launchArguments = ["-OpenStreamTrace", "YES"]
+        app.launch()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 60))
+        XCTAssertTrue(app.staticTexts["No Sources"].waitForExistence(timeout: 60))
+        XCTAssertFalse(app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH 'home.continue.'")).firstMatch.exists)
+        Thread.sleep(forTimeInterval: 25)
+        attach("clean-app")
+        XCTAssertTrue(focusAppOnHome(), "never managed to focus the oStream icon")
+        attach("clean-home")
+        let texts = homeScreenTexts()
+        XCTAssertFalse(texts.isEmpty, "Home screen accessibility snapshot was unavailable")
+        for title in ["top-shelf/swipe-up-affordance/label", "Continue Watching", "Recently Added", "Stub Movie Five"] {
+            XCTAssertFalse(texts.contains(title))
+        }
     }
 
     func testTopShelfShowsRealContentWhenTheAppIconIsFocused() {
@@ -56,38 +129,26 @@ final class AppleTVTopShelfUITests: OpenStreamUITestCase {
         configureFixtureLaunch(app)
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 60), "the app never came to the foreground")
+        attach("00-app-running")
         // The shelf lists what was watched here. On the fixtures, watch part of
         // a title from the fixture Jellyfin first (`Tests/Fixtures/serve.py`).
         if ProcessInfo.processInfo.environment["OPENSTREAM_STUB_DIR"]?.isEmpty == false {
-            watchPartOfAFixtureTitle(in: app)
+            guard watchPartOfATitle(in: app, matching: Self.serverShelfItem("jf-movie-5")) else { return }
+        } else if ProcessInfo.processInfo.environment["OPENSTREAM_TOPSHELF_PLAY_OWNER"] == "YES" {
+            guard watchPartOfATitle(in: app, matching: NSPredicate(
+                format: "identifier BEGINSWITH 'library.title.'"), inLibrary: true) else { return }
         }
         Thread.sleep(forTimeInterval: 25)
         attach("01-app-running")
+        let homeTree = XCTAttachment(string: app.debugDescription)
+        homeTree.name = "diagnostic-topshelf-home-tree"
+        homeTree.lifetime = .keepAlways
+        add(homeTree)
 
         // 2. Home, then leftmost, then step right until OpenStream has focus.
         // A device whose TV button opens the Apple TV app (DevTV) lands there
         // first; a second press goes on to the home screen, which ignores it.
-        remote.press(.home)
-        Thread.sleep(forTimeInterval: 4)
-        remote.press(.home)
-        Thread.sleep(forTimeInterval: 4)
-        attach("02-home-screen")
-        for _ in 0..<8 { remote.press(.left); Thread.sleep(forTimeInterval: 0.4) }
-        remote.press(.up)
-        Thread.sleep(forTimeInterval: 2)
-
-        var focusedOnOpenStream = false
-        for step in 0..<8 {
-            let focused = focusedLabel()
-            print("TOPSHELF focus step \(step): \(focused ?? "<none>")")
-            if focused?.localizedCaseInsensitiveContains("oStream") == true,
-               focused?.localizedCaseInsensitiveContains("UITests") != true {
-                focusedOnOpenStream = true
-                break
-            }
-            remote.press(.right)
-            Thread.sleep(forTimeInterval: 1.5)
-        }
+        let focusedOnOpenStream = focusAppOnHome()
         // Give the extension time to be launched and to hand back content.
         Thread.sleep(forTimeInterval: 8)
         attach("03-top-shelf")
@@ -133,6 +194,24 @@ final class AppleTVTopShelfUITests: OpenStreamUITestCase {
         XCTAssertTrue(nextPage.contains { $0.hasPrefix("page ") }, "Right did not page the full-screen carousel")
         // Deliberately no `press(.home)` here: the run ends with the shelf on
         // screen so a `simctl io screenshot` from outside catches the same frame.
+    }
+
+    private func focusAppOnHome() -> Bool {
+        remote.press(.home)
+        Thread.sleep(forTimeInterval: 4)
+        remote.press(.home)
+        Thread.sleep(forTimeInterval: 4)
+        for _ in 0..<8 { remote.press(.left); Thread.sleep(forTimeInterval: 0.4) }
+        remote.press(.up)
+        Thread.sleep(forTimeInterval: 2)
+        for _ in 0..<8 {
+            let focused = focusedLabel()
+            if focused?.localizedCaseInsensitiveContains("oStream") == true,
+               focused?.localizedCaseInsensitiveContains("UITests") != true { return true }
+            remote.press(.right)
+            Thread.sleep(forTimeInterval: 1.5)
+        }
+        return false
     }
 
     /// From a snapshot: a query on a host with no accessibility server

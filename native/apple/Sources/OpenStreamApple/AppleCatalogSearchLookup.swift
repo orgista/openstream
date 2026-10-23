@@ -11,6 +11,29 @@ struct AppleCatalogSearchMatch: Equatable, Sendable {
         Self(item: item, source: metadataSource)
     }
 
+    static func mediaServer(_ record: AppleMediaRecord, sources: [AppleSource], items: [AppleCatalogItem] = []) -> Self? {
+        let enabled = Dictionary(sources.filter { $0.isEnabled && !$0.needsSignIn && $0.kind == .mediaServer }
+            .map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        for route in record.availability {
+            guard route.capability == .resolvable, let source = enabled[route.instanceID] else { continue }
+            if let item = items.first(where: {
+                AppleMediaServerItemReference.parse($0.mediaID)?.sourceID == source.id
+                    && route.itemReference == ApplePlaybackIdentity.digest(for: "\($0.type)|\($0.mediaID)")
+            }) {
+                return Self(item: item, source: source)
+            }
+            guard let itemID = route.mediaServerItemID else { continue }
+            let mediaID = AppleMediaServerItemReference(sourceID: source.id, itemID: itemID).mediaID
+            let type = route.mediaServerItemType ?? record.kind.rawValue
+            guard route.itemReference == ApplePlaybackIdentity.digest(for: "\(type)|\(mediaID)") else { continue }
+            return Self(item: AppleCatalogItem(mediaID: mediaID, type: type, name: record.title,
+                posterURL: record.artworkURL, backgroundURL: record.backdropURL, summary: record.summary,
+                year: record.year, imdbID: record.canonicalID.flatMap { AppleMediaIdentifier.isIMDBIdentifier($0) ? $0 : nil }),
+                source: source)
+        }
+        return nil
+    }
+
     private static let metadataSource = AppleSource(id: AppleMediaAvailability.metadataOnlyInstanceID, kind: .library,
                                                     name: "oStream", url: URL(string: "openstream://metadata")!)
 }

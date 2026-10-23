@@ -90,9 +90,13 @@ enum AppleContinueWatchingResolver {
         return AppleWatchProgress.fraction(position: saved.position, duration: saved.duration)
     }
 
-    /// Whether a record can open its own page: a library file, server
-    /// title or channel (`AppleCatalogSearchStore.listsUnmatched`).
-    static func isOpenable(_ record: AppleMediaRecord) -> Bool {
+    /// Server catalog records are resolvable; the enabled server supplies their page.
+    static func isOpenable(_ record: AppleMediaRecord, sources: [AppleSource]) -> Bool {
         AppleCatalogSearchStore.listsUnmatched(record)
+            || AppleCatalogSearchMatch.mediaServer(record, sources: sources) != nil
+            || record.availability.contains { route in
+                route.capability == .resolvable && route.mediaServerItemID == nil
+                    && sources.contains { $0.id == route.instanceID && $0.isEnabled && !$0.needsSignIn && $0.kind == .mediaServer }
+            }
     }
 }

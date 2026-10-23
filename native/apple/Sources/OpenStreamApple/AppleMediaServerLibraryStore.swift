@@ -942,6 +942,13 @@ public final class AppleMediaServerLibraryStore {
         persist()
     }
 
+    func prepareRoute(source: AppleSource, session: AppleMediaServerSession) {
+        guard source.isEnabled, !source.needsSignIn, source.kind == .mediaServer,
+              sessionIndex[source.id] == nil else { return }
+        sourceIndex[source.id] = source
+        sessionIndex[source.id] = session
+    }
+
     public func detail(for reference: AppleMediaServerItemReference) async throws -> AppleMediaServerDetail {
         if let cached = detailCache[reference], Date().timeIntervalSince(cached.fetchedAt) < 600 {
             return cached.detail

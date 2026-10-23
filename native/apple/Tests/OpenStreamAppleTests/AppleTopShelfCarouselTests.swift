@@ -10,11 +10,11 @@ struct AppleTopShelfCarouselTests {
     private func item(_ id: String, backdrop: Bool = true, progress: Double? = nil) -> AppleTopShelfSnapshot.Item {
         .init(
             id: id, title: id.uppercased(), kind: "movie",
-            artworkURL: URL(string: "https://image.tmdb.org/t/p/w500/\(id).jpg"),
+            artworkURL: URL(string: "https://fixture.example/art/\(id).jpg"),
             displayURL: URL(string: "openstream://media/\(id)?action=display")!,
             playURL: URL(string: "openstream://media/\(id)?action=play"),
             progress: progress,
-            landscapeArtworkURL: backdrop ? URL(string: "https://image.tmdb.org/t/p/original/\(id)-wide.jpg") : nil
+            landscapeArtworkURL: backdrop ? URL(string: "https://fixture.example/art/\(id)-wide.jpg") : nil
         )
     }
 
@@ -57,7 +57,7 @@ struct AppleTopShelfCarouselTests {
         let legacyJSON = """
         {"version":1,"generatedAt":0,"continueWatching":[{"id":"a","title":"A","kind":"movie",\
         "displayURL":"openstream://media/a?action=display","progress":0.4,\
-        "landscapeArtworkURL":"https://image.tmdb.org/t/p/original/a.jpg"}],"recentlyAdded":[],"favorites":[]}
+        "landscapeArtworkURL":"https://fixture.example/art/a.jpg"}],"recentlyAdded":[],"favorites":[]}
         """
         let decoded = try JSONDecoder().decode(AppleTopShelfSnapshot.self, from: Data(legacyJSON.utf8))
         let value = try #require(decoded.continueWatching.first)
@@ -71,10 +71,10 @@ struct AppleTopShelfCarouselTests {
             .appending(path: "openstream-topshelf-carousel-\(UUID().uuidString)", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        let backdrop = URL(string: "https://image.tmdb.org/t/p/original/matilda.jpg")!
-        let film = AppleCatalogItem(mediaID: "tt0117008", type: "movie", name: "Matilda",
-                                    posterURL: URL(string: "https://image.tmdb.org/t/p/w500/matilda.jpg"),
-                                    backgroundURL: backdrop, summary: "A gifted girl.", releaseInfo: "1996",
+        let backdrop = URL(string: "https://fixture.example/art/fixture-film.jpg")!
+        let film = AppleCatalogItem(mediaID: "tt0000001", type: "movie", name: "Fixture Film",
+                                    posterURL: URL(string: "https://fixture.example/art/fixture-film.jpg"),
+                                    backgroundURL: backdrop, summary: "A fixture film.", releaseInfo: "1996",
                                     genres: ["Comedy", "Family"], runtimeMinutes: 98)
         var record = AppleMediaIngestion.catalogRecord(instanceID: UUID(), item: film)
         record.progress = 0.3
@@ -90,10 +90,10 @@ struct AppleTopShelfCarouselTests {
         #expect(page.genre == "Comedy")
         #expect(page.year == 1996)
         #expect(page.durationSeconds == 5_880)
-        #expect(page.summary == "A gifted girl.")
+        #expect(page.summary == "A fixture film.")
         let continued = try #require(written.continueWatching.first)
         #expect(continued.year == 1996)
-        #expect(continued.summary == "A gifted girl.")
+        #expect(continued.summary == "A fixture film.")
         #expect(continued.landscapeArtworkURL == backdrop)
 
         let pages = AppleTopShelfContentBuilder.carouselItems(for: written)

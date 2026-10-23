@@ -78,6 +78,7 @@ public enum AppleDeviceReset {
         AppleChannelLineupStore.shared.discardAfterReset()
         ApplePlaybackFailureHistory.shared.removeAll()
         ApplePlaybackProgressFeed.shared.storeDidChange()
+        AppleTopShelfHeroFeed.shared.discardAfterReset()
         AppleRemoteImageCache.shared.removeAllCached()
     }
 
@@ -175,7 +176,7 @@ public enum AppleDeviceReset {
             let bundle = Bundle.main.bundleIdentifier ?? "com.orgista.openstream"
             return [.applicationSupportDirectory, .cachesDirectory].compactMap {
                 fileManager.urls(for: $0, in: .userDomainMask).first?.appendingPathComponent(bundle)
-            } + lineups
+            } + [AppleTopShelfRouteStore.defaultURL.deletingLastPathComponent()] + lineups
         }
         #endif
         let documents = fileManager.urls(for: .documentDirectory, in: .userDomainMask)

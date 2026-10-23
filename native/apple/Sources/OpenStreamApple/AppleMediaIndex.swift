@@ -44,6 +44,9 @@ public struct AppleMediaAvailability: Codable, Equatable, Sendable {
     public let capability: AppleMediaPlaybackCapability
     /// Opaque lookup key only. It is never a URL, SMB path, or credential.
     public let itemReference: String
+    /// Server item identity, without a URL or credentials, for cold title-page routes.
+    public let mediaServerItemID: String?
+    public let mediaServerItemType: String?
     public var isStale: Bool?
     public let lastVerified: Date
 
@@ -51,11 +54,15 @@ public struct AppleMediaAvailability: Codable, Equatable, Sendable {
         instanceID: AppleSource.ID,
         capability: AppleMediaPlaybackCapability,
         itemReference: String,
+        mediaServerItemID: String? = nil,
+        mediaServerItemType: String? = nil,
         lastVerified: Date = .now
     ) {
         self.instanceID = instanceID
         self.capability = capability
         self.itemReference = ApplePlaybackIdentity.digest(for: itemReference)
+        self.mediaServerItemID = mediaServerItemID
+        self.mediaServerItemType = mediaServerItemType
         self.lastVerified = lastVerified
     }
 }
@@ -126,9 +133,9 @@ public struct AppleMediaRecord: Identifiable, Codable, Equatable, Sendable {
     }
 
     /// Equal apart from when it was last verified.
-    fileprivate func hasSameContent(as other: AppleMediaRecord) -> Bool {
+    func hasSameContent(as other: AppleMediaRecord) -> Bool {
         func undated(_ value: AppleMediaAvailability) -> String {
-            "\(value.instanceID)|\(value.capability.rawValue)|\(value.itemReference)|\(value.isStale.map(String.init) ?? "")"
+            "\(value.instanceID)|\(value.capability.rawValue)|\(value.itemReference)|\(value.mediaServerItemID ?? "")|\(value.mediaServerItemType ?? "")|\(value.isStale.map(String.init) ?? "")"
         }
         var dated = self
         dated.lastVerified = other.lastVerified
@@ -546,6 +553,10 @@ public enum AppleMediaIngestion {
                 instanceID: instanceID,
                 capability: .resolvable,
                 itemReference: "\(item.type)|\(item.mediaID)",
+                mediaServerItemID: AppleMediaServerItemReference.parse(item.mediaID).flatMap {
+                    $0.sourceID == instanceID ? $0.itemID : nil
+                },
+                mediaServerItemType: AppleMediaServerItemReference.parse(item.mediaID) == nil ? nil : item.type,
                 lastVerified: verifiedAt
             )],
             isPrivate: AppleXtreamReference.parse(item.mediaID) != nil,

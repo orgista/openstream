@@ -7,14 +7,16 @@ import OSLog
 /// should call `publish` from a `.task`/`.onChange` for each.
 @MainActor
 public final class AppleTopShelfPublisher {
-    public static let shared = AppleTopShelfPublisher()
+    public static let shared = AppleTopShelfPublisher(routes: .shared)
     private static let logger = Logger(subsystem: "com.orgista.openstream.topshelf", category: "publisher")
 
     private let writer: AppleTopShelfSnapshotWriter
+    private let routes: AppleTopShelfRouteStore?
     private var lastDigest: String?
 
-    public init(writer: AppleTopShelfSnapshotWriter = .shared) {
+    public init(writer: AppleTopShelfSnapshotWriter = .shared, routes: AppleTopShelfRouteStore? = nil) {
         self.writer = writer
+        self.routes = routes
     }
 
     /// Cheap no-op when nothing relevant changed since the last publish; the
@@ -28,6 +30,7 @@ public final class AppleTopShelfPublisher {
         records: [AppleMediaRecord],
         sources: [AppleSource],
         heroes: [AppleTopShelfHero] = [],
+        continueWatching: [AppleMediaRecord]? = nil,
         enabled: Bool,
         playbackStore: ApplePlaybackStore = ApplePlaybackStore()
     ) async {
@@ -52,8 +55,39 @@ public final class AppleTopShelfPublisher {
             watchedAt[record.id] = saved.updatedAt
             savedProgress[record.id] = saved
         }
+        func indexedContinueWatching() -> [AppleMediaRecord] {
+            AppleContinueWatchingResolver.inProgress(records,
+                saved: { savedProgress[$0.id] }, activity: { activity[$0.id] },
+                successorAvailable: { successorAvailable.contains($0.id) }, removedAt: { removals[$0.id] }) {
+                    activity[$0.id]?.updatedAt ?? watchedAt[$0.id] ?? $0.lastVerified
+                }
+        }
+        var continued = continueWatching
+        if continued == nil, let routes {
+            let publishedIDs = await writer.continueWatchingIDs()
+            let privateIDs = Set(records.lazy.filter(\.isPrivate).map(\.id))
+            let cached = await routes.records().compactMap { record -> AppleMediaRecord? in
+                guard publishedIDs.contains(record.id), !privateIDs.contains(record.id),
+                      !playbackStore.isRemovedFromContinueWatching(mediaID: record.id),
+                      let match = AppleCatalogSearchMatch.mediaServer(record, sources: sources) else { return nil }
+                return Self.continueWatchingRecord(record, item: match.item, sourceID: match.source.id,
+                    playbackStore: playbackStore)
+            }
+            // Home's server resumes may have no progress in the index on the next launch.
+            if !cached.isEmpty {
+                let cachedIDs = Set(cached.map(\.id))
+                continued = cached + indexedContinueWatching().filter { !cachedIDs.contains($0.id) }.map { record in
+                    var result = record
+                    result.progress = AppleContinueWatchingResolver.progress(isSeries: record.kind == .series,
+                        saved: savedProgress[record.id], recordProgress: record.progress)
+                    return result
+                }
+            }
+        }
+        let continuedKey = continued.map { Self.continueWatchingKey($0).joined(separator: ",") } ?? "index"
         let digest = Self.digest(records: records, sources: sources,
                                  savedProgress: savedProgress, enabled: enabled)
+            + "|continueWatching:\(continuedKey)"
             + "|activity:\(ApplePlaybackProgressFeed.shared.revision)|successors:\(successorAvailable.sorted())|removed:\(removals.keys.sorted())"
             + "|heroes:" + heroes.map { "\($0.item.id)#\($0.backdropURL?.absoluteString ?? "")#\($0.wordmarkURL?.absoluteString ?? "")" }
                 .joined(separator: ",")
@@ -66,13 +100,27 @@ public final class AppleTopShelfPublisher {
         let combinedDigest = digest + liveDigest
         let snapshotExists = enabled ? await writer.snapshotExists() : true
         guard combinedDigest != lastDigest || !snapshotExists else { return }
+        var routesSaved = true
+        if let routes {
+            do {
+                let routingRecords = continued ?? indexedContinueWatching()
+                let privateIDs = Set(records.lazy.filter(\.isPrivate).map(\.id))
+                try await routes.save(records: routingRecords.filter { !privateIDs.contains($0.id) }, sources: sources, enabled: enabled)
+            } catch is CancellationError {
+                return
+            } catch {
+                routesSaved = false
+                AppleInteractionTrace.record(.failure, "top shelf route cache write failed")
+            }
+        }
+        guard !Task.isCancelled else { return }
         do {
-            try await writer.write(records: records, sources: sources,
+            try await writer.write(records: records, sources: sources, continueWatching: continued,
                                    watchedAt: watchedAt, savedProgress: savedProgress, activity: activity,
                                    successorAvailable: successorAvailable, removedAt: removals,
                                    favoriteChannels: favorites, recentChannels: recents, heroes: heroes, enabled: enabled)
             // Only a completed write/removal may suppress the next identical publish.
-            lastDigest = combinedDigest
+            lastDigest = routesSaved ? combinedDigest : nil
         } catch is CancellationError {
             // A newer publish replaced this one.
         } catch {
@@ -89,6 +137,47 @@ public final class AppleTopShelfPublisher {
         }
     }
 
+    nonisolated static func continueWatchingKey(_ records: [AppleMediaRecord]) -> [String] {
+        records.map { record in
+            "\(record.id)|\(record.progress ?? -1)|\(record.backdropURL?.absoluteString ?? "")|\(record.isPrivate)|"
+                + record.availability.map { "\($0.instanceID)#\($0.itemReference)#\($0.mediaServerItemID ?? "")#\($0.mediaServerItemType ?? "")" }.joined(separator: ";")
+        }
+    }
+
+    nonisolated static func missingRecords(records: [AppleMediaRecord], continueWatching: [AppleMediaRecord],
+                                            sources: [AppleSource]) -> [AppleMediaRecord] {
+        let known = Dictionary(records.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let enabled = Set(sources.filter(\.isEnabled).map(\.id))
+        return continueWatching.compactMap { record in
+            guard !record.isPrivate, known[record.id]?.isPrivate != true else { return nil }
+            let routes = record.availability.filter { enabled.contains($0.instanceID) }
+            guard routes.contains(where: { route in
+                known[record.id]?.availability.contains {
+                    $0.instanceID == route.instanceID && $0.itemReference == route.itemReference
+                        && $0.mediaServerItemID == route.mediaServerItemID
+                        && $0.mediaServerItemType == route.mediaServerItemType
+                } != true
+            }) else { return nil }
+            var result = record
+            result.progress = nil
+            let replaced = Set(routes.map(\.instanceID))
+            result.availability = (known[record.id]?.availability.filter { !replaced.contains($0.instanceID) } ?? []) + routes
+            result.isFavorite = known[record.id]?.isFavorite ?? record.isFavorite
+            return result
+        }
+    }
+
+    static func continueWatchingRecord(_ record: AppleMediaRecord, item: AppleCatalogItem,
+        sourceID: AppleSource.ID, playbackStore: ApplePlaybackStore) -> AppleMediaRecord {
+        let key = AppleTitleProgressIdentity.key(
+            among: AppleTitleProgressIdentity.candidates(item: item, sourceID: sourceID),
+            progress: { playbackStore.progress(for: $0) }) ?? record.id
+        var result = record
+        result.progress = AppleContinueWatchingResolver.progress(isSeries: record.kind == .series,
+            saved: playbackStore.progress(for: key), recordProgress: record.progress)
+        return result
+    }
+
     private static func digest(
         records: [AppleMediaRecord],
         sources: [AppleSource],
@@ -98,7 +187,7 @@ public final class AppleTopShelfPublisher {
         let recordsKey = records
             // The saved backdrop is the tile's art once a title leaves the shelves
             // (review of 0627624).
-            .map { "\($0.id)|\($0.isFavorite)|\($0.progress ?? -1)|\($0.lastVerified.timeIntervalSince1970)|\($0.backdropURL?.absoluteString ?? "")" }
+            .map { "\($0.id)|\($0.isFavorite)|\($0.isPrivate)|\($0.progress ?? -1)|\($0.lastVerified.timeIntervalSince1970)|\($0.backdropURL?.absoluteString ?? "")" }
             .joined(separator: ",")
         // Enabling or removing a source changes what Continue Watching can open.
         let sourcesKey = sources.map { "\($0.id.uuidString)#\($0.isEnabled)#\($0.kind)" }.joined(separator: ",")

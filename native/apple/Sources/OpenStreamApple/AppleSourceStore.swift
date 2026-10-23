@@ -346,7 +346,17 @@ private struct AppleSourceLossyList {
 @MainActor
 @Observable
 public final class AppleSourceStore {
-    public private(set) var sources: [AppleSource]
+    public private(set) var sources: [AppleSource] {
+        didSet {
+            let remaining = Set(sources.map(\.id))
+            let available = Set(sources.filter { $0.isEnabled && !$0.needsSignIn }.map(\.id))
+            if oldValue.contains(where: { !remaining.contains($0.id)
+                || ($0.isEnabled && !$0.needsSignIn && !available.contains($0.id)) }) {
+                do { try AppleTopShelfRouteStore.removeFile(at: topShelfRoutesURL) }
+                catch { appleTraceFailure("top shelf route cache removal failed") }
+            }
+        }
+    }
     public private(set) var sourceTombstones: [UUID: Date]
     public private(set) var credentialError: String?
 
@@ -354,6 +364,7 @@ public final class AppleSourceStore {
     private let storageKey: String
     private let keychain: any AppleCredentialStoring
     private let managedImportsDirectory: URL
+    private let topShelfRoutesURL: URL
     private var protectsStoredBlobWhenEmpty: Bool
     private var pendingCredentialCleanupReferences: [String]
 
@@ -361,13 +372,15 @@ public final class AppleSourceStore {
         defaults: UserDefaults = .standard,
         storageKey: String = "openstream.sources.v1",
         keychain: any AppleCredentialStoring = AppleKeychainStore(service: "com.orgista.openstream.instances"),
-        documentsDirectory: URL? = nil
+        documentsDirectory: URL? = nil,
+        topShelfRoutesURL: URL? = nil
     ) {
         self.defaults = defaults
         self.storageKey = storageKey
         sourceTombstones = defaults.data(forKey: storageKey + ".tombstones")
             .flatMap { try? JSONDecoder().decode([UUID: Date].self, from: $0) } ?? [:]
         self.keychain = keychain
+        self.topShelfRoutesURL = topShelfRoutesURL ?? AppleTopShelfRouteStore.defaultURL
         managedImportsDirectory = (documentsDirectory ?? AppleStorageLocation.documents)
             .appendingPathComponent("Imports", isDirectory: true).standardizedFileURL
         credentialError = nil

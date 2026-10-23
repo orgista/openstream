@@ -14,6 +14,17 @@ private func searchConfigurationIdentity(_ sources: [AppleSource]) -> String {
 }
 
 @MainActor
+private struct AppleDiscoverRecommendationRefresh: ViewModifier {
+    let revision: String
+    let rebuild: @MainActor (String) async -> Void
+
+    func body(content: Content) -> some View {
+        let key = revision + "|play:\(ApplePlaybackProgressFeed.shared.revision)"
+        content.task(id: key) { await rebuild(key) }
+    }
+}
+
+@MainActor
 struct AppleDiscoverView: View {
     @Environment(\.appleIsLargeLayout) private var isLargeLayout
     @Environment(\.appleUsesPadLandingChrome) private var usesPadLandingChrome
@@ -290,7 +301,7 @@ struct AppleDiscoverView: View {
                 }
                 .padding()
             }
-            .task(id: recommendationRevision) {
+            .modifier(AppleDiscoverRecommendationRefresh(revision: recommendationRevision) { revision in
                 // A cached rail can open before Discover finishes its index load.
                 if !loadedCache && !continueWatchingCacheReady {
                     await mediaIndex.load()
@@ -298,8 +309,8 @@ struct AppleDiscoverView: View {
                     mediaIndex.beginSynchronizingPlaybackProgress()
                     continueWatchingCacheReady = true
                 }
-                await rebuildRecommendations(for: recommendationRevision)
-            }
+                await rebuildRecommendations(for: revision)
+            })
             .navigationTitle("Continue Watching")
             .scrollIndicators(.never)
             .environment(\.appleDiscoverRows, discoverRowStyle)
@@ -327,9 +338,8 @@ struct AppleDiscoverView: View {
             do { try await Task.sleep(for: AppleContinueWatchingResolver.refreshDelay) } catch { return }
             continueWatchingRemovalRevision &+= 1
         }
-        .task(id: recommendationRevision) {
-            await rebuildRecommendations(for: recommendationRevision)
-        }
+        .modifier(AppleDiscoverRecommendationRefresh(revision: recommendationRevision,
+            rebuild: rebuildRecommendations))
         .onReceive(NotificationCenter.default.publisher(for: AppleTitleRatingStore.changeNotification)
             .receive(on: RunLoop.main)) { _ in
                 ratingStoreRevision = AppleTitleRatingStore.revision
@@ -536,6 +546,10 @@ struct AppleDiscoverView: View {
         .onChange(of: topShelfHeroes(heroes), initial: true) { _, pages in
             AppleTopShelfHeroFeed.shared.update(pages)
         }
+        .onChange(of: recommendationsRevision, initial: true) {
+            updateTopShelfContinueWatching()
+        }
+        .onChange(of: continueWatchingRemovalRevision) { updateTopShelfContinueWatching() }
         #endif
         // The same Search and Refresh on every page pushed from here.
         .environment(\.appleTabToolbar, tabToolbarContext)
@@ -544,11 +558,16 @@ struct AppleDiscoverView: View {
     /// All selection inputs have cheap revision tokens. Geometry, scrolling,
     /// carousel ticks and wordmark publication do not invalidate this snapshot.
     private var recommendationRevision: String {
-        "\(searchConfigurationIdentity(sourceStore.sources))|loaded:\(loadedCache || continueWatchingCacheReady)|play:\(ApplePlaybackProgressFeed.shared.revision)"
+        "\(searchConfigurationIdentity(sourceStore.sources))|loaded:\(loadedCache || continueWatchingCacheReady)"
             + "|ratings:\(ratingStoreRevision)|index:\(mediaIndex.revision)|server:\(mediaServerLibrary.contentRevision)"
+            + "|loading:\(mediaServerLibrary.isLoading)"
             + "|library:\(library.contentRevision)|chart:\(settings.top10ListsEnabled):\(top10?.fetchedAt.timeIntervalSinceReferenceDate ?? 0)"
             + "|relations:\(relationRevision)|metadata:\(AppleCatalogArtworkPolicy.configurationMarker(metadataConfiguration))"
             + "|xtream:\(AppleXtreamLibraryStore.shared.revision)|removed:\(continueWatchingRemovalRevision)|art:\(heroArtworkRevision)"
+    }
+
+    private var currentRecommendationRevision: String {
+        recommendationRevision + "|play:\(ApplePlaybackProgressFeed.shared.revision)"
     }
 
     private var recommendationCacheScope: String {
@@ -597,7 +616,7 @@ struct AppleDiscoverView: View {
         // A rating may change while this screen is covered and unsubscribed.
         ratingStoreRevision = AppleTitleRatingStore.revision
         relationRevision = AppleTMDBRelationCache.revision
-        guard revision == recommendationRevision, recommendationsRevision != revision else { return }
+        guard revision == currentRecommendationRevision, recommendationsRevision != revision else { return }
         let store = ApplePlaybackStore()
         #if DEBUG
         let wanted = UserDefaults.standard.string(forKey: "OpenStreamHeroTitle")
@@ -631,7 +650,7 @@ struct AppleDiscoverView: View {
                 result.heroes = [pinned]
             }
             #endif
-            guard !Task.isCancelled, revision == recommendationRevision else { return }
+            guard !Task.isCancelled, revision == currentRecommendationRevision else { return }
             appleTrace("discover recommendations \(AppleLaunchMarks.milliseconds(started.duration(to: .now)))ms"
                 + " picks=\(result.picks.count) heroes=\(result.heroes.count)"
                 + " serverShelves=\(snapshot.serverShelves.count) local=\(snapshot.localItems.count) trending=\(snapshot.trending.count)")
@@ -648,7 +667,7 @@ struct AppleDiscoverView: View {
                 return
             }
             if let key = await AppleDiscoverRecommendationCache.key(scope: cacheScope, state: state),
-               !Task.isCancelled, revision == recommendationRevision {
+               !Task.isCancelled, revision == currentRecommendationRevision {
                 await AppleDiscoverRecommendationCache.store(result, key: key,
                     favoriteIDs: Set(snapshot.records.lazy.filter(\.isFavorite).map(\.id)))
             }
@@ -1317,6 +1336,18 @@ struct AppleDiscoverView: View {
         }
     }
 
+    private func updateTopShelfContinueWatching() {
+        let isLoaded = recommendationsRevision != nil && hasSettled
+            && !mediaServerLibrary.isLoading && mediaServerLibrary.failures.isEmpty
+        guard isLoaded else { return }
+        let store = ApplePlaybackStore()
+        let records = AppleContinueWatchingResolver.rail(recommendations.continueWatching).map { value in
+            AppleTopShelfPublisher.continueWatchingRecord(value.record, item: value.item,
+                sourceID: value.source.id, playbackStore: store)
+        }
+        AppleTopShelfHeroFeed.shared.updateContinueWatching(records, isLoaded: isLoaded)
+    }
+
     /// The hero's own record, with any textless art that has since arrived.
     /// `id` is unchanged by the swap, so the billboard keeps its identity and
     /// tvOS keeps its focus.
@@ -1554,6 +1585,7 @@ struct AppleDiscoverView: View {
 
 @MainActor
 struct AppleSearchView: View {
+    @Environment(AppleMediaServerLibraryStore.self) private var mediaServerLibrary: AppleMediaServerLibraryStore?
     @Environment(\.appleTabToolbar) private var tabToolbar
     @State private var query = ""
     @State private var sharedLinkError = ""
@@ -1597,6 +1629,8 @@ struct AppleSearchView: View {
     let settings: AppleSettingsStore
     let openSettings: () -> Void
 
+    @State private var shelfRouteRecord: AppleMediaRecord?
+
     var body: some View {
         Group {
             if sharedLinkLoading {
@@ -1634,6 +1668,7 @@ struct AppleSearchView: View {
                                 metadataConfiguration: metadataConfiguration,
                                 settings: settings,
                                 openSettings: openSettings,
+                                mediaServerLibrary: mediaServerLibrary,
                                 tabToolbar: tabToolbar
                             )
                         } label: {
@@ -1700,6 +1735,7 @@ struct AppleSearchView: View {
                 settings: settings,
                 openSettings: openSettings,
                 initialAutoPlay: value.action == .play,
+                mediaServerLibrary: mediaServerLibrary,
                 tabToolbar: tabToolbar
             )
             .task(id: router.revision) {
@@ -1721,25 +1757,7 @@ struct AppleSearchView: View {
             }
         }
         .task(id: router.revision) {
-            let revision = router.revision
-            if case .sharedLink(let link) = router.route {
-                guard deliveredRouteRevision != revision else { return }
-                routedResult = nil
-                await openSharedLink(link, revision: revision)
-                return
-            }
-            guard case .media(let id, _) = router.route else {
-                routedResult = nil
-                return
-            }
-            await mediaIndex.load()
-            guard !Task.isCancelled, router.revision == revision else { return }
-            guard let record = mediaIndex.records.first(where: { $0.id == id }) else {
-                query = ""
-                return
-            }
-            query = record.title
-            deliverMediaRoute(revision: revision)
+            await resolveRoute(revision: router.revision)
         }
         .task(id: query + ":" + String(AppleXtreamLibraryStore.shared.revision)) {
             pendingSharedPlayer = nil
@@ -1867,11 +1885,52 @@ struct AppleSearchView: View {
         .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
     }
 
+    private func resolveRoute(revision: Int) async {
+        shelfRouteRecord = nil
+        if case .sharedLink(let link) = router.route {
+            guard deliveredRouteRevision != revision else { return }
+            routedResult = nil
+            await openSharedLink(link, revision: revision)
+            return
+        }
+        guard case .media(let id, _) = router.route else {
+            routedResult = nil
+            return
+        }
+        await mediaIndex.load()
+        let cached = await AppleTopShelfRouteStore.shared.record(id: id)
+        guard !Task.isCancelled, router.revision == revision else { return }
+        if let cached, AppleCatalogSearchMatch.mediaServer(cached, sources: sourceStore.sources) != nil,
+           mediaIndex.record(id: id)?.isPrivate != true {
+            shelfRouteRecord = cached
+        }
+        guard let record = mediaIndex.record(id: id) ?? shelfRouteRecord else {
+            query = ""
+            return
+        }
+        if searchMatch(for: record) == nil, let mediaServerLibrary,
+           AppleContinueWatchingResolver.isOpenable(record, sources: sourceStore.sources) {
+            await mediaServerLibrary.reload(sources: sourceStore.sources) { try sourceStore.mediaServerSession(for: $0) }
+            guard !Task.isCancelled, router.revision == revision else { return }
+        }
+        if let match = searchMatch(for: shelfRouteRecord ?? record), match.source.kind == .mediaServer {
+            do {
+                if let session = try sourceStore.mediaServerSession(for: match.source) {
+                    mediaServerLibrary?.prepareRoute(source: match.source, session: session)
+                }
+            } catch {
+                appleTraceFailure("top shelf server session unavailable")
+            }
+        }
+        query = record.title
+        deliverMediaRoute(revision: revision)
+    }
+
     private func deliverMediaRoute(revision: Int) {
         guard !Task.isCancelled, revision == router.revision,
               deliveredRouteRevision != revision,
               case .media(let id, let action) = router.route,
-              let record = mediaIndex.records.first(where: { $0.id == id }),
+              let record = shelfRouteRecord.flatMap { $0.id == id ? $0 : nil } ?? mediaIndex.record(id: id),
               let result = searchMatch(for: record) else { return }
         deliveredRouteRevision = revision
         appleTrace("detail route \"\(result.item.name)\"")
@@ -1904,7 +1963,10 @@ struct AppleSearchView: View {
     }
 
     private func searchMatch(for record: AppleMediaRecord) -> AppleCatalogSearchMatch? {
-        AppleXtreamLibraryStore.shared.match(record)
+        if let match = AppleXtreamLibraryStore.shared.match(record) { return match }
+        if let match = AppleCatalogSearchMatch.mediaServer(record, sources: sourceStore.sources) { return match }
+        return AppleCatalogSearchMatch.mediaServer(record, sources: sourceStore.sources,
+            items: (mediaServerLibrary?.continueWatching ?? []) + (mediaServerLibrary?.shelves.flatMap(\.items) ?? []))
     }
 
     /// Every row either opens its title page or is a file, server title or
@@ -9795,5 +9857,4 @@ extension AppleCatalogItemDetailView {
     }
 }
 #endif
-
 

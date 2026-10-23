@@ -271,9 +271,30 @@ public struct AppleTopShelfHero: Equatable, Sendable {
 public final class AppleTopShelfHeroFeed {
     public static let shared = AppleTopShelfHeroFeed()
     public private(set) var heroes: [AppleTopShelfHero] = []
+    /// Nil until Home has resolved its row; an empty row clears the shelf.
+    public private(set) var continueWatching: [AppleMediaRecord]?
+    public private(set) var continueWatchingRevision: UInt64 = 0
+    private var continueWatchingKey: [String]?
 
     public func update(_ heroes: [AppleTopShelfHero]) {
         if heroes != self.heroes { self.heroes = heroes }
+    }
+
+    public func updateContinueWatching(_ records: [AppleMediaRecord], isLoaded: Bool = true) {
+        guard isLoaded else { return }
+        let key = AppleTopShelfPublisher.continueWatchingKey(records)
+        if continueWatchingKey != key {
+            continueWatchingKey = key
+            continueWatching = records
+            continueWatchingRevision &+= 1
+        }
+    }
+
+    func discardAfterReset() {
+        heroes = []
+        continueWatching = nil
+        continueWatchingKey = nil
+        continueWatchingRevision &+= 1
     }
 }
 
@@ -539,6 +560,13 @@ public actor AppleTopShelfSnapshotWriter {
         return FileManager.default.fileExists(atPath: snapshotLocation(root).path)
     }
 
+    func continueWatchingIDs() -> Set<String> {
+        guard let root = containerProvider(),
+              let data = try? Data(contentsOf: snapshotLocation(root)),
+              let snapshot = try? JSONDecoder().decode(AppleTopShelfSnapshot.self, from: data) else { return [] }
+        return Set(snapshot.continueWatching.map(\.id))
+    }
+
     /// - Parameters:
     ///   - sources: When given, Continue Watching lists only what can open its
     ///     own page (`AppleContinueWatchingResolver.isOpenable`). Nil treats
@@ -546,6 +574,8 @@ public actor AppleTopShelfSnapshotWriter {
     ///   - watchedAt: When each record was last watched, by record id —
     ///     Continue Watching is most recent first, as on Discover. A record
     ///     missing here falls back to its `lastVerified`.
+    ///   - continueWatching: Home's resolved row, in its displayed order with
+    ///     title-specific progress. Nil builds the row from the index.
     ///   - savedProgress: The playback store's entry for each record, by
     ///     record id; the bar follows it as Discover's does
     ///     (`AppleContinueWatchingResolver.progress`). Nil keeps each
@@ -553,6 +583,7 @@ public actor AppleTopShelfSnapshotWriter {
     public func write(
         records: [AppleMediaRecord],
         sources: [AppleSource]? = nil,
+        continueWatching: [AppleMediaRecord]? = nil,
         watchedAt: [String: Date] = [:],
         savedProgress: [String: ApplePlaybackProgress]? = nil,
         activity: [String: ApplePlaybackProgress] = [:],
@@ -585,26 +616,36 @@ public actor AppleTopShelfSnapshotWriter {
             return
         }
 
-        let eligible = records.filter { !$0.availability.isEmpty && !$0.isPrivate }
-        let continued = AppleContinueWatchingResolver.inProgress(eligible,
+        let enabledSourceIDs = sources.map { Set($0.filter(\.isEnabled).map(\.id)) }
+        let privateIDs = Set(records.filter(\.isPrivate).map(\.id))
+        let isContinueWatchingEligible: (AppleMediaRecord) -> Bool = { record in
+            !record.isPrivate && !privateIDs.contains(record.id)
+                && record.availability.contains { enabledSourceIDs?.contains($0.instanceID) ?? true }
+        }
+        let eligible = records.filter { !$0.isPrivate && !$0.availability.isEmpty }
+        let continueWatchingEligible = eligible.filter(isContinueWatchingEligible)
+        let heroes = enabledSourceIDs?.isEmpty == true ? [] : heroes
+        let continued = continueWatching?.filter(isContinueWatchingEligible) ?? AppleContinueWatchingResolver.inProgress(continueWatchingEligible,
             saved: { savedProgress?[$0.id] }, activity: { activity[$0.id] },
             successorAvailable: { successorAvailable.contains($0.id) }, removedAt: { removedAt[$0.id] }) {
                 activity[$0.id]?.updatedAt ?? watchedAt[$0.id] ?? $0.lastVerified
             }
         let favorites = eligible.filter(\.isFavorite).sorted { $0.title < $1.title }
         let recent = eligible.sorted { $0.lastVerified > $1.lastVerified }
-        let shownContinued = Array(continued.filter { sources == nil || AppleContinueWatchingResolver.isOpenable($0) }
-            .prefix(AppleContinueWatchingResolver.maximumCount))
+        let shownContinued = Array(continued.filter { record in
+            guard let sources else { return true }
+            return AppleContinueWatchingResolver.isOpenable(record, sources: sources)
+        }.prefix(AppleContinueWatchingResolver.maximumCount))
         let shownRecent = Self.recentlyAddedFromServers(recent, sources: sources,
                                                         excluding: Set(shownContinued.map(\.id)))
         var snapshot = AppleTopShelfSnapshot(
             version: 1,
             generatedAt: .now,
             continueWatching: shownContinued.map { record in
-                Self.item(record, progress: savedProgress.map {
+                Self.item(record, progress: continueWatching == nil ? (savedProgress.map {
                     AppleContinueWatchingResolver.progress(isSeries: record.kind == .series,
                         saved: $0[record.id], recordProgress: record.progress)
-                } ?? record.progress,
+                } ?? record.progress) : record.progress,
                           landscapeArtworkURL: AppleSystemArtworkPolicy.publicURL(record.backdropURL))
             },
             recentlyAdded: Array(recent.prefix(20)).map { Self.item($0) },

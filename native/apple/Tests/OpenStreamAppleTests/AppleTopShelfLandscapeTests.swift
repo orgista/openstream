@@ -8,9 +8,9 @@ struct AppleTopShelfLandscapeTests {
     private func item(_ id: String, poster: String? = nil, backdrop: String? = nil) -> AppleTopShelfSnapshot.Item {
         .init(
             id: id, title: id, kind: "movie",
-            artworkURL: poster.flatMap { URL(string: "https://image.tmdb.org/t/p/w500/\($0).jpg") },
+            artworkURL: poster.flatMap { URL(string: "https://fixture.example/art/\($0).jpg") },
             displayURL: URL(string: "openstream://media/\(id)?action=display")!, playURL: nil,
-            landscapeArtworkURL: backdrop.flatMap { URL(string: "https://image.tmdb.org/t/p/w1280/\($0).jpg") }
+            landscapeArtworkURL: backdrop.flatMap { URL(string: "https://fixture.example/art/\($0).jpg") }
         )
     }
 
@@ -33,7 +33,7 @@ struct AppleTopShelfLandscapeTests {
     @Test func snapshotsWrittenBeforeTheFieldDecodeWithNoLandscapeArt() throws {
         let legacyJSON = """
         {"version":1,"generatedAt":0,"continueWatching":[{"id":"a","title":"A","kind":"movie",\
-        "artworkURL":"https://image.tmdb.org/t/p/w500/a.jpg","displayURL":"openstream://media/a?action=display",\
+        "artworkURL":"https://fixture.example/art/a.jpg","displayURL":"openstream://media/a?action=display",\
         "progress":0.4}],"recentlyAdded":[],"favorites":[],"topPicks":[]}
         """
         let decoded = try JSONDecoder().decode(AppleTopShelfSnapshot.self, from: Data(legacyJSON.utf8))
@@ -67,10 +67,10 @@ struct AppleTopShelfLandscapeTests {
         let root = try temporaryContainer()
         defer { try? FileManager.default.removeItem(at: root) }
         let sourceID = UUID()
-        let backdrop = URL(string: "https://image.tmdb.org/t/p/w1280/wide.jpg")!
+        let backdrop = URL(string: "https://fixture.example/art/wide.jpg")!
         let catalogItems = [
             AppleCatalogItem(mediaID: "tt0000001", type: "series", name: "Wide",
-                             posterURL: URL(string: "https://image.tmdb.org/t/p/w500/tall.jpg"),
+                             posterURL: URL(string: "https://fixture.example/art/tall.jpg"),
                              backgroundURL: backdrop),
             AppleCatalogItem(mediaID: "tt0000002", type: "movie", name: "Private Backdrop",
                              backgroundURL: URL(string: "https://nas.local/backdrop.jpg")),

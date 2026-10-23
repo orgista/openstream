@@ -411,6 +411,7 @@ public struct OpenStreamRootView: View {
         .appleVisionPlayerStage(visionPlayerStage)
         #endif
         .modifier(ApplePINPresenter())
+        .environment(mediaServerLibrary)
         .onChange(of: restrictionScenePhase) { _, phase in
             if phase == .background { AppleRestrictionStore.shared.background() }
         }
@@ -1061,10 +1062,16 @@ private struct AppleSystemSurfacePublishing: ViewModifier {
             }
             .onChange(of: mediaIndex.records) { schedulePublish() }
             .onChange(of: sourceStore.sources) { schedulePublish() }
+            .onChange(of: ApplePlaybackProgressFeed.shared.revision) { schedulePublish() }
             .onChange(of: AppleLiveSystemChannels.shared.revision) { schedulePublish() }
             .onChange(of: settingsStore.topShelfEnabled) { schedulePublish() }
             .onChange(of: AppleTopShelfHeroFeed.shared.heroes) { schedulePublish() }
+            .onChange(of: AppleTopShelfHeroFeed.shared.continueWatchingRevision) { schedulePublish() }
             .onChange(of: AppleServerTrailerStore.shared.revision) { schedulePublish() }
+            .onDisappear {
+                pendingPublish?.cancel()
+                pendingPublish = nil
+            }
         #else
         // macOS. The shared app group container works here now (the
         // entitlement was added and `AppleTopShelfSnapshotWriter.appGroup`
@@ -1089,10 +1096,15 @@ private struct AppleSystemSurfacePublishing: ViewModifier {
                 AppleLaunchWorkPolicy.remainingLaunchWindow(processAge: AppleLaunchMarks.launchAge())))
             guard !Task.isCancelled else { return }
             let started = ContinuousClock.now
+            let continued = AppleTopShelfHeroFeed.shared.continueWatching
+            let missing = AppleTopShelfPublisher.missingRecords(records: mediaIndex.records,
+                continueWatching: continued ?? [], sources: sourceStore.sources)
+            let replaced = Set(missing.map(\.id))
             await AppleTopShelfPublisher.shared.publish(
-                records: mediaIndex.records,
+                records: mediaIndex.records.filter { !replaced.contains($0.id) } + missing,
                 sources: sourceStore.sources,
                 heroes: AppleTopShelfHeroFeed.shared.heroes,
+                continueWatching: continued,
                 enabled: settingsStore.topShelfEnabled
             )
             appleTrace("top shelf published in \(AppleLaunchMarks.milliseconds(started.duration(to: .now)))ms")

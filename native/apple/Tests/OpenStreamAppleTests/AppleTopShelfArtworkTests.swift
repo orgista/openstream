@@ -14,7 +14,7 @@ struct AppleTopShelfArtworkTests {
         .init(id: id, title: id.uppercased(), kind: "movie", artworkURL: nil,
               displayURL: URL(string: "openstream://media/\(id)?action=display")!,
               playURL: URL(string: "openstream://media/\(id)?action=play"),
-              landscapeArtworkURL: backdrop ? URL(string: "https://image.tmdb.org/t/p/original/\(id).jpg") : nil)
+              landscapeArtworkURL: backdrop ? URL(string: "https://fixture.example/art/\(id).jpg") : nil)
     }
 
     private static func png(width: Int, height: Int, opaque: CGRect? = nil) -> Data {
@@ -53,8 +53,8 @@ struct AppleTopShelfArtworkTests {
 
     @Test("File names change with the wordmark")
     func names() {
-        let backdrop = URL(string: "https://image.tmdb.org/t/p/original/a.jpg")!
-        let logo = URL(string: "https://image.tmdb.org/t/p/original/a.png")!
+        let backdrop = URL(string: "https://fixture.example/art/a.jpg")!
+        let logo = URL(string: "https://fixture.example/art/a.png")!
         let plain = AppleTopShelfArtworkLayout.fileName(backdrop: backdrop, wordmark: nil)
         #expect(plain == AppleTopShelfArtworkLayout.fileName(backdrop: backdrop, wordmark: nil))
         #expect(plain != AppleTopShelfArtworkLayout.fileName(backdrop: backdrop, wordmark: logo))
@@ -77,9 +77,9 @@ struct AppleTopShelfArtworkTests {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try Data("stale".utf8).write(to: directory.appending(path: "stale.jpg"))
 
-        let backdrop = URL(string: "https://image.tmdb.org/t/p/original/hero-textless.jpg")!
-        let logo = URL(string: "https://image.tmdb.org/t/p/original/hero.png")!
-        let missing = URL(string: "https://image.tmdb.org/t/p/original/missing.png")!
+        let backdrop = URL(string: "https://fixture.example/art/hero-textless.jpg")!
+        let logo = URL(string: "https://fixture.example/art/hero.png")!
+        let missing = URL(string: "https://fixture.example/art/missing.png")!
         let heroes = [
             AppleTopShelfHero(item: item("lead"), backdropURL: backdrop, wordmarkURL: logo),
             AppleTopShelfHero(item: item("second"), backdropURL: backdrop, wordmarkURL: missing),
