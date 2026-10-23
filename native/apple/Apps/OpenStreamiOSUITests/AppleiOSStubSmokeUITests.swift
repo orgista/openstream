@@ -79,6 +79,11 @@ final class AppleiOSStubSmokeUITests: OpenStreamUITestCase {
         app.launch()
         let captureButton = app.buttons["debug.layout.capture"].firstMatch
         XCTAssertTrue(captureButton.waitForExistence(timeout: 30))
+        // Owner rule "no unused real estate": the unfolded canvas is used edge to edge.
+        func assertSpansCanvas(_ element: XCUIElement, _ canvas: CGRect, _ what: String) {
+            XCTAssertEqual(element.frame.minX, canvas.minX, accuracy: 2, what + " starts at the window edge")
+            XCTAssertEqual(element.frame.width, canvas.width, accuracy: 2, what + " spans the window")
+        }
         var captureIndex = 0
         func capture(_ name: String) {
             captureButton.tap()
@@ -114,10 +119,16 @@ final class AppleiOSStubSmokeUITests: OpenStreamUITestCase {
             XCTAssertTrue(play.waitForExistence(timeout: 10))
             let canvas = app.windows.containing(.button, identifier: "home.featured.play").firstMatch
             XCTAssertTrue(canvas.exists)
+            let canvasFrame = canvas.frame
             let scale = min(canvas.frame.width / (shape == "wide" ? 951 : 669),
                             canvas.frame.height / (shape == "wide" ? 669 : 951))
             XCTAssertEqual(play.frame.minX / scale, 24, accuracy: 2)
             XCTAssertEqual(play.frame.width / scale, 180, accuracy: 2)
+            let heroAtEdges = expectation(for: NSPredicate { _, _ in
+                self.heroArtReachesBothEdges(of: canvasFrame, rows: [120, 160, 200, 240, 280].map { $0 * scale })
+            }, evaluatedWith: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [heroAtEdges], timeout: 15), .completed,
+                           "The Discover hero's art reaches both edges")
             capture("duo-large-\(shape)-discover")
             details.tap()
             XCTAssertTrue(app.buttons["detail.play"].firstMatch.waitForExistence(timeout: 30))
@@ -137,14 +148,23 @@ final class AppleiOSStubSmokeUITests: OpenStreamUITestCase {
             let guide = app.buttons["live.guide"].firstMatch
             XCTAssertTrue(guide.exists)
             let schedule = app.descendants(matching: .any)["live.stage.schedule"].firstMatch
+            let list = app.descendants(matching: .any)["live.list"].firstMatch
+            XCTAssertTrue(list.exists)
             if shape == "wide" {
                 XCTAssertGreaterThan(guide.frame.midX, stage.frame.maxX)
                 XCTAssertTrue(schedule.waitForExistence(timeout: 10), "The stage's column must continue with the schedule")
                 XCTAssertGreaterThanOrEqual(schedule.frame.minY, stage.frame.maxY - 1)
                 XCTAssertLessThan(schedule.frame.maxX, guide.frame.minX)
+                // Stage and channel list side by side share the whole width.
+                XCTAssertEqual(stage.frame.minX, canvasFrame.minX, accuracy: 2, "The Live stage starts at the window edge")
+                XCTAssertGreaterThanOrEqual(list.frame.minX, stage.frame.maxX - 2)
+                XCTAssertGreaterThanOrEqual(list.frame.maxX, tabColumnEdge(canvasFrame) - 24 * scale,
+                                            "The channel list reaches the tab bar")
             } else {
                 XCTAssertGreaterThan(guide.frame.minY, stage.frame.maxY)
                 XCTAssertFalse(schedule.exists)
+                assertSpansCanvas(stage, canvasFrame, "The Live stage")
+                assertSpansCanvas(list, canvasFrame, "The channel list")
             }
             let playing = expectation(for: NSPredicate(format: "value == %@", "Playing"), evaluatedWith: stage)
             XCTAssertEqual(XCTWaiter.wait(for: [playing], timeout: 30), .completed)
@@ -264,6 +284,39 @@ final class AppleiOSStubSmokeUITests: OpenStreamUITestCase {
         add(shot)
     }
 
+    /// The hero's art, not the page's black background, reaches both side edges of `window`:
+    /// at each edge at least one sample, `rows` points below the window's top, is not the page's
+    /// pure black. The screenshot is lossless, so even near-black art (10, 10, 10 in a stub) counts;
+    /// several rows keep one black spot in the art from reading as a gap.
+    private func heroArtReachesBothEdges(of window: CGRect, rows: [CGFloat]) -> Bool {
+        guard let image = XCUIScreen.main.screenshot().image.cgImage, app.frame.width > 0 else { return false }
+        let ratio = CGFloat(image.width) / app.frame.width
+        let width = image.width, height = image.height
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let drawn = pixels.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                                          bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard drawn else { return false }
+        func differsFromPage(x: CGFloat, y: CGFloat) -> Bool {
+            let column = min(max(Int(x * ratio), 0), width - 1), row = min(max(Int(y * ratio), 0), height - 1)
+            let offset = (row * width + column) * 4
+            return pixels[offset..<offset + 3].contains { $0 > 3 }
+        }
+        return [window.minX + 2, window.maxX - 3].allSatisfy { x in
+            rows.contains { differsFromPage(x: x, y: window.minY + $0) }
+        }
+    }
+
+    /// Where a side tab bar (the unfolded Duo's) begins, else the window's edge.
+    private func tabColumnEdge(_ window: CGRect) -> CGFloat {
+        let rail = app.toolbars.buttons["Discover"].firstMatch
+        return rail.exists && rail.frame.minX > window.midX ? rail.frame.minX : window.maxX
+    }
+
     private func tapTab(_ title: String) {
         let tabBarButton = app.tabBars.buttons[title].firstMatch
         let railButton = app.toolbars.buttons[title].firstMatch
@@ -365,13 +418,35 @@ final class AppleiOSStubSmokeUITests: OpenStreamUITestCase {
         let back = app.buttons["detail.back"].firstMatch
         let stage = app.descendants(matching: .any)["live.stage.player"].firstMatch
 
-        let postures = exercisesFolding ? [true, false] : [min(app.frame.width, app.frame.height) < 600]
-        for folded in postures {
-            let shape = exercisesFolding ? (folded ? "folded" : "unfolded")
+        // Owner rule "no unused real estate": the art and the stage run edge to edge in every posture.
+        func assertSpansWindow(_ element: XCUIElement, _ what: String) {
+            XCTAssertEqual(element.frame.minX, app.frame.minX, accuracy: 1, what + " starts at the window edge")
+            XCTAssertEqual(element.frame.width, app.frame.width, accuracy: 1, what + " spans the window")
+        }
+        defer { XCUIDevice.shared.orientation = .portrait }
+        let small = min(app.frame.width, app.frame.height) < 600
+        let passes: [(folded: Bool, landscape: Bool)] = exercisesFolding
+            ? [(true, false), (true, true), (false, false), (false, true)]
+            : [(small, false), (small, true)]
+        for (index, pass) in passes.enumerated() {
+            let folded = pass.folded
+            let posture = exercisesFolding ? (folded ? "folded" : "unfolded")
                 : (folded ? "default-small-window" : "default-large-window")
+            let shape = posture + (pass.landscape ? "-landscape" : "")
+            let exercisesTransitions = exercisesFolding && index == 0
             if exercisesFolding { try await setFolded(folded) }
+            XCUIDevice.shared.orientation = pass.landscape ? .landscapeLeft : .portrait
+            // A large window follows the device; a small phone window stays upright outside the player.
+            await wait(NSPredicate { _, _ in
+                (self.app.frame.width > self.app.frame.height) == (pass.landscape && !folded)
+            })
             await tab("Discover")
             await wait(NSPredicate(format: "exists == true AND hittable == true"), on: details, timeout: 60)
+            // Below the folded screen's status bar, which sits in the column beside the content.
+            // The art loads after the hero's buttons.
+            await wait(NSPredicate { _, _ in
+                self.heroArtReachesBothEdges(of: self.app.frame, rows: [180, 220, 260, 300, 340])
+            }, timeout: 15)
             try await capture("duo-native-\(shape)-discover")
             details.tap()
             await wait(NSPredicate(format: "exists == true"), on: play)
@@ -379,7 +454,7 @@ final class AppleiOSStubSmokeUITests: OpenStreamUITestCase {
             let titleID = detail.identifier
             XCTAssertFalse(titleID.isEmpty)
             try await capture("duo-native-\(shape)-title")
-            if folded && exercisesFolding {
+            if exercisesTransitions {
                 for next in [false, true] {
                     try await setFolded(next)
                     await wait(NSPredicate(format: "exists == true AND hittable == true"), on: back)
@@ -400,11 +475,25 @@ final class AppleiOSStubSmokeUITests: OpenStreamUITestCase {
             await wait(NSPredicate(format: "exists == true AND value == %@", "Playing"), on: stage, timeout: 60)
             let guide = app.buttons["live.guide"].firstMatch
             XCTAssertTrue(guide.exists)
+            if folded {
+                assertSpansWindow(stage, "The Live stage")
+                let categories = app.descendants(matching: .any)["live.categories"].firstMatch
+                XCTAssertGreaterThanOrEqual(categories.frame.minY, stage.frame.maxY - 1, "The stage stays above the category row")
+            }
             if !folded {
+                let list = app.descendants(matching: .any)["live.list"].firstMatch
+                XCTAssertTrue(list.exists)
                 if app.frame.width > app.frame.height {
                     XCTAssertGreaterThan(guide.frame.midX, stage.frame.maxX)
+                    // Stage and channel list side by side share the whole width.
+                    XCTAssertEqual(stage.frame.minX, app.frame.minX, accuracy: 1, "The Live stage starts at the window edge")
+                    XCTAssertGreaterThanOrEqual(list.frame.minX, stage.frame.maxX - 1)
+                    XCTAssertGreaterThanOrEqual(list.frame.maxX, tabColumnEdge(app.frame) - 24,
+                                                "The channel list reaches the tab bar")
                 } else {
                     XCTAssertGreaterThan(guide.frame.minY, stage.frame.maxY)
+                    assertSpansWindow(stage, "The Live stage")
+                    assertSpansWindow(list, "The channel list")
                 }
             }
             try await capture("duo-native-\(shape)-live")
@@ -431,7 +520,7 @@ final class AppleiOSStubSmokeUITests: OpenStreamUITestCase {
             let start = try XCTUnwrap(seconds())
             await playing(after: start)
             try await capture("duo-native-\(shape)-player")
-            if folded && exercisesFolding {
+            if exercisesTransitions {
                 for next in [false, true] {
                     let previous = try XCTUnwrap(seconds())
                     try await setFolded(next)

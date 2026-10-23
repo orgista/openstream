@@ -383,7 +383,8 @@ def main():
         parser.error("--simulator requires exactly one --platform")
     signal.signal(signal.SIGINT, request_cancel)
     with local_engine_override(args.engine_fork):
-        os.environ["DEVELOPER_DIR"] = "/Applications/Xcode.app/Contents/Developer"
+        # Keep a caller-chosen Xcode (the Duo needs the 27.2 SDK to get its real layout).
+        os.environ.setdefault("DEVELOPER_DIR", "/Applications/Xcode.app/Contents/Developer")
         work = Path(tempfile.mkdtemp(prefix="openstream-fixtures-", dir="/tmp"))
         print("E2E scratch: " + str(work), flush=True)
         media_environment = {}

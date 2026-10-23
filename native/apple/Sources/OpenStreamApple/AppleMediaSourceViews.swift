@@ -112,6 +112,8 @@ struct AppleLiveTVView: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var viewportSize: CGSize = .zero
+    /// The side column the stage's video runs under (`AppleHeroSideColumn`).
+    @State private var stageSideInsets = EdgeInsets()
     @State private var showsGuide = false
     #endif
     #if os(tvOS)
@@ -1424,6 +1426,12 @@ struct AppleLiveTVView: View {
                 sideBySide: sideBySide, expandsPhoneLayout: expandsPhoneLayout))
                 .frame(width: sideBySide ? AppleLiveStagePolicy.playerWidth(total: viewportSize.width) : nil)
                 .frame(maxHeight: sideBySide ? .infinity : nil, alignment: .top)
+                #if os(iOS)
+                // Stacked, edge to edge: the video fills the side column, and its slot is as
+                // tall as that width needs; the rows below stay beside the column.
+                .frame(height: sideBySide || stageSideInsets == EdgeInsets() ? nil : stackedStageHeight)
+                .ignoresSafeArea(.container, edges: sideBySide ? [] : stageBleedEdges)
+                #endif
                 // Stacked, the stage takes its full height first; the list gets the rest.
                 .layoutPriority(1)
             liveStageGuideColumn
@@ -1436,6 +1444,9 @@ struct AppleLiveTVView: View {
         .onGeometryChange(for: CGSize.self) { proxy in
             proxy.size
         } action: { viewportSize = $0 }
+        #if os(iOS)
+        .onGeometryChange(for: EdgeInsets.self, of: AppleHeroSideBleed.sides) { stageSideInsets = $0 }
+        #endif
         .onChange(of: liveCategoryTabs) { _, tabs in
             // The last favourite removed or the events gone: back to All.
             let resolved = AppleLiveCategoryOrder.resolved(selectedCategory, in: tabs)
@@ -1466,7 +1477,25 @@ struct AppleLiveTVView: View {
     private func stageAspectRatio(sideBySide: Bool) -> CGFloat {
         guard usesParamountLiveStyle, !usesPhoneLiveLayout, !sideBySide else { return 16 / 9 }
         let height = AppleLiveStagePolicy.stackedStageHeight(size: viewportSize)
-        return height > 0 ? viewportSize.width / height : 16 / 9
+        return height > 0 ? stackedStageWidth / height : 16 / 9
+    }
+
+    #if os(iOS)
+    private var stageBleedEdges: Edge.Set {
+        var edges: Edge.Set = []
+        if stageSideInsets.leading > 0 { edges.insert(.leading) }
+        if stageSideInsets.trailing > 0 { edges.insert(.trailing) }
+        return edges
+    }
+    #endif
+
+    /// Stacked, the stage spans the side column too.
+    private var stackedStageWidth: CGFloat {
+        viewportSize.width + stageSideInsets.leading + stageSideInsets.trailing
+    }
+
+    private var stackedStageHeight: CGFloat? {
+        stackedStageWidth > 0 ? stackedStageWidth / stageAspectRatio(sideBySide: false) : nil
     }
 
     private var liveGuideSheet: some View {
@@ -3229,6 +3258,8 @@ struct AppleLibraryView: View {
     @State private var padHeroLayout = AppleMacHeroLayout(platform: .pad)
     @State private var library = AppleLocalLibraryStore.shared
     @State private var viewportSize: CGSize = .zero
+    /// The page's side safe areas, which the hero's art runs under (`AppleHeroSideBleed`).
+    @State private var sideInsets = EdgeInsets()
     @State private var selectedHero: AppleLibrarySeries?
     @State private var selectedHeroAutoPlay = false
     @State private var showsSelectedHero = false
@@ -3510,18 +3541,23 @@ struct AppleLibraryView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: sectionSpacing) {
                 let heroes = library.featuredCandidates
-                if !heroes.isEmpty {
-                    homeHero(heroes)
-                } else {
-                    let providerHeroes = AppleHeroRotation.candidates(
-                        AppleXtreamLibraryStore.shared.shelves.flatMap(\.preview), id: \.id,
-                        hasBackdrop: AppleHeroRotation.hasBackdrop)
-                    if !providerHeroes.isEmpty {
-                        AppleXtreamLibraryHero(items: providerHeroes, sourceStore: sourceStore, mediaIndex: mediaIndex,
-                            settings: settings, openSettings: openSettings, viewportSize: viewportSize,
-                            phoneLayout: phoneHeroLayout, wideLayout: wideHeroLayout)
+                Group {
+                    if !heroes.isEmpty {
+                        homeHero(heroes)
+                    } else {
+                        let providerHeroes = AppleHeroRotation.candidates(
+                            AppleXtreamLibraryStore.shared.shelves.flatMap(\.preview), id: \.id,
+                            hasBackdrop: AppleHeroRotation.hasBackdrop)
+                        if !providerHeroes.isEmpty {
+                            AppleXtreamLibraryHero(items: providerHeroes, sourceStore: sourceStore, mediaIndex: mediaIndex,
+                                settings: settings, openSettings: openSettings, viewportSize: viewportSize,
+                                phoneLayout: phoneHeroLayout, wideLayout: wideHeroLayout)
+                        }
                     }
                 }
+                #if os(iOS)
+                .modifier(AppleHeroSideBleed(insets: sideInsets))
+                #endif
                 if let error = library.errorMessage {
                     Label(error, systemImage: "exclamationmark.triangle").padding(.horizontal, 16)
                 }
@@ -3553,6 +3589,10 @@ struct AppleLibraryView: View {
         .onGeometryChange(for: CGSize.self) { $0.size } action: {
             viewportSize = AppleHomePageViewport.settled(drawn: viewportSize, measured: $0)
         }
+        #if os(iOS)
+        .onGeometryChange(for: EdgeInsets.self, of: AppleHeroSideBleed.sides) { sideInsets = $0 }
+        .scrollClipDisabled(sideInsets != EdgeInsets())
+        #endif
         #if os(iOS) || os(visionOS)
         .modifier(AppleDiscoverHeroLayoutReader(page: "library", phone: $phoneHeroLayout, pad: $padHeroLayout))
         #elseif os(macOS)

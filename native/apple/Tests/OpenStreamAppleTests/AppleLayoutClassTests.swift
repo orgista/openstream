@@ -1,4 +1,5 @@
 import CoreGraphics
+import SwiftUI
 import Testing
 @testable import OpenStreamApple
 
@@ -169,5 +170,18 @@ struct AppleLayoutClassTests {
         let barChange = AppleHomePhoneHeroLayout(containerHeight: 870, topInset: 97, bottomInset: 83,
                                                  containerWidth: 393)
         #expect(AppleHomePhoneHeroLayout.next(drawn: folded, measured: barChange, held: true) == folded)
+    }
+
+    @Test func onlyASideColumnTakesTheHeroBleed() {
+        // The Duo's status bar or tab rail column, either side.
+        #expect(AppleHeroSideColumn.insets(leading: 0, trailing: 84)
+            == EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 84))
+        #expect(AppleHeroSideColumn.insets(leading: 84, trailing: 0)
+            == EdgeInsets(top: 0, leading: 84, bottom: 0, trailing: 0))
+        #expect(AppleHeroSideColumn.insets(leading: 8, trailing: 84)
+            == EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 84))
+        // A notched iPhone on its side, and an upright phone or iPad: nothing moves.
+        #expect(AppleHeroSideColumn.insets(leading: 59, trailing: 59) == EdgeInsets())
+        #expect(AppleHeroSideColumn.insets(leading: 0, trailing: 0) == EdgeInsets())
     }
 }

@@ -42,9 +42,43 @@ enum AppleLayoutClass {
     #endif
 }
 
+/// The side safe area a hero's art and the Live video may run under: the
+/// iPhone Duo keeps its status bar (folded) or tab bar (unfolded) in an
+/// 84 pt column on one side, so its sides differ. A notched iPhone on its side
+/// insets both sides equally for the camera; the art stays inside those, so
+/// phones are unchanged.
+enum AppleHeroSideColumn {
+    static func insets(leading: CGFloat, trailing: CGFloat) -> EdgeInsets {
+        guard leading != trailing else { return EdgeInsets() }
+        return EdgeInsets(top: 0, leading: leading, bottom: 0, trailing: trailing)
+    }
+}
+
+#if os(iOS)
+/// A hero's art runs under the side column (`AppleHeroSideColumn`); copy and
+/// controls stay beside it (`appleHeroSideBleed`).
+struct AppleHeroSideBleed: ViewModifier {
+    let insets: EdgeInsets
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.appleHeroSideBleed, insets)
+            .padding(.leading, -insets.leading)
+            .padding(.trailing, -insets.trailing)
+    }
+
+    /// The side column alone, so a bar moving does not redraw the page.
+    nonisolated static func sides(of proxy: GeometryProxy) -> EdgeInsets {
+        AppleHeroSideColumn.insets(leading: proxy.safeAreaInsets.leading, trailing: proxy.safeAreaInsets.trailing)
+    }
+}
+#endif
+
 extension EnvironmentValues {
     @Entry var appleIsLargeLayout = false
     @Entry var appleExpandsPhoneLayout = false
+    /// How far the hero's art runs past the page's sides (`AppleHeroSideBleed`).
+    @Entry var appleHeroSideBleed = EdgeInsets()
 
     var appleUsesPadLandingChrome: Bool {
         // `appleExpandsPhoneLayout` is set only for a large window on a phone.

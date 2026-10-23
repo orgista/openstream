@@ -510,6 +510,7 @@ struct AppleHomeHeroPageIndicator: View {
 @MainActor
 private struct AppleHomeHeroPreview: View {
     @Environment(\.appleIsLargeLayout) private var isLargeLayout
+    @Environment(\.appleHeroSideBleed) private var sideBleed
     let item: AppleCatalogItem
     let sources: [AppleSource]
     let settings: AppleSettingsStore
@@ -681,7 +682,7 @@ private struct AppleHomeHeroPreview: View {
                         AppleTrailerSoundMemory.remember(soundOn: !isMuted)
                     }
                         .padding(.top, muteTopInset)
-                        .padding(.trailing, AppleMacHeroLayout.muteTrailingInset)
+                        .padding(.trailing, AppleMacHeroLayout.muteTrailingInset + sideBleed.trailing)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                 }
             }

@@ -20,6 +20,8 @@ struct AppleDiscoverView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var viewportSize: CGSize = .zero
+    /// The page's side safe areas, which the hero's art runs under (`AppleHeroSideBleed`).
+    @State private var sideInsets = EdgeInsets()
     /// The scroll view's height and bar insets, which size the iPhone
     /// portrait hero and pull it up under the navigation bar.
     @State private var phoneHeroLayout = AppleHomePhoneHeroLayout()
@@ -212,6 +214,9 @@ struct AppleDiscoverView: View {
                                         pad: mode == .pad, tv: tv)
                                 }
                                 .environment(\.appleHeroesSettled, heroSettlement.isSettled(by: settledHeroes))
+                                #if os(iOS)
+                                .modifier(AppleHeroSideBleed(insets: sideInsets))
+                                #endif
                                 .task(id: heroSettlement) {
                                     settledHeroes = nil
                                     guard heroSettlement.catalogReviewDone else { return }
@@ -245,6 +250,9 @@ struct AppleDiscoverView: View {
                 }
                 .modifier(ArtworkScrollPauseModifier())
                 .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
+                #if os(iOS)
+                .scrollClipDisabled(sideInsets != EdgeInsets())
+                #endif
                 #if os(iOS) || os(visionOS)
                 .refreshable { await refreshContent() }
                 #endif
@@ -335,6 +343,9 @@ struct AppleDiscoverView: View {
         .onGeometryChange(for: CGSize.self) { proxy in
             proxy.size
         } action: { viewportSize = AppleHomePageViewport.settled(drawn: viewportSize, measured: $0) }
+        #if os(iOS)
+        .onGeometryChange(for: EdgeInsets.self, of: AppleHeroSideBleed.sides) { sideInsets = $0 }
+        #endif
         // tvOS: no toolbar items. Search is its own tab there and the catalog
         // refreshes on appear, so nothing floats over the billboard (X4).
         #if !os(tvOS)
@@ -6794,6 +6805,7 @@ final class AppleTrailerControlButton: UIButton {
 }
 
 struct AppleYouTubeAutoPreview: UIViewRepresentable {
+    @Environment(\.appleHeroSideBleed) private var sideBleed
     let url: URL
     let artworkURL: URL?
     /// The caller's already-decoded still, when it has one. The cover shows it
@@ -7081,6 +7093,8 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         var isLandscape = false { didSet { setNeedsLayout() } }
         var fitsFrame = false { didSet { if oldValue != fitsFrame { setNeedsLayout() } } }
         var controlTopInset: CGFloat? = nil { didSet { if oldValue != controlTopInset { setNeedsLayout() } } }
+        /// The art under a side safe area; the control stays beside it (`AppleHeroSideBleed`).
+        var controlSideInsets = EdgeInsets() { didSet { if oldValue != controlSideInsets { setNeedsLayout() } } }
         var coverSize: CGSize? = nil { didSet { if oldValue != coverSize { setNeedsLayout() } } }
         var pictureWindow: ClosedRange<CGFloat> = 0...1 { didSet { setNeedsLayout() } }
         var hasMeasuredPicture = false
@@ -7239,7 +7253,10 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
             // Placed in the part that is on screen: the hero's 16:9 view
             // overhangs its art frame, and a control at its own corner was
             // clipped off the screen.
-            let visible = cover.frame.intersection(bounds)
+            let rightToLeft = effectiveUserInterfaceLayoutDirection == .rightToLeft
+            let visible = cover.frame.intersection(bounds).inset(by: UIEdgeInsets(
+                top: 0, left: rightToLeft ? controlSideInsets.trailing : controlSideInsets.leading,
+                bottom: 0, right: rightToLeft ? controlSideInsets.leading : controlSideInsets.trailing))
             #if os(visionOS)
             let controlSide: CGFloat = 60
             muteButton.layer.cornerRadius = controlSide / 2
@@ -7403,6 +7420,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         container.isLandscape = isLandscape
         container.fitsFrame = fitsFrame
         container.controlTopInset = controlTopInset
+        container.controlSideInsets = sideBleed
         container.coverSize = coverSize
         container.settlesPictureBeforeReveal = settlesPictureBeforeReveal
         #if DEBUG && os(iOS)
@@ -7439,6 +7457,7 @@ struct AppleYouTubeAutoPreview: UIViewRepresentable {
         view.isLandscape = isLandscape
         view.fitsFrame = fitsFrame
         view.controlTopInset = controlTopInset
+        view.controlSideInsets = sideBleed
         view.coverSize = coverSize
         view.updateArtwork(artworkURL)
         view.updateStill(artworkImage)
@@ -8490,6 +8509,10 @@ extension AppleCatalogItemDetailView {
                 .frame(maxWidth: .infinity)
                 .frame(height: phoneHeroArtHeight)
                 .clipped()
+                #if os(iOS)
+                .modifier(AppleHeroSideBleed(insets: AppleHeroSideColumn.insets(
+                    leading: pageGeometry.safeAreaInsets.leading, trailing: pageGeometry.safeAreaInsets.trailing)))
+                #endif
         }
         .background(.black)
         // Where the hero sits in the page, read without a GeometryReader

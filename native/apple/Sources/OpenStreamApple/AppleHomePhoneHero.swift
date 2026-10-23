@@ -17,6 +17,7 @@ struct AppleHomePhoneHero<Actions: View>: View {
     @ViewBuilder var actions: Actions
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.appleHeroSideBleed) private var sideBleed
     @State private var copyHidden = false
     var body: some View {
         VStack(spacing: 12) {
@@ -72,6 +73,9 @@ struct AppleHomePhoneHero<Actions: View>: View {
                 fadeLine: copyFadeLine))
         }
         .padding(.horizontal, 20)
+        // The art runs under the side safe areas; the copy stays centred beside them.
+        .padding(.leading, sideBleed.leading)
+        .padding(.trailing, sideBleed.trailing)
         // Room for the carousel's page dots, which sit over the art.
         .padding(.bottom, AppleHomePhoneHeroLayout.copyBottomInset)
         // At the accessibility sizes the copy never rises under the large
