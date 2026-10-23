@@ -448,6 +448,91 @@ final class AppleTVFocusUITests: OpenStreamUITestCase {
 
     private var remote: XCUIRemote { .shared }
 
+    func testOwnerLibraryResumeAndLiveAudio() throws {
+        guard ProcessInfo.processInfo.environment["OPENSTREAM_OWNER_CONTENT"] == "1" else {
+            throw XCTSkip("Requires the owner's sources on DevTV.")
+        }
+        app.launchArguments = ["-OpenStreamTrace", "YES", "-OpenStreamMuteAudio", "NO"]
+        app.launch()
+
+        func selectTab(_ name: String) {
+            for _ in 0..<8 { remote.press(.up) }
+            let tab = app.buttons[name].firstMatch
+            // AVKit can consume the first Menu press to hide its controls.
+            for _ in 0..<2 where !tab.exists {
+                remote.press(.menu)
+                for _ in 0..<8 { remote.press(.up) }
+            }
+            XCTAssertTrue(tab.waitForExistence(timeout: 20))
+            for _ in 0..<6 where !tab.hasFocus { remote.press(.left) }
+            for _ in 0..<6 where !tab.hasFocus { remote.press(.right) }
+            XCTAssertTrue(tab.hasFocus, "Cannot focus the \(name) tab")
+            remote.press(.select)
+        }
+
+        func seconds() -> Double? {
+            let elapsed = app.staticTexts["Elapsed Time"].firstMatch
+            let values = elapsed.exists ? [elapsed.label, elapsed.value as? String].compactMap { $0 } : []
+            let numeric = app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", #"\d+:\d{2}(:\d{2})?"#)).firstMatch
+            for value in values + (numeric.exists ? [numeric.label] : []) {
+                if let range = value.range(of: #"\d+:\d{2}(:\d{2})?"#, options: .regularExpression) {
+                    return value[range].split(separator: ":").reduce(0) { $0 * 60 + (Double($1) ?? 0) }
+                }
+            }
+            return nil
+        }
+
+        selectTab("Library")
+        let title = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "library.title.")).firstMatch
+        XCTAssertTrue(title.waitForExistence(timeout: 240), "Library has no share titles")
+        for _ in 0..<10 where !focusedElement.identifier.hasPrefix("library.title.") { remote.press(.down) }
+        XCTAssertTrue(focusedElement.identifier.hasPrefix("library.title."))
+        remote.press(.select)
+        let play = element("detail.play")
+        XCTAssertTrue(play.waitForExistence(timeout: 30))
+        XCTAssertTrue(play.hasFocus)
+        remote.press(.select)
+        for _ in 0..<3 where seconds() == nil { remote.press(.down) }
+        let advancing = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            (seconds() ?? 0) > 0
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [advancing], timeout: 60), .completed, "Library title did not start")
+        Thread.sleep(forTimeInterval: 20)
+        remote.press(.playPause)
+        for _ in 0..<3 where seconds() == nil { remote.press(.down) }
+        let stopped = try XCTUnwrap(seconds(), "Library player has no elapsed time")
+        attachScreen("owner-tv-library-20s")
+        remote.press(.menu)
+        XCTAssertTrue(play.waitForExistence(timeout: 15))
+        XCTAssertTrue(play.hasFocus)
+        remote.press(.select)
+        for _ in 0..<3 where seconds() == nil { remote.press(.down) }
+        let resumedPlayback = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            (seconds() ?? 0) >= max(1, stopped - 5)
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [resumedPlayback], timeout: 60), .completed, "Library title did not resume")
+        remote.press(.playPause)
+        let resumed = try XCTUnwrap(seconds(), "Resumed player has no elapsed time")
+        print("OWNER-CONTENT tv resume stopped=\(stopped)s resumed=\(resumed)s delta=\(abs(resumed - stopped))s")
+        XCTAssertLessThanOrEqual(abs(resumed - stopped), 5, "Resume missed the saved stop point")
+        attachScreen("owner-tv-library-resumed")
+        remote.press(.menu)
+        remote.press(.menu)
+
+        selectTab("Live")
+        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "guide.play."))
+        XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 120))
+        for _ in 0..<10 where !focusedElement.identifier.hasPrefix("guide.play.") { remote.press(.down) }
+        XCTAssertTrue(focusedElement.identifier.hasPrefix("guide.play."))
+        remote.press(.select)
+        XCTAssertTrue(element("live.player.surface").waitForExistence(timeout: 45))
+        Thread.sleep(forTimeInterval: 20)
+        XCTAssertFalse(element("live.failure").exists, "Live playback failed")
+        remote.press(.playPause)
+        XCTAssertTrue(app.images["Paused"].firstMatch.waitForExistence(timeout: 10), "Live never reached a pausable stream")
+        attachScreen("owner-tv-live-audio-unmuted")
+    }
+
     override func setUp() {
         continueAfterFailure = false
         app = XCUIApplication(bundleIdentifier: "com.orgista.openstream")

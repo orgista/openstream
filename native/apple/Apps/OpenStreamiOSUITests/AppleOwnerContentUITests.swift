@@ -82,9 +82,10 @@ final class AppleOwnerContentUITests: OpenStreamUITestCase {
               "a-needs-sign-in", "some imported sources still need sign-in")
     }
 
-    /// Library lists titles from the share and plays one to a first frame.
-    func testBLibraryPlaysAShareTitle() {
-        launch([])
+    /// Library plays a share title, saves its stop point, and resumes it.
+    func testBLibraryPlaysAShareTitle() throws {
+        continueAfterFailure = false
+        launch([], muteAudio: false)
         tab("Library")
         let title = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ OR identifier BEGINSWITH %@",
                                                      "library.title.", "home.ms.")).firstMatch
@@ -97,9 +98,26 @@ final class AppleOwnerContentUITests: OpenStreamUITestCase {
         guard check(play.waitForExistence(timeout: 30), "b-no-title-page", "the Library title page has no Play") else { return }
         attach("b-library-title")
         play.tap()
-        Thread.sleep(forTimeInterval: 15)
-        attach("b-library-playing-15s")
+        let pause = app.buttons["player.play-pause"].firstMatch
+        XCTAssertTrue(pause.waitForExistence(timeout: 60), "Library player has no transport")
+        XCTAssertTrue(waitForPlaying(pause), "Library title did not start")
+        Thread.sleep(forTimeInterval: 20)
+        revealTransport()
+        XCTAssertEqual(pause.label, "Pause")
+        pause.tap()
+        let stopped = try XCTUnwrap(playbackSeconds(), "Library player has no elapsed time")
+        attach("b-library-playing-20s")
         check(!playbackFailed(), "b-playback-failed", "Library playback failed: \(alertText())")
+        closePlayer()
+        XCTAssertTrue(play.waitForExistence(timeout: 15))
+        play.tap()
+        XCTAssertTrue(pause.waitForExistence(timeout: 60))
+        XCTAssertTrue(waitForPlaying(pause), "Library title did not resume")
+        pause.tap()
+        let resumed = try XCTUnwrap(playbackSeconds(), "Resumed player has no elapsed time")
+        print("OWNER-CONTENT resume stopped=\(stopped)s resumed=\(resumed)s delta=\(abs(resumed - stopped))s")
+        XCTAssertLessThanOrEqual(abs(resumed - stopped), 5, "Resume missed the saved stop point")
+        attach("b-library-resumed")
         closePlayer()
     }
 
@@ -139,39 +157,61 @@ final class AppleOwnerContentUITests: OpenStreamUITestCase {
         closePlayer()
     }
 
-    /// Owner 2026-10-22: opening Live the first time waited on the channels.
-    /// Discover first, for the launch prefetch's time, then Live. A timing log,
-    /// not a gate: it passes at any speed, and the measurement is the app's
-    /// trace line "live rows N shown Xms after opening".
+    func testCLivePlaysWithAudio() {
+        continueAfterFailure = false
+        launch([], muteAudio: false)
+        tab("Live")
+        let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "guide.play.")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 120), "Live lists no channels")
+        row.tap()
+        let player = app.descendants(matching: .any)["live.stage.player"].firstMatch
+        XCTAssertTrue(player.waitForExistence(timeout: 30))
+        let playing = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Playing"), object: player)
+        XCTAssertEqual(XCTWaiter.wait(for: [playing], timeout: 30), .completed, "Live channel did not start")
+        Thread.sleep(forTimeInterval: 20)
+        XCTAssertEqual(player.value as? String, "Playing", "Live channel did not keep playing")
+        XCTAssertFalse(playbackFailed())
+        attach("c-live-audio-unmuted")
+    }
+
+    /// The app trace measures presentation; XCTest also waits for snapshots and idle.
     func testDLiveFirstOpenTimeToRows() {
-        launch([])
-        Thread.sleep(forTimeInterval: 12)
+        measureLiveRows(after: 15)
+    }
+
+    func testDLiveImmediateOpenTimeToRows() {
+        measureLiveRows(after: 0)
+    }
+
+    private func measureLiveRows(after delay: TimeInterval) {
+        launch([], dismissFirstRun: false)
+        if delay > 0 { Thread.sleep(forTimeInterval: delay) }
         let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "guide.play."))
         let started = Date()
         tab("Live")
         let shown = rows.firstMatch.waitForExistence(timeout: 120)
-        print("OWNER-CONTENT live first rows ms=\(Int(Date().timeIntervalSince(started) * 1000)) shown=\(shown)")
+        print("OWNER-CONTENT live automation ms=\(Int(Date().timeIntervalSince(started) * 1000)) delay=\(delay)s shown=\(shown); presentation timing is in the app trace")
         attach("d-live-first-rows")
         check(shown, "d-no-rows", "Live showed no channel rows")
     }
 
-    /// Discover's rows load from the media servers; a title page shows its trailer.
+    /// Discover shows the configured library's rows and a title page's trailer.
     func testDDiscoverRowsAndTrailer() {
         launch([])
         tab("Discover")
-        let poster = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "home.ms.")).firstMatch
-        guard check(poster.waitForExistence(timeout: 90), "d-no-rows", "Discover shows no posters") else { return }
-        Thread.sleep(forTimeInterval: 5)
-        let shelves = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "discover.shelf.")).count
-        print("OWNER-CONTENT discover shelves=\(shelves)")
-        attach("d-discover")
-        app.swipeUp()
-        Thread.sleep(forTimeInterval: 2)
-        attach("d-discover-scrolled")
-        app.swipeDown()
-
         let details = app.buttons["home.featured.details"].firstMatch
-        if details.waitForExistence(timeout: 10), details.isHittable { details.tap() } else { poster.tap() }
+        guard check(details.waitForExistence(timeout: 90), "d-no-hero", "Discover shows no hero") else { return }
+        attach("d-discover")
+        // Shelves below the billboard are built only after scrolling.
+        app.swipeUp()
+        let poster = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ OR identifier BEGINSWITH %@",
+                                                     "library.title.", "home.ms.")).firstMatch
+        scrollIntoView(poster)
+        guard check(poster.exists && poster.isHittable, "d-no-rows", "Discover shows no library posters after scrolling") else { return }
+        attach("d-discover-scrolled")
+        for _ in 0..<8 where !details.exists || !details.isHittable { app.swipeDown() }
+        guard check(details.exists && details.isHittable, "d-no-hero-return", "Discover did not return to its hero") else { return }
+        details.tap()
         let page = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "detail.screen.")).firstMatch
         guard check(page.waitForExistence(timeout: 30), "d-no-title-page", "no title page from Discover") else { return }
         let trailer = app.buttons["detail.trailer.mute"].firstMatch.waitForExistence(timeout: 30)
@@ -429,18 +469,38 @@ final class AppleOwnerContentUITests: OpenStreamUITestCase {
 
     // MARK: Helpers
 
-    private func launch(_ extra: [String]) {
+    private func launch(_ extra: [String], muteAudio: Bool = true, dismissFirstRun: Bool = true) {
         app.launchArguments = ["-OpenStreamTrace", "YES", "-OpenStreamTraceConsole", "YES",
-                               "-OpenStreamMuteAudio", "YES"] + extra
+                               "-OpenStreamMuteAudio", muteAudio ? "YES" : "NO"] + extra
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
-        let notNow = app.buttons["Not Now"].firstMatch
-        if notNow.waitForExistence(timeout: 2) { notNow.tap() }
+        if dismissFirstRun {
+            let notNow = app.buttons["Not Now"].firstMatch
+            if notNow.waitForExistence(timeout: 2) { notNow.tap() }
+        }
     }
 
     private func tab(_ name: String) {
         let button = app.tabBars.buttons[name].firstMatch
-        if button.waitForExistence(timeout: 20) { button.tap() } else { XCTFail("no \(name) tab") }
+        if button.exists || button.waitForExistence(timeout: 20) { button.tap() } else { XCTFail("no \(name) tab") }
+    }
+
+    private func revealTransport() {
+        if !app.buttons["player.play-pause"].firstMatch.exists {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.4)).tap()
+        }
+    }
+
+    private func waitForPlaying(_ pause: XCUIElement) -> Bool {
+        XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "Pause"),
+                                                     object: pause)], timeout: 60) == .completed
+    }
+
+    private func playbackSeconds() -> Double? {
+        let slider = app.sliders["Playback position"].firstMatch
+        guard slider.exists, let value = slider.value as? String,
+              value.range(of: #"^\d+:\d{2}(:\d{2})?$"#, options: .regularExpression) != nil else { return nil }
+        return value.split(separator: ":").reduce(0) { $0 * 60 + (Double($1) ?? 0) }
     }
 
     /// Swipes the page up until `element`'s row is on screen (at most 8
