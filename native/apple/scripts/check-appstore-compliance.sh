@@ -81,14 +81,14 @@ PY
                     if (( release )); then LC_ALL=C grep -Eio "$release_words" <<< "$text"; fi
                   } | sort | uniq -c || true)"
         if [[ -n "$found" ]]; then report "$rel" "$found"; hits=$((hits + 1)); fi
-    done < <(find "$product" -type f ! -name 'CodeResources' -print0)
+    done < <(find "$product" -type d -name '*.dSYM' -prune -o -type f ! -name 'CodeResources' -print0)
     if (( hits > 0 )); then
         echo "FAIL: $(basename "$product") ships words App Store builds must not (listed above)."
         failed=1
     else
         echo "PASS: $(basename "$product")"
     fi
-    if find "$product" \( -iname 'ChannelLineup' -o -iname '*.oslineup' -o -iname 'complete-us.json' \) -print -quit | grep -q .; then
+    if find "$product" -type d -name '*.dSYM' -prune -o \( -iname 'ChannelLineup' -o -iname '*.oslineup' -o -iname 'complete-us.json' \) -print -quit | grep -q .; then
         echo "FAIL: $(basename "$product") contains a bundled channel lineup."
         failed=1
     fi

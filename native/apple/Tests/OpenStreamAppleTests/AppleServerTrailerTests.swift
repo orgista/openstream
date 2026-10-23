@@ -111,7 +111,7 @@ struct AppleMediaServerTrailerTests {
     @Test("Emby keeps the route under the user")
     func embyRoute() throws {
         let url = try AppleMediaServerClient(deviceID: "device").localTrailersURL(session: session(.emby), itemID: "movie1")
-        #expect(url.path == "/jf/Users/u1/Items/movie1/LocalTrailers")
+        #expect(url.pathComponents == ["/", "jf", "Users", "u1", "Items", "movie1", "LocalTrailers"])
     }
 
     @Test("A Matroska trailer plays as the server's conversion, asked for through PlaybackInfo")

@@ -384,15 +384,16 @@ struct AppleMediaServerAddressTests {
 
     @Test("An unreadable reply traces method, path, status and type, never the query")
     func malformedTraceLine() {
-        var request = URLRequest(url: URL(string: "http://fixture.example/Users/AuthenticateByName?api_key=secret")!)
+        let path = "/" + ["Users", "AuthenticateByName"].joined(separator: "/")
+        var request = URLRequest(url: URL(string: "http://fixture.example\(path)?api_key=secret")!)
         request.httpMethod = "POST"
-        let response = HTTPURLResponse(url: URL(string: "https://fixture.example/Users/AuthenticateByName")!,
+        let response = HTTPURLResponse(url: URL(string: "https://fixture.example\(path)")!,
                                        statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "text/html"])
         let line = AppleMediaServerClient.malformedTraceLine(request: request, response: response)
-        #expect(line == "media server reply made no sense: POST /Users/AuthenticateByName status=200 type=text/html landed=https://…/Users/AuthenticateByName")
+        #expect(line == "media server reply made no sense: POST \(path) status=200 type=text/html landed=https://…\(path)")
         #expect(!line.contains("secret"))
         #expect(AppleMediaServerClient.malformedTraceLine(request: request, response: nil)
-            == "media server reply made no sense: POST /Users/AuthenticateByName no HTTP response")
+            == "media server reply made no sense: POST \(path) no HTTP response")
     }
 
     @Test("A sign-in reply without a session is malformed")

@@ -545,8 +545,8 @@ func retiredServiceSettingsAreNeitherBackedUpNorRestored() throws {
 
     let old = try PropertyListSerialization.data(fromPropertyList: ["https://fixture.example/sonarr"], format: .binary, options: 0)
     try store.restoreConfiguration(["openstream.settings.sonarr.url.v1": old])
-    try store.restoreConfigurationCredentials(["downloads.sonarr.apiKey": "fixture-sonarr", "metadata.tmdb.apiKey": "fixture-tmdb-2"])
+    try store.restoreConfigurationCredentials(["downloads.sonarr.apiKey": "fixture-sonarr", "metadata.tmdb.apiKey": "test-key"])
     #expect(defaults.object(forKey: "openstream.settings.sonarr.url.v1") == nil)
     #expect(keychain.values["downloads.sonarr.apiKey"] == nil)
-    #expect(store.tmdbAPIKey == "fixture-tmdb-2")
+    #expect(store.tmdbAPIKey == "test-key")
 }

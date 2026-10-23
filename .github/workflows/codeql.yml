@@ -1,0 +1,30 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  swift:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: swift
+          build-mode: manual
+      - name: Build Apple package
+        run: swift build --package-path native/apple --scratch-path "$RUNNER_TEMP/openstream-codeql"
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:swift

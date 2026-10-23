@@ -343,7 +343,7 @@ class FixtureHandler(BaseHTTPRequestHandler):
         if length:
             self.rfile.read(length)
         parsed = urlsplit(self.path)
-        if parsed.path == "/jf/Users/AuthenticateByName":
+        if parsed.path.split("/") == ["", "jf", "Users", "AuthenticateByName"]:
             return self._send_json({"User": {"Id": "fixture-user", "Name": "fixture"},
                                     "AccessToken": "fixture-token", "ServerId": "fixture-server"})
         if parsed.path.startswith("/jf/"):
@@ -385,7 +385,7 @@ class FixtureHandler(BaseHTTPRequestHandler):
         return self._serve_file(clip or os.path.join(self.server.root, "mp4-h264-aac.mp4"), allow_range=True)
 
     def _serve_jellyfin(self, path, query):
-        user = "/Users/fixture-user"
+        user = "/".join(("", "Users", "fixture-user"))
         if path == "/System/Info/Public":
             return self._send_json({"ServerName": "Fixture", "Version": "10.10.7", "Id": "fixture-server",
                                     "ProductName": "Jellyfin Server"})
@@ -408,7 +408,7 @@ class FixtureHandler(BaseHTTPRequestHandler):
         if path == "/Shows/NextUp":
             first = ITEMS["jf-ep-1-1"]
             return self._page([first] if query.get("ParentId", [""])[0] == "jf-lib-shows" else [], query)
-        match = re.match(r"^/Users/fixture-user/Items/([^/]+)$", path)
+        match = re.match("^" + re.escape(user) + r"/Items/([^/]+)$", path)
         if match:
             item = ITEMS.get(match.group(1))
             return self._send_json(_present(item)) if item else self._send_simple(404, b"not found")

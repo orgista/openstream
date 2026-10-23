@@ -306,7 +306,7 @@ def local_engine_override(fork):
     if not fork:
         yield
         return
-    if "/Volumes/DevExt/dev/openstream-build/" not in str(ROOT.resolve()):
+    if (Path.home() / "Developer/openstream-build").resolve() not in ROOT.resolve().parents:
         raise RuntimeError("Engine override is restricted to the Dev-Mini build mirror")
     engine = Path(fork).resolve()
     if not (engine / "Package.swift").is_file():
@@ -364,6 +364,9 @@ def main():
     parser.add_argument("--derived-data", type=Path, default=DD, help="Internal simulator DerivedData directory")
     parser.add_argument("--repeat", type=int, default=1, help="Independent runs, restoring simulator data after each")
     parser.add_argument("--engine-fork", help="Dev-Mini-only temporary engine dependency override")
+    parser.add_argument("--engine-corpus", type=Path,
+                        default=Path(os.environ.get("OPENSTREAM_ENGINE_CORPUS", "corpus")),
+                        help="Local engine corpus directory (or OPENSTREAM_ENGINE_CORPUS)")
     parser.add_argument("--matrix", action="store_true", help="Run all ISO/caption cases and affected iOS baseline retries")
     parser.add_argument("--only", action="append", default=[])
     parser.add_argument("--only-ios", action="append", default=[])
@@ -397,7 +400,7 @@ def main():
         if args.iso_fixtures:
             discs = {}
             for name in ["menu-test", "menu-features"]:
-                source = Path("/Volumes/DevExt/engine-lab/corpus/dvd") / (name + ".iso")
+                source = args.engine_corpus / "dvd" / (name + ".iso")
                 if not source.is_file():
                     raise RuntimeError("Missing ISO corpus: " + str(source))
                 folder = work / "discs" / name
@@ -408,7 +411,7 @@ def main():
             if args.iso_repro:
                 media_environment["OPENSTREAM_ISO_REPRO"] = "1"
         if args.caption_fixtures:
-            corpus = Path("/Volumes/DevExt/engine-lab/corpus/subs")
+            corpus = args.engine_corpus / "subs"
             cases = {}
             for name, track in [("g-subs-pgs.mkv", 12), ("ff-pgs-dts.m2ts", 5),
                                 ("ff-vobsub-reddwarf.mkv", 3), ("ff-largeres-vobsub.mkv", 7),
