@@ -556,7 +556,8 @@ public struct AppleTMDBClient: Sendable {
                                     summary: overview,
                                     releaseInfo: releaseDate ?? firstAirDate,
                                     genres: genres?.prefix(12).compactMap { AppleTMDBClient.bounded($0.name, limit: 60) },
-                                    year: (releaseDate ?? firstAirDate).flatMap { Int($0.prefix(4)) })
+                                    year: (releaseDate ?? firstAirDate).flatMap { Int($0.prefix(4)) },
+                                    logoURL: AppleTMDBClient.imageURL(path: AppleTMDBClient.logoPath(in: images), width: "w500"))
         }
     }
 
@@ -638,16 +639,7 @@ public struct AppleTMDBClient: Sendable {
         let spoken = (value.spokenLanguages ?? []).compactMap { language in
             AppleTitlePagePolicy.languageName(language.code) ?? bounded(language.englishName, limit: 60)
         }
-        // An SVG wordmark does not decode as an image here; skip it.
-        let logoPath = value.images?.logos
-            .filter { $0.filePath?.lowercased().hasSuffix(".svg") != true }
-            .sorted { lhs, rhs in
-                let lhsEnglish = lhs.language?.caseInsensitiveCompare("en") == .orderedSame
-                let rhsEnglish = rhs.language?.caseInsensitiveCompare("en") == .orderedSame
-                if lhsEnglish != rhsEnglish { return lhsEnglish }
-                return (lhs.voteAverage ?? 0) > (rhs.voteAverage ?? 0)
-            }
-            .first?.filePath
+        let logoPath = logoPath(in: value.images)
         // The hero draws the wordmark itself, so it wants the frame without
         // one painted on. `include_image_language=en,null` already brings the
         // textless entries back in the same request this response came from —
@@ -706,6 +698,18 @@ public struct AppleTMDBClient: Sendable {
         guard let url, isResizableArtworkURL(url) else { return url }
         let parts = url.path.split(separator: "/")
         return imageURL(path: "/" + parts.dropFirst(3).joined(separator: "/"), width: size)
+    }
+
+    private static func logoPath(in images: Images?) -> String? {
+        images?.logos
+            .filter { $0.filePath?.lowercased().hasSuffix(".svg") != true }
+            .sorted { lhs, rhs in
+                let lhsEnglish = lhs.language?.caseInsensitiveCompare("en") == .orderedSame
+                let rhsEnglish = rhs.language?.caseInsensitiveCompare("en") == .orderedSame
+                if lhsEnglish != rhsEnglish { return lhsEnglish }
+                return (lhs.voteAverage ?? 0) > (rhs.voteAverage ?? 0)
+            }
+            .first?.filePath
     }
 
     private static func imageURL(path: String?, width: String) -> URL? {

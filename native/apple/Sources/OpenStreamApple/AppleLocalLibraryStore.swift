@@ -223,6 +223,49 @@ final class AppleLocalLibraryStore {
             type: group.parsed.kind == .show ? "series" : "movie", name: group.parsed.title,
             releaseInfo: group.parsed.year.map(String.init))
     }
+
+    func mediaRecord(for group: AppleLibrarySeries, file: AppleLibraryItem? = nil) -> AppleMediaRecord? {
+        guard let file = file ?? group.items.first,
+              let source = sources.first(where: { $0.id == file.sourceID && $0.isEnabled }) else { return nil }
+        let original = AppleMediaIngestion.libraryRecord(source: source, item: file)
+        let item = catalogItem(for: group)
+        return AppleMediaRecord(canonicalID: original.canonicalID,
+            kind: item.type == "series" ? .series : metadata[group.id] == nil && group.parsed.kind == .other ? .video : .movie,
+            title: item.name, aliases: [group.parsed.title], year: item.year ?? item.releaseInfo.flatMap { Int($0.prefix(4)) },
+            summary: item.summary, artworkURL: item.posterURL, backdropURL: item.backgroundURL,
+            availability: original.availability, isPrivate: true, lastVerified: original.lastVerified)
+    }
+
+    @ObservationIgnored private var searchRecordCache: (revision: Int, records: [AppleMediaRecord])?
+
+    func searchRecords(indexed: [AppleMediaRecord], additional: [AppleMediaRecord] = []) async -> [AppleMediaRecord] {
+        let references = matchIndex().byReference
+        let local: [AppleMediaRecord]
+        if let searchRecordCache, searchRecordCache.revision == contentRevision {
+            local = searchRecordCache.records
+        } else {
+            local = groups.compactMap { mediaRecord(for: $0) }
+            searchRecordCache = (contentRevision, local)
+        }
+        return await Self.combinedSearchRecords(local: local, indexed: indexed, additional: additional, references: references)
+    }
+
+    @concurrent nonisolated private static func combinedSearchRecords(local: [AppleMediaRecord], indexed: [AppleMediaRecord],
+        additional: [AppleMediaRecord], references: [String: Int]) async -> [AppleMediaRecord] {
+        guard !Task.isCancelled else { return [] }
+        return local + additional + indexed.filter { record in
+            !record.availability.contains { references[$0.itemReference] != nil }
+        }
+    }
+
+    func searchMatch(for record: AppleMediaRecord) -> AppleCatalogSearchMatch? {
+        let index = matchIndex()
+        guard let route = record.availability.first(where: { index.byReference[$0.itemReference] != nil }),
+              let position = index.byReference[route.itemReference],
+              let source = sources.first(where: { $0.id == route.instanceID && $0.isEnabled }) else { return nil }
+        let group = index.groups[position]
+        return .init(item: catalogItem(for: group), source: source)
+    }
     /// `matches(_:_:)` against every group, answered from `matchIndex()`.
     func matchingGroups(_ item: AppleCatalogItem) -> [AppleLibrarySeries] {
         let index = matchIndex()
@@ -239,6 +282,7 @@ final class AppleLocalLibraryStore {
         let groups: [AppleLibrarySeries]
         var byIMDb: [String: [Int]] = [:]
         var byName: [String: [Int]] = [:]
+        var byReference: [String: Int] = [:]
         var hasIMDb: [Bool] = []
     }
     @ObservationIgnored private var matchIndexCache: MatchIndex?
@@ -259,6 +303,9 @@ final class AppleLocalLibraryStore {
             index.hasIMDb.append(hasIMDb)
             if hasIMDb { index.byIMDb["\(item.type):\(item.mediaID)", default: []].append(position) }
             index.byName[Self.nameKey(item), default: []].append(position)
+            for reference in group.items.map(\.id) + ["\(item.type)|\(item.mediaID)"] {
+                index.byReference[ApplePlaybackIdentity.digest(for: reference)] = position
+            }
         }
         matchIndexCache = index
         return index

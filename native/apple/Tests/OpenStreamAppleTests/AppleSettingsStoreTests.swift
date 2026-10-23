@@ -550,3 +550,23 @@ func retiredServiceSettingsAreNeitherBackedUpNorRestored() throws {
     #expect(keychain.values["downloads.sonarr.apiKey"] == nil)
     #expect(store.tmdbAPIKey == "test-key")
 }
+
+@MainActor @Test
+func metadataOffDisablesHeroTMDBRequestsEvenWithAValidKey() async throws {
+    let store = AppleSettingsStore(defaults: makeIsolatedDefaults(), keychain: StubCredentialStore())
+    store.tmdbAPIKey = "fixture-tmdb"
+    store.metadataEnabled = true
+    #expect(store.tmdbConfiguration != nil)
+    store.metadataEnabled = false
+    #expect(store.tmdbConfiguration == nil)
+    #expect(await store.loadedTMDBConfiguration(interval: .zero) == nil)
+    await confirmation(expectedCount: 0) { requested in
+        let client = AppleTMDBClient { _ in
+            requested()
+            throw AppleTMDBError.titleNotFound
+        }
+        if let configuration = store.tmdbConfiguration {
+            _ = try? await client.details(imdbID: "tt0000072", kind: .movie, configuration: configuration)
+        }
+    }
+}

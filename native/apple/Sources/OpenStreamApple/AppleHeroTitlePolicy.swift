@@ -78,4 +78,18 @@ enum AppleHeroTitlePolicy {
     static func wordmarkLookupPending(mediaID: String, resolved: Set<String>, wordmarkFailed: Bool) -> Bool {
         !wordmarkFailed && !resolved.contains(mediaID)
     }
+
+    static func phoneWordmarkLookupPending(metadataLoaded: Bool, lookupPending: Bool,
+                                          validatedTaskID: String?, taskID: String) -> Bool {
+        !metadataLoaded || lookupPending || validatedTaskID != taskID
+    }
+
+    @MainActor
+    static func resolveWordmark(lookup: () async -> AppleHeroArtworkUpgrade.Artwork,
+                                apply: (AppleHeroArtworkUpgrade.Artwork) -> Void, didResolve: () -> Void) async {
+        let artwork = await lookup()
+        guard !Task.isCancelled else { return }
+        apply(artwork)
+        didResolve()
+    }
 }

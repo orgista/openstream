@@ -62,7 +62,7 @@ struct AppleHomeBillboard<Actions: View>: View {
     @State private var detailTrailerKeys: [String] = []
     @State private var phoneDetails: AppleTMDBDetails?
     @State private var phoneLogo: URL?
-    @State private var phoneLogoLookupPending = true
+    @State private var validatedPhoneLogoTaskID: String?
     @State private var trailerRequest: UUID?
     /// The title's trailer on the user's server, and whether that lookup
     /// has answered for this page (the Vision Pro waits for it before
@@ -311,15 +311,16 @@ struct AppleHomeBillboard<Actions: View>: View {
     private var featuredBody: some View {
         if let phone {
             AppleHomePhoneHero(item: item, artHeight: phone.artHeight, copyFadeLine: phone.copyFadeLine,
-                               wordmark: phoneLogo, wordmarkLookupPending: !actionMetadataLoaded || phoneLogoLookupPending,
+                               wordmark: phoneLogo, wordmarkLookupPending: AppleHeroTitlePolicy.phoneWordmarkLookupPending(
+                                   metadataLoaded: actionMetadataLoaded, lookupPending: wordmarkLookupPending == true,
+                                   validatedTaskID: validatedPhoneLogoTaskID, taskID: phoneLogoTaskID),
                                stage: stage,
                                onOpenDetails: onOpenDetails) { actionButtons }
                 .task(id: phoneLogoTaskID) {
-                    phoneLogoLookupPending = true
                     let validated = await AppleTransparentPNGLogoValidator.firstValid(in: phoneLogoCandidates)
                     guard !Task.isCancelled else { return }
                     if validated != nil || actionMetadataLoaded { phoneLogo = validated }
-                    phoneLogoLookupPending = false
+                    validatedPhoneLogoTaskID = phoneLogoTaskID
                 }
         } else {
             AppleFeaturedHero(

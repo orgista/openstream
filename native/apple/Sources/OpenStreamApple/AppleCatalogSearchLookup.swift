@@ -5,6 +5,16 @@ struct AppleCatalogSearchMatch: Equatable, Sendable {
     let item: AppleCatalogItem
     let source: AppleSource
 
+    static func indexed(_ record: AppleMediaRecord, sources: [AppleSource]) -> Self? {
+        guard let route = record.availability.first(where: { route in
+            sources.contains { $0.id == route.instanceID && $0.isEnabled }
+        }), let source = sources.first(where: { $0.id == route.instanceID }) else { return nil }
+        let type = record.kind == .series ? "series" : record.kind == .channel ? "tv" : "movie"
+        return .init(item: .init(mediaID: record.canonicalID ?? record.id, type: type, name: record.title,
+            posterURL: record.artworkURL, backgroundURL: record.backdropURL, summary: record.summary,
+            releaseInfo: record.year.map(String.init)), source: source)
+    }
+
     /// A title known only from TMDB (a Top 10 row, a shared link) opens its
     /// page with no source of its own.
     static func metadataOnly(_ item: AppleCatalogItem) -> Self {
@@ -20,30 +30,59 @@ struct AppleCatalogSearchMetrics: Equatable, Sendable {
     let fetchDuration: Duration
 }
 
+struct AppleCatalogSearchRow: Identifiable, Sendable {
+    let record: AppleMediaRecord
+    let match: AppleCatalogSearchMatch
+    var id: String { record.id }
+}
+
 @MainActor
 @Observable
 final class AppleCatalogSearchStore {
     typealias LocalSearch = @MainActor (String) async -> [AppleMediaRecord]
+    typealias ResolveMatch = @MainActor (AppleMediaRecord) -> AppleCatalogSearchMatch?
+
+    struct Identity: Equatable {
+        let query: String
+        let contentRevision: String?
+    }
 
     private(set) var results: [AppleMediaRecord] = []
+    private(set) var rows: [AppleCatalogSearchRow] = []
+    private(set) var contentRevision = ""
     private(set) var isSearching = false
     private(set) var metrics: AppleCatalogSearchMetrics?
 
     private let debounce: Duration
+    private let revisionDebounce: Duration
     private let maximumResults: Int
     private var generation: UInt64 = 0
 
-    init(debounce: Duration = .milliseconds(100), maximumResults: Int = 100) {
+    init(debounce: Duration = .milliseconds(100), maximumResults: Int = 100, revisionDebounce: Duration = .milliseconds(350)) {
         self.debounce = max(debounce, .zero)
+        self.revisionDebounce = max(revisionDebounce, .zero)
         self.maximumResults = min(max(maximumResults, 1), 100)
     }
 
-    func search(query: String, localSearch: @escaping LocalSearch) async {
+    func taskIdentity(query: String) -> Identity {
+        Identity(query: query, contentRevision: AppleSharedLinkResolver.link(in: query) == nil ? contentRevision : nil)
+    }
+
+    func coalesceRevision(_ revision: String) async {
+        guard contentRevision != revision else { return }
+        do { try await Task.sleep(for: revisionDebounce) }
+        catch { return }
+        guard !Task.isCancelled else { return }
+        contentRevision = revision
+    }
+
+    func search(query: String, resolveMatch: ResolveMatch? = nil, localSearch: @escaping LocalSearch) async {
         generation &+= 1
         let currentGeneration = generation
         let value = String(query.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))
         guard !value.isEmpty else {
             results = []
+            rows = []
             metrics = nil
             isSearching = false
             return
@@ -57,7 +96,11 @@ final class AppleCatalogSearchStore {
         // search answers: "saturday night live" sat under the
         // "saturday night li" list (Life, Lights, then Live) until the slow
         // search came back (Apple TV regression 2026-10-01).
+        let matchesByID = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0.match) })
         results = Self.mergedResults(results, matching: value, limit: maximumResults)
+        rows = results.compactMap { record in
+            matchesByID[record.id].map { AppleCatalogSearchRow(record: record, match: $0) }
+        }
 
         let clock = ContinuousClock()
         let debounceStart = clock.now
@@ -71,14 +114,27 @@ final class AppleCatalogSearchStore {
 
         let fetchStart = clock.now
         let localRecords = await localSearch(value)
+        guard generation == currentGeneration, !Task.isCancelled else { return }
+        let prepared = await Self.prepareResults(localRecords, matching: value, limit: maximumResults)
         let fetchDuration = fetchStart.duration(to: clock.now)
         guard generation == currentGeneration, !Task.isCancelled else { return }
 
-        results = Self.mergedResults(localRecords, matching: value, limit: maximumResults)
+        results = prepared
+        rows = prepared.compactMap { record in
+            guard let match = resolveMatch?(record) else { return nil }
+            return AppleCatalogSearchRow(record: record, match: match)
+        }
         metrics = AppleCatalogSearchMetrics(
             debounceDuration: debounceDuration,
             fetchDuration: fetchDuration
         )
+    }
+
+    @concurrent nonisolated private static func prepareResults(
+        _ records: [AppleMediaRecord], matching query: String, limit: Int
+    ) async -> [AppleMediaRecord] {
+        guard !Task.isCancelled else { return [] }
+        return mergedResults(records, matching: query, limit: limit)
     }
 
     /// Whether a row that resolves to no title page should still be listed:

@@ -3266,6 +3266,7 @@ struct AppleLibraryView: View {
     /// Textless hero art, keyed by media id, once TMDB has been asked for it.
     /// Empty is the normal state on first paint — see `upgradeHeroArtwork`.
     @State private var heroArtwork: [String: AppleHeroArtworkUpgrade.Artwork] = [:]
+    @State private var heroWordmarksResolved: Set<String> = []
     #if os(macOS)
     /// The same hero geometry as Discover's (`AppleMacHeroLayout`).
     @State private var macHeroLayout = AppleMacHeroLayout()
@@ -3407,6 +3408,8 @@ struct AppleLibraryView: View {
             preferredSourceID: group.items.first?.sourceID ?? AppleSource.ID(),
             onPlay: { selectHero(group, autoPlay: true) }, onOpenDetails: { selectHero(group, autoPlay: false) },
             settings: settings, viewportSize: viewportSize, wordmark: failed ? nil : item.logoURL,
+            wordmarkLookupPending: AppleHeroTitlePolicy.wordmarkLookupPending(
+                mediaID: item.mediaID, resolved: heroWordmarksResolved, wordmarkFailed: failed),
             rotationCount: count, rotationIndex: index,
             phone: mode == .phone ? .init(artHeight: phoneHeroLayout.artHeight, copyFadeLine: phoneHeroLayout.topInset) : nil,
             mac: mode == .mac || mode == .pad ? .init(layout: wideHeroLayout) : nil,
@@ -3467,21 +3470,25 @@ struct AppleLibraryView: View {
     /// metadata disk cache after the first visit, so the swap is a first-run
     /// event, not something the viewer sees every time.
     private func upgradeHeroArtwork(_ heroes: [AppleLibrarySeries]) async {
-        guard settings.metadataEnabled,
-              let configuration = try? AppleTMDBConfiguration(credential: settings.tmdbAPIKey) else { return }
         for group in heroes {
             let item = library.catalogItem(for: group)
-            guard heroArtwork[item.mediaID] == nil,
-                  let imdbID = AppleHeroArtworkUpgrade.upgradeableIMDBID(for: item) else { continue }
-            let upgrade = await AppleHeroArtworkUpgrade.shared.artwork(
-                imdbID: imdbID,
-                kind: item.type == "series" ? .series : .movie,
-                configuration: configuration
-            )
+            guard let configuration = settings.tmdbConfiguration else {
+                heroWordmarksResolved.insert(item.mediaID)
+                continue
+            }
+            guard heroArtwork[item.mediaID] == nil else {
+                heroWordmarksResolved.insert(item.mediaID)
+                continue
+            }
+            await AppleHeroTitlePolicy.resolveWordmark {
+                await AppleHeroArtworkUpgrade.shared.artwork(for: item,
+                    hasLibraryMetadataMatch: library.metadata[group.id] != nil, configuration: configuration)
+            } apply: { upgrade in
+                heroArtwork[item.mediaID] = upgrade
+            } didResolve: {
+                heroWordmarksResolved.insert(item.mediaID)
+            }
             guard !Task.isCancelled else { return }
-            // Nothing to show for it is still an answer worth holding on to:
-            // it stops the loop asking again every time the view reappears.
-            heroArtwork[item.mediaID] = upgrade
         }
     }
 

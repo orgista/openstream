@@ -225,7 +225,6 @@ struct AppleDiscoverView: View {
                                     settledHeroes = heroSettlement
                                 }
                                 .task(id: heroes.map(\.item.mediaID).joined(separator: ",")) {
-                                    heroWordmarksResolved.formUnion(heroes.map(\.item.mediaID))
                                     // Only after the billboard has drawn: the
                                     // textless backdrop is an upgrade, never
                                     // something first paint waits on.
@@ -612,7 +611,8 @@ struct AppleDiscoverView: View {
             activity: store.activities(),
             completed: store.configurationWatchedHistory(), unwatched: store.configurationWatchedTombstones(),
             removed: store.configurationContinueWatchingRemovals(), ratings: AppleTitleRatingStore().allRatings,
-            serverContinueWatching: mergedContinueWatching(local: []), serverShelves: mediaServerLibrary.shelves,
+            serverContinueWatching: mergedContinueWatching(local: Self.localContinueWatching(library: library, playbackStore: store)),
+            serverShelves: mediaServerLibrary.shelves,
             artwork: heroArtwork, debugHeroTitle: wanted, now: .now,
             localItems: library.featuredCandidates.prefix(AppleHeroRotation.maximumCandidates).compactMap { group in
                 guard let file = group.items.first,
@@ -778,6 +778,20 @@ struct AppleDiscoverView: View {
             xtreamItems: AppleXtreamLibraryStore.shared.continueWatching,
             xtreamSource: { AppleXtreamLibraryStore.shared.source($0) },
             sources: sourceStore.sources, playbackStore: ApplePlaybackStore())
+    }
+
+    static func localContinueWatching(library: AppleLocalLibraryStore, playbackStore: ApplePlaybackStore) -> [IndexedCatalogItem] {
+        library.continueWatching.compactMap { group in
+            guard let file = group.items.max(by: {
+                (playbackStore.lastActivity(for: library.playbackID($0))?.updatedAt ?? .distantPast)
+                    < (playbackStore.lastActivity(for: library.playbackID($1))?.updatedAt ?? .distantPast)
+            }), var record = library.mediaRecord(for: group, file: file),
+                  let source = library.sources.first(where: { $0.id == file.sourceID && $0.isEnabled }) else { return nil }
+            let progress = playbackStore.progress(for: library.playbackID(file))
+            record.progress = progress.map { AppleWatchProgress.fraction(position: $0.position, duration: $0.duration) }
+            return IndexedCatalogItem(record: record, item: library.catalogItem(for: group), source: source,
+                continueWatchingUpdatedAt: playbackStore.lastActivity(for: library.playbackID(file))?.updatedAt)
+        }
     }
 
     /// The production merge with explicit inputs so tests use isolated playback storage.
@@ -1156,7 +1170,7 @@ struct AppleDiscoverView: View {
         return ForEach(Array(values.enumerated()), id: \.element.id) { index, value in
             AppleContinueWatchingTile(
                 item: value.item,
-                info: continueWatchingInfo(value, store: store),
+                info: Self.continueWatchingInfo(value, store: store),
                 isInList: mediaIndex.record(id: value.record.id)?.isFavorite ?? value.record.isFavorite,
                 onOpenTitle: { selectHero(value, autoPlay: false) },
                 onToggleList: { toggleHeroInList(value) },
@@ -1171,10 +1185,17 @@ struct AppleDiscoverView: View {
         }
     }
 
-    private func continueWatchingInfo(_ value: IndexedCatalogItem, store: ApplePlaybackStore) -> AppleContinueWatchingTileInfo {
+    static func continueWatchingInfo(_ value: IndexedCatalogItem, store: ApplePlaybackStore) -> AppleContinueWatchingTileInfo {
         let key = AppleTitleProgressIdentity.key(
-            among: AppleTitleProgressIdentity.candidates(item: value.item, sourceID: value.source.id),
+            among: [value.record.id] + AppleTitleProgressIdentity.candidates(item: value.item, sourceID: value.source.id),
             progress: { store.progress(for: $0) }) ?? value.record.id
+        if value.source.kind == .library || value.source.kind == .nas {
+            let saved = store.progress(for: key)
+            return .init(progress: saved.map { AppleWatchProgress.fraction(position: $0.position, duration: $0.duration) }
+                ?? value.record.progress ?? 0,
+                remainingLabel: saved.flatMap { AppleContinueWatchingCaption.remainingLabel(position: $0.position, duration: $0.duration) },
+                subtitle: AppleContinueWatchingCaption.subtitle(type: value.item.type, partID: saved?.partID))
+        }
         return .live(type: value.item.type, recordID: key, recordProgress: value.record.progress, store: store)
     }
 
@@ -1238,7 +1259,7 @@ struct AppleDiscoverView: View {
         _ value: IndexedCatalogItem, rotationCount: Int = 0, rotationIndex: Int = 0, wordmarkFailed: Bool = false,
         phone: Bool = false, mac: Bool = false, pad: Bool = false, tv: AppleHomeTVHeroContext? = nil
     ) -> some View {
-        let item = phone ? value.item : heroItem(value.item)
+        let item = heroItem(value.item)
         return AppleHomeBillboard(
             item: item,
             sources: sourceStore.sources,
@@ -1334,18 +1355,26 @@ struct AppleDiscoverView: View {
     /// cache once a title has been seen, so later launches draw the right art
     /// straight away.
     private func upgradeHeroArtwork(_ heroes: [IndexedCatalogItem]) async {
-        guard let configuration = metadataConfiguration else { return }
         for hero in heroes {
-            guard heroArtwork[hero.item.mediaID] == nil,
-                  let imdbID = AppleHeroArtworkUpgrade.upgradeableIMDBID(for: hero.item) else { continue }
-            let upgrade = await AppleHeroArtworkUpgrade.shared.artwork(
-                imdbID: imdbID,
-                kind: hero.item.type == "series" ? .series : .movie,
-                configuration: configuration
-            )
+            guard let configuration = metadataConfiguration else {
+                heroWordmarksResolved.insert(hero.item.mediaID)
+                continue
+            }
+            guard heroArtwork[hero.item.mediaID] == nil else {
+                heroWordmarksResolved.insert(hero.item.mediaID)
+                continue
+            }
+            let hasMetadataMatch = library.matchingGroups(hero.item).contains { library.metadata[$0.id] != nil }
+            await AppleHeroTitlePolicy.resolveWordmark {
+                await AppleHeroArtworkUpgrade.shared.artwork(for: hero.item,
+                    hasLibraryMetadataMatch: hasMetadataMatch, configuration: configuration)
+            } apply: { upgrade in
+                heroArtwork[hero.item.mediaID] = upgrade
+                heroArtworkRevision &+= 1
+            } didResolve: {
+                heroWordmarksResolved.insert(hero.item.mediaID)
+            }
             guard !Task.isCancelled else { return }
-            heroArtwork[hero.item.mediaID] = upgrade
-            heroArtworkRevision &+= 1
         }
     }
 
@@ -1575,6 +1604,7 @@ struct AppleSearchView: View {
     @State private var routedResult: RoutedResult?
     @State private var deliveredRouteRevision: Int?
     @State private var recentSearches = AppleRecentSearchStore()
+    @State private var library = AppleLocalLibraryStore.shared
     #if DEBUG
     @State private var debugOpenedFirstResult = false
     #endif
@@ -1619,28 +1649,24 @@ struct AppleSearchView: View {
                 } else {
                     ContentUnavailableView("Search Your Sources", systemImage: "magnifyingglass")
                 }
-            } else if listedResults.isEmpty {
+            } else if searchStore.rows.isEmpty {
                 ContentUnavailableView.search(text: query)
             } else {
-                List(listedResults) { record in
-                    if let result = searchMatch(for: record) {
-                        NavigationLink {
-                            AppleCatalogItemDetailView(
-                                item: result.item,
-                                source: result.source,
-                                relatedItems: [],
-                                mediaIndex: mediaIndex,
-                                playbackSources: sourceStore.sources,
-                                metadataConfiguration: metadataConfiguration,
-                                settings: settings,
-                                openSettings: openSettings,
-                                tabToolbar: tabToolbar
-                            )
-                        } label: {
-                            resultRow(record, sourceName: result.source.name)
-                        }
-                    } else {
-                        resultRow(record, sourceName: sourceName(for: record))
+                List(searchStore.rows) { row in
+                    NavigationLink {
+                        AppleCatalogItemDetailView(
+                            item: row.match.item,
+                            source: row.match.source,
+                            relatedItems: [],
+                            mediaIndex: mediaIndex,
+                            playbackSources: sourceStore.sources,
+                            metadataConfiguration: metadataConfiguration,
+                            settings: settings,
+                            openSettings: openSettings,
+                            tabToolbar: tabToolbar
+                        )
+                    } label: {
+                        resultRow(row.record, sourceName: row.match.source.name)
                     }
                 }
                 .scrollIndicators(AppleDesignTokens.scrollIndicatorVisibility)
@@ -1741,9 +1767,9 @@ struct AppleSearchView: View {
             query = record.title
             deliverMediaRoute(revision: revision)
         }
-        .task(id: query + ":" + String(AppleXtreamLibraryStore.shared.revision)) {
-            pendingSharedPlayer = nil
+        .task(id: searchIdentity) {
             if query != sharedLinkGenerationQuery {
+                pendingSharedPlayer = nil
                 sharedLinkGenerationQuery = query
                 sharedLinkGeneration &+= 1
             }
@@ -1752,17 +1778,21 @@ struct AppleSearchView: View {
                 await openSharedLink(link, revision: revision)
                 return
             }
-            await searchStore.search(query: query) { value in
-                await mediaIndex.search(value) + AppleXtreamLibraryStore.shared.search(value)
+            await searchStore.search(query: query, resolveMatch: searchMatch) { value in
+                await localSearch(value)
             }
             deliverMediaRoute(revision: revision)
             // A query that stayed put and found something is a search worth
             // remembering; the keystrokes on the way to it are not (tvOS has
             // no submit, so this is the only path there).
-            guard !listedResults.isEmpty else { return }
+            guard !Task.isCancelled, !searchStore.rows.isEmpty else { return }
             try? await Task.sleep(for: .seconds(2.5))
             guard !Task.isCancelled else { return }
             recentSearches.record(query)
+        }
+        .task(id: searchContentIdentity) {
+            guard let revision = searchContentIdentity else { return }
+            await searchStore.coalesceRevision(revision)
         }
         .task {
             await mediaIndex.load()
@@ -1771,16 +1801,15 @@ struct AppleSearchView: View {
         // `-OpenStreamDebugSearchQuery <text>` types a query and opens the
         // first result's title page once, for a headless sweep of Search as
         // an entry point (N53).
-        .task(id: listedResults.count) {
+        .task(id: searchStore.rows.count) {
             guard let typed = UserDefaults.standard.string(forKey: "OpenStreamDebugSearchQuery"),
                   !typed.isEmpty else { return }
             if query.isEmpty { query = typed; return }
-            guard !debugOpenedFirstResult, let record = listedResults.first,
-                  let match = searchMatch(for: record) else { return }
+            guard !debugOpenedFirstResult, let row = searchStore.rows.first else { return }
             try? await Task.sleep(for: .seconds(2))
             guard !Task.isCancelled else { return }
             debugOpenedFirstResult = true
-            routedResult = RoutedResult(record: record, item: match.item, source: match.source,
+            routedResult = RoutedResult(record: row.record, item: row.match.item, source: row.match.source,
                                         action: .display, revision: -1)
         }
         #endif
@@ -1793,8 +1822,8 @@ struct AppleSearchView: View {
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     Task { @MainActor in
-                        await searchStore.search(query: query) { value in
-                            await mediaIndex.search(value) + AppleXtreamLibraryStore.shared.search(value)
+                        await searchStore.search(query: query, resolveMatch: searchMatch) { value in
+                            await localSearch(value)
                         }
                     }
                 } label: {
@@ -1898,21 +1927,25 @@ struct AppleSearchView: View {
         }
     }
 
-    private func sourceName(for record: AppleMediaRecord) -> String {
-        let names = record.availability.compactMap { route in sourceStore.sources.first { $0.id == route.instanceID }?.name }
-        return names.isEmpty ? "Local source" : names.joined(separator: ", ")
-    }
-
     private func searchMatch(for record: AppleMediaRecord) -> AppleCatalogSearchMatch? {
-        AppleXtreamLibraryStore.shared.match(record)
+        library.searchMatch(for: record) ?? AppleXtreamLibraryStore.shared.match(record)
+            ?? AppleCatalogSearchMatch.indexed(record, sources: sourceStore.sources)
     }
 
-    /// Every row either opens its title page or is a file, server title or
-    /// channel; see `AppleCatalogSearchStore.listsUnmatched`.
-    private var listedResults: [AppleMediaRecord] {
-        searchStore.results.filter {
-            AppleCatalogSearchStore.listsUnmatched($0) || searchMatch(for: $0) != nil
-        }
+    private var searchIdentity: AppleCatalogSearchStore.Identity {
+        searchStore.taskIdentity(query: query)
+    }
+
+    private var searchContentIdentity: String? {
+        guard !library.isLoading, !AppleXtreamLibraryStore.shared.isLoading else { return nil }
+        return [String(AppleXtreamLibraryStore.shared.revision), String(library.contentRevision),
+            String(mediaIndex.revision), searchConfigurationIdentity(sourceStore.sources)].joined(separator: "|")
+    }
+
+    private func localSearch(_ value: String) async -> [AppleMediaRecord] {
+        let indexed = await mediaIndex.search(value)
+        let xtream = await AppleXtreamLibraryStore.shared.search(value)
+        return await library.searchRecords(indexed: indexed, additional: xtream)
     }
 
 
@@ -9795,5 +9828,3 @@ extension AppleCatalogItemDetailView {
     }
 }
 #endif
-
-

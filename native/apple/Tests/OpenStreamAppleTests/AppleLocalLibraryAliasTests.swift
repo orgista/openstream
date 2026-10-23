@@ -18,7 +18,7 @@ private struct AliasCredentialStub: AppleCredentialStoring {
     let settings: AppleSettingsStore
     var blobDirectory: URL { root.appendingPathComponent("Playback") }
 
-    static func run(lookup: @escaping AppleLibraryMetadataResolver.Lookup = { _, _, _ in nil },
+    static func run(kind: AppleSourceKind = .library, lookup: @escaping AppleLibraryMetadataResolver.Lookup = { _, _, _ in nil },
                     _ body: (Self) async throws -> Void) async throws {
         let suite = "local-alias-\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -27,7 +27,7 @@ private struct AliasCredentialStub: AppleCredentialStoring {
         let resolver = AppleLibraryMetadataResolver(directory: root.appendingPathComponent("Titles"),
             matchDirectory: root.appendingPathComponent("Matches"), lookup: lookup)
         let playback = ApplePlaybackStore(defaults: defaults, blobDirectory: root.appendingPathComponent("Playback"))
-        let source = AppleSource(kind: .library, name: "Fixture", url: root.appendingPathComponent("Media"))
+        let source = AppleSource(kind: kind, name: "Fixture", url: root.appendingPathComponent("Media"))
         let sources = AppleSourceStore(defaults: defaults, keychain: AliasCredentialStub(), documentsDirectory: root)
         let settings = AppleSettingsStore(defaults: defaults, keychain: AliasCredentialStub())
         try await body(Self(defaults: defaults, root: root, resolver: resolver, playback: playback,
@@ -57,6 +57,107 @@ private struct AliasCredentialStub: AppleCredentialStoring {
 }
 
 @MainActor @Suite struct AppleLocalLibraryAliasTests {
+    @Test(arguments: [AppleSourceKind.library, .nas], ["72.HOURS.2024.mkv", "aabbccddeeff00112233445566778899.mkv"])
+    func discoverContinuesTheLibraryTitleWithItsFileProgress(kind: AppleSourceKind, filename: String) async throws {
+        try await LocalAliasFixture.run(kind: kind) { f in
+            let file = f.file(filename)
+            try await f.resolver.correctMatch(for: file,
+                candidate: .init(mediaID: "tt0000072", type: "movie", name: "72 Hours",
+                    posterURL: URL(string: "https://fixture.example/poster.jpg"), releaseInfo: "2024"), provider: "fixture")
+            let library = f.store([file])
+            await f.resolveAll(library)
+            f.playback.save(mediaID: library.playbackID(file), position: 600, duration: 3600)
+            let values = AppleDiscoverView.localContinueWatching(library: library, playbackStore: f.playback)
+            let value = try #require(values.first)
+            #expect(values.count == library.continueWatching.count)
+            #expect(value.record.id == library.playbackID(file))
+            #expect(value.record.title == "72 Hours")
+            #expect(value.record.kind == .movie)
+            #expect(value.item.name == "72 Hours")
+            #expect(value.record.progress == 1.0 / 6)
+            #expect(AppleDiscoverView.continueWatchingInfo(value, store: f.playback).progress == 1.0 / 6)
+            #expect(value.item.posterURL == URL(string: "https://fixture.example/poster.jpg"))
+            #expect(value.source.id == f.source.id)
+            f.playback.removeFromContinueWatching(mediaID: library.playbackID(file))
+            #expect(AppleDiscoverView.localContinueWatching(library: library, playbackStore: f.playback).isEmpty)
+        }
+    }
+
+    @Test func discoverSearchUsesOneMetadataTitleAndKeepsItsFileRoute() async throws {
+        try await LocalAliasFixture.run { f in
+            let files = [f.file("JOHN.WICK.2014.1080p.mkv"), f.file("JOHN.WICK.2014.2160p.mkv")]
+            let movie = AppleCatalogItem(mediaID: "tt2911666", type: "movie", name: "John Wick",
+                posterURL: URL(string: "https://fixture.example/wick.jpg"), releaseInfo: "2014")
+            for file in files { try await f.resolver.correctMatch(for: file, candidate: movie, provider: "fixture") }
+            let library = f.store(files)
+            await f.resolveAll(library)
+            let staleTitle = AppleCatalogItem(mediaID: movie.mediaID, type: "movie", name: "JOHN WICK",
+                posterURL: movie.posterURL, summary: "An older index entry.", releaseInfo: "2014")
+            let indexed = AppleMediaIngestion.libraryRecords(source: f.source, items: files)
+                + [AppleMediaIngestion.catalogRecord(instanceID: f.source.id, item: staleTitle)]
+            let rows = AppleCatalogSearchStore.mergedResults(await library.searchRecords(indexed: indexed), matching: "wick", limit: 100)
+            let row = try #require(rows.first)
+            #expect(rows.count == 1)
+            #expect(row.title == "John Wick")
+            #expect(row.kind == .movie)
+            #expect(row.artworkURL == movie.posterURL)
+            let match = try #require(library.searchMatch(for: row))
+            #expect(match.item == movie)
+            #expect(match.source.id == f.source.id)
+        }
+    }
+
+    @Test func discoverShowsFileProgressForAnUnmatchedLocalEpisode() async throws {
+        try await LocalAliasFixture.run { f in
+            let file = f.file("Shows/Show/Show.S01E02.mkv")
+            let library = f.store([file])
+            f.playback.save(mediaID: library.playbackID(file), position: 600, duration: 1800)
+            let value = try #require(AppleDiscoverView.localContinueWatching(library: library, playbackStore: f.playback).first)
+            let info = AppleDiscoverView.continueWatchingInfo(value, store: f.playback)
+            #expect(info.progress == 1.0 / 3)
+            #expect(info.remainingLabel != nil)
+        }
+    }
+
+    @Test func discoverSearchFindsMetadataNamesAndGroupsShowEpisodes() async throws {
+        try await LocalAliasFixture.run { f in
+            let files = [f.file("RELEASE.S01E01.mkv"), f.file("RELEASE.S01E02.mkv")]
+            let show = AppleCatalogItem(mediaID: "tt0903747", type: "series", name: "Breaking Bad", releaseInfo: "2008")
+            try await f.resolver.correctMatch(for: files[0], candidate: show, provider: "fixture")
+            let library = f.store(files)
+            await f.resolveAll(library)
+            let rows = AppleCatalogSearchStore.mergedResults(
+                await library.searchRecords(indexed: AppleMediaIngestion.libraryRecords(source: f.source, items: files)),
+                matching: "breaking", limit: 100)
+            #expect(rows.count == 1)
+            #expect(rows.first?.kind == .series)
+            #expect(rows.first.flatMap { library.searchMatch(for: $0) }?.item == show)
+        }
+    }
+
+    @Test func unmatchedLibrarySearchStillOpensATitlePage() async throws {
+        try await LocalAliasFixture.run { f in
+            let library = f.store([f.file("Unmatched.2024.mkv")])
+            let row = try #require(await library.searchRecords(indexed: []).first)
+            #expect(library.searchMatch(for: row)?.item.name == "Unmatched")
+            #expect(library.searchMatch(for: row)?.source.id == f.source.id)
+        }
+    }
+
+    @Test func searchSnapshotRefreshesWhenLibraryMetadataChanges() async throws {
+        try await LocalAliasFixture.run { f in
+            let file = f.file("RELEASE.2024.mkv")
+            let library = f.store([file])
+            #expect(await library.searchRecords(indexed: []).first?.title == "RELEASE")
+            try await f.resolver.correctMatch(for: file,
+                candidate: .init(mediaID: "tt0000072", type: "movie", name: "72 Hours", releaseInfo: "2024"), provider: "fixture")
+            await f.resolveAll(library)
+            #expect(await library.searchRecords(indexed: []).first?.title == "72 Hours")
+            library.discardAfterReset()
+            #expect(await library.searchRecords(indexed: []).isEmpty)
+        }
+    }
+
     @Test func defaultDVDPlayOpensTheDiscMenu() async throws {
         try await LocalAliasFixture.run { f in
             let file = f.file("Film.2020.iso")

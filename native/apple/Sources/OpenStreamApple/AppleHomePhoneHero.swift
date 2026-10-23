@@ -101,7 +101,7 @@ struct AppleHomePhoneHero<Actions: View>: View {
     private static var coordinateSpaceName: String { "AppleHomePhoneHero" }
 
     /// The wordmark, its slot held empty while it loads; the name in
-    /// black-weight capitals when it fails, is slow or there is none, over
+    /// the title's own casing when it fails, is slow or there is none, over
     /// any art (`AppleHeroTitlePolicy`).
     private var title: some View {
         AppleHeroTitleLockup(pageID: item.id, wordmark: wordmark,

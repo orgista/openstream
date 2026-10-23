@@ -36,7 +36,7 @@ actor AppleHeroArtworkUpgrade {
     /// away from the metadata responses that share the cache directory. The
     /// version suffix retires every stored answer if the choice rule changes.
     private static let cacheSource = "openstream://hero-artwork"
-    private static let cacheType = "portrait-v2"
+    private static let cacheType = "portrait-v4"
 
     private let client: AppleTMDBClient
     private let cache: AppleMetadataDiskCache
@@ -48,12 +48,8 @@ actor AppleHeroArtworkUpgrade {
         self.cache = cache
     }
 
-    /// The IMDB id a hero can be upgraded through, or nothing.
-    ///
-    /// Library and catalog items carry media ids in several shapes —
-    /// `tt0119698`, `tt0944947:1:2`, `tmdb:12345`, `local-<digest>`. Only a
-    /// plain IMDB id resolves on TMDB, so everything else is left alone.
     static func upgradeableIMDBID(for item: AppleCatalogItem) -> String? {
+        if let imdbID = item.imdbID, !imdbID.contains(":"), AppleMediaIdentifier.isIMDBIdentifier(imdbID) { return imdbID }
         let root = item.mediaID.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
             .first.map(String.init) ?? ""
         guard AppleMediaIdentifier.isIMDBIdentifier(root) else { return nil }
@@ -64,10 +60,21 @@ actor AppleHeroArtworkUpgrade {
         "\(kind == .series ? "series" : "movie")\u{1f}\(imdbID)"
     }
 
+    private static func cacheKey(for item: AppleCatalogItem) -> String {
+        cacheKey(kind: item.type == "series" ? .series : .movie,
+            imdbID: upgradeableIMDBID(for: item) ?? "\(item.mediaID)|\(item.name)|\(item.releaseInfo ?? "")")
+    }
+
+    private static func tmdbID(for item: AppleCatalogItem) -> String? {
+        let parts = item.mediaID.split(separator: ":")
+        guard parts.first == "tmdb", let id = parts.last, (Int(id) ?? 0) > 0 else { return nil }
+        return String(id)
+    }
+
     // Stale hero art is preferable to a blank widget while the app refreshes metadata.
-    func cachedArtwork(for item: AppleCatalogItem) async -> Artwork? {
-        guard let imdbID = Self.upgradeableIMDBID(for: item) else { return nil }
-        let key = Self.cacheKey(kind: item.type == "series" ? .series : .movie, imdbID: imdbID)
+    func cachedArtwork(for item: AppleCatalogItem, hasLibraryMetadataMatch: Bool = false) async -> Artwork? {
+        guard Self.upgradeableIMDBID(for: item) != nil || Self.tmdbID(for: item) != nil || hasLibraryMetadataMatch else { return nil }
+        let key = Self.cacheKey(for: item)
         guard let stored = await cache.entry(source: Self.cacheSource, type: Self.cacheType, mediaID: key) else {
             return nil
         }
@@ -80,7 +87,16 @@ actor AppleHeroArtworkUpgrade {
         configuration: AppleTMDBConfiguration,
         includingTitlePage: Bool = false
     ) async -> Artwork {
-        let key = Self.cacheKey(kind: kind, imdbID: imdbID)
+        await artwork(for: .init(mediaID: imdbID, type: kind == .series ? "series" : "movie", name: ""),
+            configuration: configuration, includingTitlePage: includingTitlePage)
+    }
+
+    func artwork(for item: AppleCatalogItem, hasLibraryMetadataMatch: Bool = false, configuration: AppleTMDBConfiguration,
+                 includingTitlePage: Bool = false) async -> Artwork {
+        guard Self.upgradeableIMDBID(for: item) != nil || Self.tmdbID(for: item) != nil || hasLibraryMetadataMatch else {
+            return Artwork(details: nil)
+        }
+        let key = Self.cacheKey(for: item)
         if let stored = await cache.entry(source: Self.cacheSource, type: Self.cacheType, mediaID: key),
            stored.freshness == .fresh,
            let value = try? JSONDecoder().decode(Artwork.self, from: stored.payload),
@@ -91,11 +107,30 @@ actor AppleHeroArtworkUpgrade {
         // arriving mid-fetch joins this task instead of starting its own.
         if let running = inFlight[key] { return await running.value }
         let task = Task { [client, cache] () -> Artwork in
-            let details = try? await client.details(imdbID: imdbID, kind: kind, configuration: configuration)
-            // `textlessBackdropURL`, not `backdropURL`: replacing one
-            // title-in-the-picture backdrop with another buys the viewer a
-            // reload of the hero and nothing else.
-            let value = Artwork(details: details)
+            let kind: AppleMediaKind = item.type == "series" ? .series : .movie
+            let value: Artwork
+            if let imdbID = Self.upgradeableIMDBID(for: item) {
+                value = Artwork(details: try? await client.details(imdbID: imdbID, kind: kind, configuration: configuration))
+            } else {
+                let parsed = AppleLibraryTitle(title: item.name, year: item.year ?? item.releaseInfo.flatMap { Int($0.prefix(4)) },
+                    season: nil, episode: nil, kind: kind == .series ? .show : .movie)
+                let match: AppleCatalogItem?
+                if let id = Self.tmdbID(for: item) {
+                    match = try? await client.libraryDetails(provider: "tmdb", id: id, kind: parsed.kind,
+                        configuration: configuration)
+                } else {
+                    match = try? await client.librarySearch(parsed, configuration: configuration)
+                }
+                if let match, match.logoURL == nil, let imdbID = Self.upgradeableIMDBID(for: match) {
+                    let details = try? await client.details(imdbID: imdbID, kind: kind, configuration: configuration)
+                    value = Artwork(backdropURL: details?.textlessBackdropURL, logoURL: details?.logoURL ?? match.logoURL,
+                        posterURL: details?.textlessPosterURL,
+                        titlePage: .init(backdropURL: details?.textlessBackdropURL, posterURL: details?.posterURL ?? match.posterURL))
+                } else {
+                    value = Artwork(backdropURL: nil, logoURL: match?.logoURL,
+                        titlePage: .init(backdropURL: nil, posterURL: match?.posterURL))
+                }
+            }
             // A failed lookup is still worth remembering for a day: the cost
             // of asking again on every visit is paid by the viewer.
             if let payload = try? JSONEncoder().encode(value) {

@@ -9,10 +9,12 @@ struct ApplePhoneHeroTitle: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .largeTitle) private var titleSize: CGFloat = 44
 
+    var textFallback: Text { Text(name) }
+
     var body: some View {
         Group {
             if presentation == .text {
-                Text(name.uppercased())
+                textFallback
                     .font(.system(size: min(max(titleSize, 34), dynamicTypeSize.isAccessibilitySize ? 58 : 48), weight: .black))
                     .tracking(1)
                     .multilineTextAlignment(.center)

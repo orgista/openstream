@@ -10,8 +10,83 @@ import Testing
 @MainActor
 @Suite(.serialized)
 struct AppleSearchResultShapeTests {
+    @Test func indexedTitleOpensWithMetadataAndAnEnabledSource() throws {
+        let source = AppleSource(kind: .mediaServer, name: "Fixture", url: try #require(URL(string: "https://fixture.example")))
+        let reference = AppleMediaServerItemReference(sourceID: source.id, itemID: "wick").mediaID
+        let item = AppleCatalogItem(mediaID: reference, type: "movie", name: "John Wick",
+            posterURL: URL(string: "https://fixture.example/wick.jpg"), releaseInfo: "2014", imdbID: "tt2911666")
+        let record = AppleMediaIngestion.catalogRecord(instanceID: source.id, item: item)
+        let match = try #require(AppleCatalogSearchMatch.indexed(record, sources: [source]))
+        #expect(match.item.mediaID == "tt2911666")
+        #expect(match.item.name == item.name)
+        #expect(match.item.posterURL == item.posterURL)
+        #expect(match.source.id == source.id)
+        var disabled = source
+        disabled.isEnabled = false
+        #expect(AppleCatalogSearchMatch.indexed(record, sources: [disabled]) == nil)
+        #expect(AppleCatalogSearchMatch.indexed(record, sources: []) == nil)
+    }
+
+    @Test func eachDisplayedMatchIsResolvedOncePerResultSet() async throws {
+        let source = AppleSource(kind: .library, name: "Fixture", url: URL(fileURLWithPath: "/fixture"))
+        let record = AppleMediaRecord(kind: .movie, title: "John Wick",
+            availability: [.init(instanceID: source.id, capability: .direct, itemReference: "wick")])
+        let subject = store()
+        var resolutions = 0
+        await subject.search(query: "wick", resolveMatch: {
+            resolutions += 1
+            return AppleCatalogSearchMatch.indexed($0, sources: [source])
+        }) { _ in [record, record] }
+        #expect(resolutions == 1)
+        let row = try #require(subject.rows.first)
+        #expect(row.record == record)
+        #expect(row.match.item.name == "John Wick")
+        #expect(subject.rows.count == 1)
+        #expect(resolutions == 1)
+    }
+
+    @Test func cancelledRevisionUpdatesDoNotRestartSearch() async {
+        let subject = store()
+        let cancelled = Task { @MainActor in await subject.coalesceRevision("scan-1") }
+        cancelled.cancel()
+        await cancelled.value
+        #expect(subject.contentRevision.isEmpty)
+        await subject.coalesceRevision("scan-2")
+        #expect(subject.contentRevision == "scan-2")
+        #expect(subject.results.isEmpty)
+    }
+
+    @Test func sharedLinksIgnoreContentRevisionsButTextQueriesRefresh() async {
+        let subject = store()
+        let query = subject.taskIdentity(query: "wick")
+        let link = "https://www.imdb.com/title/tt2911666/"
+        let sharedLink = subject.taskIdentity(query: link)
+        await subject.coalesceRevision("scan-complete")
+        #expect(subject.taskIdentity(query: "wick") != query)
+        #expect(subject.taskIdentity(query: "wick 4") != subject.taskIdentity(query: "wick"))
+        #expect(subject.taskIdentity(query: link) == sharedLink)
+    }
+
+    @Test(arguments: [AppleMediaKind.video, .movie, .channel])
+    func enabledFilesServerTitlesAndChannelsKeepTitlePageRows(kind: AppleMediaKind) async throws {
+        let source = AppleSource(kind: kind == .movie ? .mediaServer : .library,
+            name: "Fixture", url: URL(fileURLWithPath: "/fixture"))
+        let retained = AppleMediaRecord(kind: kind, title: "Fixture Star",
+            availability: [.init(instanceID: source.id, capability: .direct, itemReference: "star")])
+        let subject = store()
+        await subject.search(query: "star", resolveMatch: { AppleCatalogSearchMatch.indexed($0, sources: [source]) }) { _ in [retained] }
+        #expect(subject.rows.count == 1)
+        #expect(subject.rows.first?.match.source.id == source.id)
+        await subject.search(query: "star", resolveMatch: { AppleCatalogSearchMatch.indexed($0, sources: []) }) { _ in [retained] }
+        #expect(subject.rows.isEmpty)
+        var disabled = source
+        disabled.isEnabled = false
+        await subject.search(query: "star", resolveMatch: { AppleCatalogSearchMatch.indexed($0, sources: [disabled]) }) { _ in [retained] }
+        #expect(subject.rows.isEmpty)
+    }
+
     private func store() -> AppleCatalogSearchStore {
-        AppleCatalogSearchStore(debounce: .milliseconds(1), maximumResults: 50)
+        AppleCatalogSearchStore(debounce: .milliseconds(1), maximumResults: 50, revisionDebounce: .zero)
     }
 
     private func record(
