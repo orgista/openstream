@@ -36,13 +36,13 @@ jobs:
           sh scripts/quest-layer-test.sh
       - name: Build television staging packages
         run: node scripts/build-tv-packages.mjs
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: github.event_name != 'pull_request'
         with:
           name: openstream-web
           path: dist
           retention-days: 7
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: github.event_name != 'pull_request'
         with:
           name: openstream-smart-tv-staging
@@ -76,25 +76,25 @@ jobs:
         run: OPENSTREAM_ANDROID_XR_BUILD_DIR="$RUNNER_TEMP/openstream-android-xr-scene" gradle --no-watch-fs -p native/android-xr-scene testDebugUnitTest lintDebug assembleDebug
       - name: Build Meta Quest OpenXR
         run: OPENSTREAM_QUEST_BUILD_DIR="$RUNNER_TEMP/openstream-meta-quest" gradle --no-watch-fs -p native/meta-quest lintDebug assembleDebug
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: github.event_name != 'pull_request'
         with:
           name: openstream-android-debug
           path: native/android-xr/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 7
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: github.event_name != 'pull_request'
         with:
           name: openstream-google-tv-debug
           path: native/google-tv/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 7
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: github.event_name != 'pull_request'
         with:
           name: openstream-android-xr-debug
           path: ${{ runner.temp }}/openstream-android-xr-scene/outputs/apk/debug/app-debug.apk
           retention-days: 7
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: github.event_name != 'pull_request'
         with:
           name: openstream-meta-quest-debug
@@ -118,7 +118,7 @@ jobs:
           xcodebuild -project native/apple/Apps/OpenStreamApps.xcodeproj -target 'OpenStream iOS' -sdk iphonesimulator -configuration Debug SYMROOT=/tmp/openstream-ios-products OBJROOT=/tmp/openstream-ios-objects CODE_SIGNING_ALLOWED=NO build
           xcodebuild -project native/apple/Apps/OpenStreamApps.xcodeproj -target 'OpenStream tvOS' -sdk appletvsimulator -configuration Debug SYMROOT=/tmp/openstream-tvos-products OBJROOT=/tmp/openstream-tvos-objects CODE_SIGNING_ALLOWED=NO build
           xcodebuild -project native/apple/Apps/OpenStreamApps.xcodeproj -target 'OpenStream visionOS' -sdk xrsimulator -configuration Debug SYMROOT=/tmp/openstream-vision-products OBJROOT=/tmp/openstream-vision-objects CODE_SIGNING_ALLOWED=NO build
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: openstream-apple-simulator-apps
           path: |
